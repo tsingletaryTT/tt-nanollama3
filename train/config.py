@@ -78,6 +78,9 @@ def build_yaml_config(
             "max_steps": max_steps,
             "eval_every": eval_every,
             "gradient_accumulation_steps": gradient_accumulation_steps,
+            # Checkpointing is deferred to Stage 3 (needs ttml's checkpoint format read
+            # first), so this is always 0 for now — `checkpoint_dir`/`save_every` below
+            # are threaded through RunConfig but currently unused.
             "model_save_interval": 0,
             "checkpoint_dir": checkpoint_dir,
             "tokenizer_type": "bpe",
