@@ -144,8 +144,18 @@ def test_chunking_does_not_change_output(tiny_corpus, tiny_tokenizer, tmp_path):
 
 
 def test_vocab_size_reported_from_tokenizer(tiny_corpus, tiny_tokenizer, tmp_path):
+    """`stats.vocab_size` is the tokenizer's ACHIEVED vocabulary, not the target.
+
+    The fixture corpus exhausts BPE merges far below the 400 cap — 283 in practice —
+    so this asserts agreement with the tokenizer itself rather than a hardcoded
+    number. `vocab_size` is a ceiling, not a promise (see Plan 1).
+    """
+    from transformers import AutoTokenizer
+
+    tok = AutoTokenizer.from_pretrained(str(tiny_tokenizer), local_files_only=True)
     stats = tokenize_corpus(tiny_corpus, tiny_tokenizer, tmp_path / "tokens")
-    assert stats.vocab_size == 400
+    assert stats.vocab_size == tok.vocab_size
+    assert 260 < stats.vocab_size <= 400  # above the byte alphabet, under the cap
 
 
 def test_eos_survives_tokenization(tiny_tokenizer, tmp_path):
