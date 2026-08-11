@@ -678,6 +678,47 @@ is small and ships with the model bundle later."
 
 **Scope.** One subsystem, three tasks, each independently testable and committable.
 
+## Post-review amendments (applied)
+
+The code blocks above are the plan **as executed**. A whole-branch review afterwards found
+five Important issues; all were fixed on this branch. Where the shipped code and the blocks
+above disagree, **the code is correct** — these are the deltas:
+
+1. **`convert/tokenizer.py` passes `add_prefix_space=True` to the `PreTrainedTokenizerFast`
+   constructor as well**, not only to `pre_tokenizers.ByteLevel`. `PreTrainedTokenizerFast.__init__`
+   (transformers 4.52.4) applies its own `add_prefix_space=False` default onto the wrapped
+   backend tokenizer, so the plan's version learned merges with prefix-space on and applied
+   them with it off. Verify by reading the exported `tokenizer.json` back — the flag does not
+   survive wrapping on its own.
+2. **`prepare_corpus` rewrites TinyStories' `<|endoftext|>` separator lines to `</s>`.** The
+   plan never mentioned document boundaries at all. Left as prose, the separator is four
+   ordinary tokens, burns a vocabulary slot on the subword `endoftext`, and leaves `</s>` with
+   zero occurrences in training — so a trained model would have no stop token and would
+   generate to `max_model_len` on every request. Only lines that are *exactly* the separator
+   are rewritten; a substring replace would corrupt real prose.
+3. **`scripts/build_tokenizer.py` enforces the achieved vocabulary** and exits non-zero on a
+   mismatch, instead of printing "Done" over a short vocabulary that would only surface later
+   as an embedding-shape failure in tt-train. `train_bpe` gained a `show_progress` parameter
+   (default `False`; the script passes `True`).
+4. **`fetch_corpus` pins `revision=CORPUS_REVISION`.** Reproducibility of a published model's
+   vocabulary cannot depend on a Hub file never changing.
+5. **`CLAUDE.md` records this branch**, its real numbers, and its gotchas.
+
+Final artifact numbers differ from the first run because `</s>` is 9 bytes shorter than
+`<|endoftext|>`, so more whole lines fit the same 512 MB cap: **3,548,279 lines /
+536,870,821 bytes**, vocabulary exactly **32000**, with **662,878** `</s>` lines.
+
+### Two structural notes for future plans
+
+- **This plan's code blocks are the code**, transcribed verbatim by implementers. That means
+  plan review and code review cannot be separated: a defect in a plan block ships unchanged.
+  Every defect this plan produced was a plan defect, not an implementation one. Future plans
+  should have their assertions checked against reality *before* dispatch, the way the
+  `vocab_size == 500` and `torch`-ban assertions eventually were.
+- **Spec drift:** the design spec says `train/data.py` "fetches, **deduplicates**, and shards"
+  the corpus. This plan silently dropped dedup and sharding. They are deferred, not done —
+  recorded here so they are not quietly lost.
+
 ## Findings that shape Plan 2
 
 The trainer question is **resolved, and no tt-metal upgrade is required.**
