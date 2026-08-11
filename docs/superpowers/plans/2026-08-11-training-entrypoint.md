@@ -7,7 +7,7 @@
 
 **Goal:** Train NanoLlama3 on Blackhole from our own corpus and tokenizer, using a training entrypoint this repo owns.
 
-**Architecture:** Three layers with clean boundaries. `train/tokenize.py` turns the prepared corpus into token-id arrays on disk (pure Python, chunked, no Tenstorrent imports). `train/config.py` assembles the tt-train YAML config and a run-config object that carries every field `ttml.common.trainer.train()` actually reads. `train/run.py` is the hardware entrypoint: it reuses ttml's `TransformerModelFactory`, `create_optimizer`, and `train()` while supplying our own data and a real validation loop.
+**Architecture:** Three layers with clean boundaries. `train/tokenization.py` turns the prepared corpus into token-id arrays on disk (pure Python, chunked, no Tenstorrent imports). `train/config.py` assembles the tt-train YAML config and a run-config object that carries every field `ttml.common.trainer.train()` actually reads. `train/run.py` is the hardware entrypoint: it reuses ttml's `TransformerModelFactory`, `create_optimizer`, and `train()` while supplying our own data and a real validation loop.
 
 **Tech Stack:** Python 3.10+, `ttml` (tt-train, built at `~/tt-metal/build_Release`), `ttnn`, numpy, `transformers`/`tokenizers`, pytest
 
@@ -36,7 +36,7 @@ Two further behaviors we must work around rather than inherit:
   `# SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC`
   (a `#!` shebang may precede them in an executable script)
 - Python 3.10+
-- **Purity boundary — read carefully, it differs from Plan 1.** `convert/`, `train/data.py`, and `train/tokenize.py` must NOT import `ttnn` or `ttml`. `train/run.py` and `train/config.py`'s device section are the hardware entrypoint and **are expected to import them** — do not apply the Plan 1 purity rule to those two files.
+- **Purity boundary — read carefully, it differs from Plan 1.** `convert/`, `train/data.py`, and `train/tokenization.py` must NOT import `ttnn` or `ttml`. `train/run.py` and `train/config.py`'s device section are the hardware entrypoint and **are expected to import them** — do not apply the Plan 1 purity rule to those two files.
 - Model architecture comes from tt-train's `nanollama3.yaml` and is not redefined here: `num_heads: 6`, `num_groups: 3`, `embedding_dim: 384`, `num_blocks: 6`, `max_sequence_length: 256`, `theta: 500000.0`, `model_type: llama`, `vocab_size: 32000`.
 - **Sequence length is 256** everywhere. It is `max_sequence_length` on `TransformerConfig` and must be copied onto the run config as `seq_len`, because `train()` reads `cfg.seq_len` and `TrainingConfig` does not provide it.
 - Inputs from Plan 1, already on disk: `artifacts/corpus/corpus.txt` (3,548,279 lines / 536,870,821 bytes) and `artifacts/tokenizer/` (vocabulary exactly 32000, `</s>` = id 2).
@@ -48,21 +48,21 @@ Two further behaviors we must work around rather than inherit:
 
 | File | Responsibility |
 |---|---|
-| `train/tokenize.py` | Corpus text → token-id `.npy` arrays, chunked; train/val split |
+| `train/tokenization.py` | Corpus text → token-id `.npy` arrays, chunked; train/val split |
 | `train/config.py` | Assemble the tt-train YAML dict + a `RunConfig` carrying every field `train()` reads |
 | `train/run.py` | Hardware entrypoint: build model/optimizer, run training, real validation, checkpoint |
-| `tests/test_tokenize.py` | Chunked encoding, split boundaries, dtype, resume-on-existing |
+| `tests/test_tokenization.py` | Chunked encoding, split boundaries, dtype, resume-on-existing |
 | `tests/test_trainconfig.py` | Config assembly, `seq_len` propagation, vocab agreement |
 
-`tokenize.py` is separate from `data.py` because they have different lifetimes and different failure modes: `data.py` is a one-time corpus fetch, `tokenize.py` is re-run whenever the tokenizer changes.
+`tokenization.py` is separate from `data.py` because they have different lifetimes and different failure modes: `data.py` is a one-time corpus fetch, `tokenization.py` is re-run whenever the tokenizer changes. (Originally named `tokenize.py`; renamed in the whole-branch fix wave because it shadowed the stdlib `tokenize` module — see Task 1.)
 
 ---
 
 ## Task 1: Corpus tokenization to disk
 
 **Files:**
-- Create: `train/tokenize.py`
-- Test: `tests/test_tokenize.py`
+- Create: `train/tokenization.py`
+- Test: `tests/test_tokenization.py`
 
 **Interfaces:**
 - Consumes: `artifacts/tokenizer/` (Plan 1), `artifacts/corpus/corpus.txt` (Plan 1)
@@ -87,7 +87,7 @@ import numpy as np
 import pytest
 
 from convert.tokenizer import train_bpe
-from train.tokenize import TOKEN_DTYPE, TokenStats, tokenize_corpus
+from train.tokenization import TOKEN_DTYPE, TokenStats, tokenize_corpus
 
 
 @pytest.fixture(scope="module")
@@ -129,7 +129,7 @@ def test_split_fraction_and_totals(tiny_corpus, tiny_tokenizer, tmp_path):
     assert stats.train_tokens == len(train)
     assert stats.val_tokens == len(val)
     assert stats.total_tokens == len(train) + len(val)
-    # 10% val, within one chunk's rounding
+    # 10% val, within int() truncation's rounding
     assert abs(stats.val_tokens / stats.total_tokens - 0.1) < 0.02
 
 
@@ -165,14 +165,29 @@ def test_eos_survives_tokenization(tiny_tokenizer, tmp_path):
     tokenize_corpus(corpus, tiny_tokenizer, tmp_path / "tokens", val_fraction=0.0)
     ids = np.load(tmp_path / "tokens" / "train_ids.npy")
     assert 2 in ids.tolist(), "eos id 2 absent — separators are not reaching the token stream"
+
+
+def test_rejects_val_fraction_above_one(tiny_corpus, tiny_tokenizer, tmp_path):
+    """val_fraction > 1.0 makes `split` negative and `ids[:negative]` silently drops data."""
+    with pytest.raises(ValueError, match="val_fraction"):
+        tokenize_corpus(tiny_corpus, tiny_tokenizer, tmp_path / "tokens", val_fraction=1.5)
+
+
+def test_rejects_non_positive_chunk_lines(tiny_corpus, tiny_tokenizer, tmp_path):
+    with pytest.raises(ValueError, match="chunk_lines"):
+        tokenize_corpus(tiny_corpus, tiny_tokenizer, tmp_path / "tokens", chunk_lines=0)
 ```
+
+(The last two tests — the `val_fraction`/`chunk_lines` guards — were added in the later
+whole-branch fix wave, alongside the `train/tokenize.py` → `train/tokenization.py` rename.
+They are shown here so the plan matches the file as it exists on disk.)
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd ~/code/tt-nanollama3 && python -m pytest tests/test_tokenize.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'train.tokenize'`
+Run: `cd ~/code/tt-nanollama3 && python -m pytest tests/test_tokenization.py -v`
+Expected: FAIL — `ModuleNotFoundError: No module named 'train.tokenization'`
 
-- [ ] **Step 3: Implement `train/tokenize.py`**
+- [ ] **Step 3: Implement `train/tokenization.py`**
 
 ```python
 # SPDX-License-Identifier: Apache-2.0
@@ -192,9 +207,10 @@ No ttnn/ttml imports: this runs on any machine.
 
 from __future__ import annotations
 
+import argparse
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import numpy as np
 
@@ -226,6 +242,11 @@ def tokenize_corpus(
     to its runs.
     """
     from transformers import AutoTokenizer
+
+    if not 0.0 <= val_fraction <= 1.0:
+        raise ValueError(f"val_fraction must be in [0.0, 1.0], got {val_fraction}")
+    if chunk_lines <= 0:
+        raise ValueError(f"chunk_lines must be > 0, got {chunk_lines}")
 
     corpus, tokenizer_dir, out_dir = Path(corpus), Path(tokenizer_dir), Path(out_dir)
     if not corpus.is_file():
@@ -269,23 +290,62 @@ def tokenize_corpus(
         val_tokens=int(len(val_ids)),
         vocab_size=int(tok.vocab_size),
     )
+
+
+def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--corpus", default="artifacts/corpus/corpus.txt",
+                    help="Path to the prepared corpus text file.")
+    p.add_argument("--tokenizer", default="artifacts/tokenizer",
+                    help="Directory holding the trained tokenizer.")
+    p.add_argument("--out", default="artifacts/tokens",
+                    help="Directory to write train_ids.npy / val_ids.npy into.")
+    p.add_argument("--val-fraction", type=float, default=0.1,
+                    help="Fraction of the token stream (tail) held out for validation.")
+    p.add_argument("--chunk-lines", type=int, default=50_000,
+                    help="Corpus lines encoded per tokenizer call (a memory knob only).")
+    return p.parse_args(argv)
+
+
+def main() -> int:
+    args = _parse_args()
+    stats = tokenize_corpus(
+        Path(args.corpus),
+        Path(args.tokenizer),
+        Path(args.out),
+        val_fraction=args.val_fraction,
+        chunk_lines=args.chunk_lines,
+    )
+    print(stats)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
 ```
+
+(The `argparse` CLI and the two validation guards above the tokenizer call were added in the
+later whole-branch fix wave, alongside the `train/tokenize.py` → `train/tokenization.py`
+rename — the rename is what makes `python train/tokenization.py` runnable as a script in
+the first place, since `train/tokenize.py` shadowed the stdlib `tokenize` module that numpy
+imports transitively.)
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd ~/code/tt-nanollama3 && python -m pytest tests/test_tokenize.py -v`
-Expected: 6 passed
+Run: `cd ~/code/tt-nanollama3 && python -m pytest tests/test_tokenization.py -v`
+Expected: 8 passed (includes the two `val_fraction`/`chunk_lines` guard tests added in the
+later whole-branch fix wave; originally 6)
 
 - [ ] **Step 5: Run the whole suite**
 
 Run: `cd ~/code/tt-nanollama3 && python -m pytest -q`
-Expected: 21 passed (15 from Plan 1 + 6 new)
+Expected: 23 passed (15 from Plan 1 + 8 new)
 
 - [ ] **Step 6: Commit**
 
 ```bash
 cd ~/code/tt-nanollama3
-git add train/tokenize.py tests/test_tokenize.py
+git add train/tokenization.py tests/test_tokenization.py
 git commit -m "feat(tokenize): chunked corpus tokenization to .npy token arrays
 
 tt-train's prepare_data encodes the whole corpus in one call; against 536 MB
@@ -464,6 +524,9 @@ def build_yaml_config(
             "max_steps": max_steps,
             "eval_every": eval_every,
             "gradient_accumulation_steps": gradient_accumulation_steps,
+            # Checkpointing is deferred to Stage 3 (needs ttml's checkpoint format read
+            # first), so this is always 0 for now — `checkpoint_dir`/`save_every` below
+            # are threaded through RunConfig but currently unused.
             "model_save_interval": 0,
             "checkpoint_dir": checkpoint_dir,
             "tokenizer_type": "bpe",
@@ -500,7 +563,8 @@ Expected: 8 passed
 
 - [ ] **Step 5: Run the whole suite and commit**
 
-Run: `cd ~/code/tt-nanollama3 && python -m pytest -q` — expected 29 passed.
+Run: `cd ~/code/tt-nanollama3 && python -m pytest -q` — expected 31 passed (29 originally;
++2 from the guard tests the later fix wave added to `tests/test_tokenization.py`).
 
 ```bash
 git add train/config.py tests/test_trainconfig.py
@@ -521,7 +585,7 @@ max_sequence_length across explicitly."
 - Modify: `CLAUDE.md` (log the run and its numbers)
 
 **Interfaces:**
-- Consumes: `train.tokenize` outputs, `train.config.{build_yaml_config, run_config_from_yaml}`
+- Consumes: `train.tokenization` outputs, `train.config.{build_yaml_config, run_config_from_yaml, VOCAB_SIZE}`
 - Produces: a trained checkpoint under `artifacts/checkpoints/`, and a printed loss curve
 
 **This task imports `ttml` and `ttnn` and requires hardware.** It has no unit tests; its verification is a real short run with a monotonically decreasing loss.
@@ -557,11 +621,12 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from train.config import build_yaml_config, run_config_from_yaml  # noqa: E402
+from train.config import VOCAB_SIZE, build_yaml_config, run_config_from_yaml  # noqa: E402
 
 
 def _default_tt_metal_home() -> str:
@@ -582,24 +647,30 @@ def evaluate(model, val_ids: np.ndarray, cfg, batches: int = 10) -> float:
 
     ttml's train() does not compute this — it appends the last training loss and labels it
     val_loss. We run the model in eval mode over held-out tokens and average properly.
+
+    ``model.eval()`` only toggles dropout (0.0 in this config) — it does not disable
+    gradient tracking. Without ``no_grad()``, every forward pass here would still build a
+    full autograd graph that gets thrown away, wasting memory and compute and OOMing first
+    at larger ``validation_batch_size``. ``no_grad`` also lives in ``ttml.common.utils``,
+    alongside ``build_causal_mask``, so one import covers both.
     """
     import ttml
     import ttnn
-    # These live in different modules — build_causal_mask is in utils, not trainer.
     from ttml.common.trainer import get_batch_ttml
-    from ttml.common.utils import build_causal_mask
+    from ttml.common.utils import build_causal_mask, no_grad
 
     mask = ttml.autograd.Tensor.from_numpy(
         build_causal_mask(cfg.seq_len), ttnn.Layout.TILE, ttnn.DataType.BFLOAT16
     )
     model.eval()
     total = 0.0
-    for _ in range(batches):
-        x, y = get_batch_ttml(val_ids, cfg.seq_len, cfg.validation_batch_size, False)
-        logits = model(x, mask)
-        loss = ttml.ops.loss.cross_entropy_loss(logits, y, ttml.ops.ReduceType.MEAN)
-        total += float(loss.to_numpy().mean())
-        ttml.autograd.AutoContext.get_instance().reset_graph()
+    with no_grad():
+        for _ in range(batches):
+            x, y = get_batch_ttml(val_ids, cfg.seq_len, cfg.validation_batch_size, False)
+            logits = model(x, mask)
+            loss = ttml.ops.loss.cross_entropy_loss(logits, y, ttml.ops.ReduceType.MEAN)
+            total += float(loss.to_numpy().mean())
+            ttml.autograd.AutoContext.get_instance().reset_graph()
     model.train()
     return total / batches
 
@@ -619,7 +690,11 @@ def main() -> int:
     tokens = Path(args.tokens_dir)
     train_path, val_path = tokens / "train_ids.npy", tokens / "val_ids.npy"
     if not train_path.is_file():
-        print(f"ERROR: {train_path} not found. Run train/tokenize.py first.", file=sys.stderr)
+        print(f"ERROR: {train_path} not found. Run train/tokenization.py first.",
+              file=sys.stderr)
+        return 1
+    if not val_path.is_file():
+        print(f"ERROR: {val_path} not found. Run train/tokenization.py first.", file=sys.stderr)
         return 1
 
     model_config = Path(args.tt_metal_home) / "tt-train/configs/model_configs/nanollama3.yaml"
@@ -650,22 +725,64 @@ def main() -> int:
     val_ids = np.load(val_path)
     print(f"  train tokens={len(train_ids):,}  val tokens={len(val_ids):,}")
 
-    set_seed(yaml_config["training_config"]["seed"])
-    initialize_device(yaml_config)
+    # Nothing else checks that the token stream fits the model's vocabulary. The model's
+    # embedding table is sized from the model config yaml (transformer_config.vocab_size),
+    # not from train.config.VOCAB_SIZE — config.py never reads the yaml, it only asserts
+    # its own constant against itself. If the two disagree, or if a token id from a
+    # different tokenizer slipped in, an out-of-range embedding lookup produces silent
+    # garbage or an on-device fault with no diagnostic. Catch it here, before the device
+    # is even open.
+    with model_config.open("r", encoding="utf-8") as f:
+        model_yaml = yaml.safe_load(f)
+    model_vocab_size = model_yaml["transformer_config"]["vocab_size"]
+    assert model_vocab_size == VOCAB_SIZE, (
+        f"model config vocab_size ({model_vocab_size}) at {model_config} does not match "
+        f"train.config.VOCAB_SIZE ({VOCAB_SIZE}); the tokenizer and model disagree on "
+        "vocabulary size."
+    )
+    max_train_id = int(train_ids.max())
+    assert max_train_id < VOCAB_SIZE, (
+        f"max token id in {train_path} is {max_train_id}, which is >= VOCAB_SIZE "
+        f"({VOCAB_SIZE}); these tokens were produced by a different tokenizer than the "
+        "one the model config expects — re-tokenize with the matching tokenizer."
+    )
 
-    # The try must open immediately after the device does. Model and optimizer
-    # construction can raise (shape mismatch, on-device OOM), and anything that escapes
-    # while the device is open triggers the MetalContext::destroy_all_instances teardown
-    # abort. Everything between device-open and close belongs under this one finally.
+    set_seed(yaml_config["training_config"]["seed"])
+    try:
+        initialize_device(yaml_config)
+    except Exception:
+        print(
+            "ERROR: initialize_device failed to open the device. If the board timed out, "
+            "run `tt-smi -r` to reset it and retry.",
+            file=sys.stderr,
+        )
+        raise
+
+    # Everything from here to the end of the function runs with the device open, so it
+    # all belongs inside this try — model/optimizer construction included. If either
+    # raises (bad config, on-device OOM) before train()/evaluate() even start, the device
+    # must still be closed in the finally below, or teardown aborts in
+    # MetalContext::destroy_all_instances.
     try:
         model = TransformerModelFactory(yaml_config).create_model()
         optimizer = create_optimizer(model, yaml_config)
 
+        # ttml's train() sets the progress bar's val_loss to a copy of train_loss whenever
+        # step % eval_every == 0 or step == 1 — it is not a real validation number. Tell the
+        # operator before the bar starts printing it, not after they've already trusted it.
+        print(
+            "note: the progress bar's val_loss is ttml's placeholder (a copy of "
+            "train_loss); the real validation loss is computed after training and "
+            "printed below."
+        )
         # train() takes exactly (cfg, model, optim, train_ids, use_ddp, use_tp) — no val_ids.
         train_losses, _ = train(cfg, model, optimizer, train_ids, False, False)
         val_loss = evaluate(model, val_ids, cfg)
-        print(f"\nfirst train loss : {train_losses[0]:.4f}")
-        print(f"last  train loss : {train_losses[-1]:.4f}")
+        if train_losses:
+            print(f"\nfirst train loss : {train_losses[0]:.4f}")
+            print(f"last  train loss : {train_losses[-1]:.4f}")
+        else:
+            print("\nno training steps ran (--steps 0); no train loss to report.")
         print(f"real  val   loss : {val_loss:.4f}")
     finally:
         # Let ttml close the device — bypassing this triggers a teardown abort in
@@ -679,6 +796,13 @@ if __name__ == "__main__":
     raise SystemExit(main())
 ```
 
+(The vocabulary assertions, the `initialize_device` `tt-smi -r` hint, the `no_grad()` guard
+in `evaluate()`, the ttml placeholder banner, the `val_path` existence check, and the
+`train_losses[0]` empty-list guard were all added in the later whole-branch fix wave. The
+original `_SCRIPT_DIR` `sys.path` workaround that once preceded the `numpy` import — needed
+only because `train/tokenize.py` shadowed the stdlib `tokenize` module — was removed in that
+same fix wave, once the rename to `train/tokenization.py` made it unnecessary.)
+
 - [ ] **Step 2: Verify the dry run needs no hardware**
 
 Run: `cd ~/code/tt-nanollama3 && python train/run.py --dry-run --steps 20`
@@ -690,7 +814,7 @@ Run:
 ```bash
 cd ~/code/tt-nanollama3 && python -c "
 from pathlib import Path
-from train.tokenize import tokenize_corpus
+from train.tokenization import tokenize_corpus
 s = tokenize_corpus(Path('artifacts/corpus/corpus.txt'), Path('artifacts/tokenizer'), Path('artifacts/tokens'))
 print(s)
 "
