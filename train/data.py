@@ -25,6 +25,23 @@ CORPUS_FILES = {
     "valid": "TinyStoriesV2-GPT4-valid.txt",
 }
 
+#: Pinned commit SHA of the dataset repo. This tokenizer defines the vocabulary of a
+#: model we intend to publish, so the corpus it is trained on must be reproducible —
+#: without a pin, a future Hub-side change to the file would silently retrain a
+#: different vocabulary from the one shipped. Verified current as of 2026-08-11.
+CORPUS_REVISION = "f54c09fd23315a6f9c86f9dc80f725de7d8f9c64"
+
+#: TinyStories' own story delimiter: a line containing exactly this text separates one
+#: story from the next in the raw corpus. Left as ordinary text it wastes a vocabulary
+#: slot on the subword "endoftext" and the model never sees an actual stop token,
+#: so `prepare_corpus` rewrites it to the tokenizer's `</s>` special token instead.
+DOCUMENT_SEPARATOR = "<|endoftext|>"
+
+#: The literal replacement text for `DOCUMENT_SEPARATOR` lines. Matches
+#: ``convert.tokenizer.SPECIAL_TOKENS[2]`` — kept as a plain string here (rather than
+#: importing convert/) so this module stays free of any dependency beyond the stdlib.
+EOS_TOKEN_TEXT = "</s>"
+
 
 @dataclass
 class CorpusStats:
@@ -56,6 +73,7 @@ def fetch_corpus(dest_dir: Path, split: str = "train") -> Path:
         repo_id=CORPUS_REPO,
         filename=CORPUS_FILES[split],
         repo_type="dataset",
+        revision=CORPUS_REVISION,
         local_dir=str(dest_dir),
     )
     return Path(downloaded)
@@ -67,6 +85,13 @@ def prepare_corpus(src: Path, dest: Path, max_bytes: Optional[int] = None) -> Co
     Normalization is deliberately minimal — the tokenizer should see text close to what
     the model will be served: CRLF collapsed to LF, blank lines dropped (they carry no
     signal and inflate the corpus), trailing whitespace stripped.
+
+    A line that is *exactly* ``DOCUMENT_SEPARATOR`` (after stripping) is TinyStories'
+    story delimiter, not prose, and is rewritten to the literal text ``</s>`` so the
+    tokenizer maps it to the eos special token. Only an exact match is rewritten — a
+    line that merely *contains* the separator inside other text is left untouched, since
+    a substring replace would corrupt prose that happens to mention it. The rewritten
+    line counts toward ``line_count`` and the byte budget exactly like any other line.
 
     ``max_bytes`` caps the output. The cap is applied on **whole lines only**: a partial
     final line would introduce a token boundary that never occurs in real text.
@@ -84,6 +109,8 @@ def prepare_corpus(src: Path, dest: Path, max_bytes: Optional[int] = None) -> Co
             line = raw.replace("\r\n", "\n").rstrip()
             if not line:
                 continue
+            if line == DOCUMENT_SEPARATOR:
+                line = EOS_TOKEN_TEXT
             encoded_len = len(line.encode("utf-8")) + 1  # +1 for the newline
             if max_bytes is not None and written + encoded_len > max_bytes:
                 truncated = True

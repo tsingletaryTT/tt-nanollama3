@@ -70,11 +70,21 @@ def test_special_tokens_present(exported: Path):
 
 
 def test_roundtrip_preserves_text(exported: Path):
+    """Round-trips modulo the leading space ``add_prefix_space=True`` injects.
+
+    Byte-level BPE with ``add_prefix_space=True`` treats the start of a sequence as if
+    it followed a space, so the first word tokenizes identically to a mid-line word
+    (see the tokenizer.py comment on ``pre_tokenizers.ByteLevel``). Decoding faithfully
+    reproduces that injected leading space when the source text doesn't already start
+    with whitespace — this is standard GPT-2/RoBERTa-style tokenizer behavior, not data
+    loss, so ``.strip()`` here removes exactly that one injected character and nothing
+    from the interior of the text.
+    """
     from transformers import AutoTokenizer
 
     tok = AutoTokenizer.from_pretrained(str(exported), local_files_only=True)
     text = "Lily looked for the red ball."
-    assert tok.decode(tok.encode(text), skip_special_tokens=True) == text
+    assert tok.decode(tok.encode(text), skip_special_tokens=True).strip() == text
 
 
 def test_ttml_directory_load_path(exported: Path):

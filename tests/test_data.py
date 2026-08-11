@@ -4,7 +4,7 @@
 
 from pathlib import Path
 
-from train.data import CorpusStats, prepare_corpus
+from train.data import CorpusStats, DOCUMENT_SEPARATOR, prepare_corpus
 
 
 def _write(tmp_path: Path, name: str, text: str) -> Path:
@@ -54,3 +54,32 @@ def test_prepare_never_splits_a_line(tmp_path: Path):
     # Every written line must be complete.
     for line in dest.read_text(encoding="utf-8").splitlines():
         assert line in ("short", "y" * 100)
+
+
+def test_prepare_rewrites_separator_line_to_eos(tmp_path: Path):
+    """A line that is exactly the TinyStories separator becomes the literal `</s>`."""
+    src = _write(tmp_path, "src.txt", f"alpha\n{DOCUMENT_SEPARATOR}\nbeta\n")
+    dest = tmp_path / "out.txt"
+    prepare_corpus(src, dest)
+    assert dest.read_text(encoding="utf-8") == "alpha\n</s>\nbeta\n"
+
+
+def test_prepare_leaves_embedded_separator_text_alone(tmp_path: Path):
+    """A line merely containing the separator inside other text is untouched.
+
+    Substring-replacing would corrupt prose that happens to mention the delimiter; only
+    an exact-match line (the real story boundary) is rewritten.
+    """
+    line = f"She said {DOCUMENT_SEPARATOR} out loud, which confused everyone."
+    src = _write(tmp_path, "src.txt", line + "\n")
+    dest = tmp_path / "out.txt"
+    prepare_corpus(src, dest)
+    assert dest.read_text(encoding="utf-8") == line + "\n"
+
+
+def test_prepare_counts_rewritten_separator_line(tmp_path: Path):
+    """The rewritten `</s>` line counts toward line_count like any other line."""
+    src = _write(tmp_path, "src.txt", f"alpha\n{DOCUMENT_SEPARATOR}\nbeta\n")
+    dest = tmp_path / "out.txt"
+    stats = prepare_corpus(src, dest)
+    assert stats.line_count == 3

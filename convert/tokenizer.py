@@ -25,7 +25,12 @@ VOCAB_SIZE = 32000
 SPECIAL_TOKENS = ["<unk>", "<s>", "</s>", "<pad>"]
 
 
-def train_bpe(corpus: Path, out_dir: Path, vocab_size: int = VOCAB_SIZE) -> Path:
+def train_bpe(
+    corpus: Path,
+    out_dir: Path,
+    vocab_size: int = VOCAB_SIZE,
+    show_progress: bool = False,
+) -> Path:
     """Train a byte-level BPE over ``corpus`` and export it to ``out_dir``.
 
     ``vocab_size`` is the **total** including ``SPECIAL_TOKENS`` — the trainer is given
@@ -34,6 +39,10 @@ def train_bpe(corpus: Path, out_dir: Path, vocab_size: int = VOCAB_SIZE) -> Path
     yields fewer tokens (the test fixture exhausts at 378 against a 500 target). The
     production corpus in Task 3 is far larger than needed to reach 32000 exactly, which
     is what tt-train's model config declares.
+
+    ``show_progress`` forwards to the ``BpeTrainer``; it defaults to ``False`` so test
+    runs stay quiet, and the build script passes ``True`` since the production BPE phase
+    runs for several minutes and a caller watching it wants to see it moving.
     """
     from tokenizers import Tokenizer, decoders, pre_tokenizers, processors, trainers
     from tokenizers.models import BPE
@@ -54,16 +63,22 @@ def train_bpe(corpus: Path, out_dir: Path, vocab_size: int = VOCAB_SIZE) -> Path
         vocab_size=vocab_size,
         special_tokens=SPECIAL_TOKENS,
         initial_alphabet=pre_tokenizers.ByteLevel.alphabet(),
-        show_progress=False,
+        show_progress=show_progress,
     )
     tokenizer.train([str(corpus)], trainer)
 
+    # add_prefix_space must be passed here too, not just to the backend ByteLevel
+    # pre_tokenizer above: PreTrainedTokenizerFast.__init__ (transformers 4.52.4)
+    # applies its own add_prefix_space=False default onto the wrapped backend
+    # tokenizer, silently overwriting what was set above. Without this, merges are
+    # learned with prefix-space on but applied with it off.
     fast = PreTrainedTokenizerFast(
         tokenizer_object=tokenizer,
         unk_token="<unk>",
         bos_token="<s>",
         eos_token="</s>",
         pad_token="<pad>",
+        add_prefix_space=True,
     )
     out_dir.mkdir(parents=True, exist_ok=True)
     fast.save_pretrained(str(out_dir))

@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from convert.tokenizer import VOCAB_SIZE, train_bpe  # noqa: E402
+from convert.tokenizer import VOCAB_SIZE, load_exported, train_bpe  # noqa: E402
 from train.data import fetch_corpus, prepare_corpus  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -47,7 +47,25 @@ def main() -> int:
           f"truncated={stats.truncated}")
 
     print(f">> Training {args.vocab_size}-token BPE -> {tok_out}")
-    train_bpe(corpus_out, tok_out, vocab_size=args.vocab_size)
+    train_bpe(corpus_out, tok_out, vocab_size=args.vocab_size, show_progress=True)
+
+    # vocab_size given to train_bpe is a ceiling, not a promise: BPE stops early if the
+    # corpus runs out of pairs worth merging. Since --corpus-mb is user-tunable, a small
+    # value can silently under-shoot the target and produce an artifact whose vocabulary
+    # mismatches tt-train's nanollama3.yaml — a failure that otherwise doesn't surface
+    # until an embedding-shape mismatch much later. Check the achieved size here instead.
+    achieved = load_exported(tok_out)
+    achieved_size = len(achieved.get_vocab())
+    print(f">> Achieved vocabulary: {achieved_size:,} (target: {args.vocab_size:,})")
+    if achieved_size != args.vocab_size:
+        print(
+            f"\nERROR: tokenizer vocabulary is {achieved_size:,}, not the requested "
+            f"{args.vocab_size:,}. This almost always means the corpus was too small "
+            f"to exhaust the vocabulary cap -- BPE stops merging once it runs out of "
+            f"pairs worth learning. Re-run with a larger --corpus-mb.",
+            file=sys.stderr,
+        )
+        return 1
 
     print("\nDone. Artifacts:")
     print(f"  corpus:    {corpus_out}")
