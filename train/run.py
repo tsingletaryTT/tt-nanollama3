@@ -25,21 +25,13 @@ import os
 import sys
 from pathlib import Path
 
-# CPython auto-prepends the *script's own directory* (train/) to sys.path before this
-# module's top-level code runs. That directory holds train/tokenize.py, which then shadows
-# the stdlib `tokenize` module for the rest of the process — and numpy imports `tokenize`
-# transitively (via inspect/linecache) as soon as it loads, raising a confusing
-# "partially initialized module 'inspect'" AttributeError. Strip it before importing numpy.
-_SCRIPT_DIR = str(Path(__file__).resolve().parent)
-if _SCRIPT_DIR in sys.path:
-    sys.path.remove(_SCRIPT_DIR)
-
 import numpy as np
+import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from train.config import build_yaml_config, run_config_from_yaml  # noqa: E402
+from train.config import VOCAB_SIZE, build_yaml_config, run_config_from_yaml  # noqa: E402
 
 
 def _default_tt_metal_home() -> str:
@@ -60,24 +52,30 @@ def evaluate(model, val_ids: np.ndarray, cfg, batches: int = 10) -> float:
 
     ttml's train() does not compute this — it appends the last training loss and labels it
     val_loss. We run the model in eval mode over held-out tokens and average properly.
+
+    ``model.eval()`` only toggles dropout (0.0 in this config) — it does not disable
+    gradient tracking. Without ``no_grad()``, every forward pass here would still build a
+    full autograd graph that gets thrown away, wasting memory and compute and OOMing first
+    at larger ``validation_batch_size``. ``no_grad`` also lives in ``ttml.common.utils``,
+    alongside ``build_causal_mask``, so one import covers both.
     """
     import ttml
     import ttnn
-    # These live in different modules — build_causal_mask is in utils, not trainer.
     from ttml.common.trainer import get_batch_ttml
-    from ttml.common.utils import build_causal_mask
+    from ttml.common.utils import build_causal_mask, no_grad
 
     mask = ttml.autograd.Tensor.from_numpy(
         build_causal_mask(cfg.seq_len), ttnn.Layout.TILE, ttnn.DataType.BFLOAT16
     )
     model.eval()
     total = 0.0
-    for _ in range(batches):
-        x, y = get_batch_ttml(val_ids, cfg.seq_len, cfg.validation_batch_size, False)
-        logits = model(x, mask)
-        loss = ttml.ops.loss.cross_entropy_loss(logits, y, ttml.ops.ReduceType.MEAN)
-        total += float(loss.to_numpy().mean())
-        ttml.autograd.AutoContext.get_instance().reset_graph()
+    with no_grad():
+        for _ in range(batches):
+            x, y = get_batch_ttml(val_ids, cfg.seq_len, cfg.validation_batch_size, False)
+            logits = model(x, mask)
+            loss = ttml.ops.loss.cross_entropy_loss(logits, y, ttml.ops.ReduceType.MEAN)
+            total += float(loss.to_numpy().mean())
+            ttml.autograd.AutoContext.get_instance().reset_graph()
     model.train()
     return total / batches
 
@@ -97,7 +95,11 @@ def main() -> int:
     tokens = Path(args.tokens_dir)
     train_path, val_path = tokens / "train_ids.npy", tokens / "val_ids.npy"
     if not train_path.is_file():
-        print(f"ERROR: {train_path} not found. Run train/tokenize.py first.", file=sys.stderr)
+        print(f"ERROR: {train_path} not found. Run train/tokenization.py first.",
+              file=sys.stderr)
+        return 1
+    if not val_path.is_file():
+        print(f"ERROR: {val_path} not found. Run train/tokenization.py first.", file=sys.stderr)
         return 1
 
     model_config = Path(args.tt_metal_home) / "tt-train/configs/model_configs/nanollama3.yaml"
@@ -128,8 +130,38 @@ def main() -> int:
     val_ids = np.load(val_path)
     print(f"  train tokens={len(train_ids):,}  val tokens={len(val_ids):,}")
 
+    # Nothing else checks that the token stream fits the model's vocabulary. The model's
+    # embedding table is sized from the model config yaml (transformer_config.vocab_size),
+    # not from train.config.VOCAB_SIZE — config.py never reads the yaml, it only asserts
+    # its own constant against itself. If the two disagree, or if a token id from a
+    # different tokenizer slipped in, an out-of-range embedding lookup produces silent
+    # garbage or an on-device fault with no diagnostic. Catch it here, before the device
+    # is even open.
+    with model_config.open("r", encoding="utf-8") as f:
+        model_yaml = yaml.safe_load(f)
+    model_vocab_size = model_yaml["transformer_config"]["vocab_size"]
+    assert model_vocab_size == VOCAB_SIZE, (
+        f"model config vocab_size ({model_vocab_size}) at {model_config} does not match "
+        f"train.config.VOCAB_SIZE ({VOCAB_SIZE}); the tokenizer and model disagree on "
+        "vocabulary size."
+    )
+    max_train_id = int(train_ids.max())
+    assert max_train_id < VOCAB_SIZE, (
+        f"max token id in {train_path} is {max_train_id}, which is >= VOCAB_SIZE "
+        f"({VOCAB_SIZE}); these tokens were produced by a different tokenizer than the "
+        "one the model config expects — re-tokenize with the matching tokenizer."
+    )
+
     set_seed(yaml_config["training_config"]["seed"])
-    initialize_device(yaml_config)
+    try:
+        initialize_device(yaml_config)
+    except Exception:
+        print(
+            "ERROR: initialize_device failed to open the device. If the board timed out, "
+            "run `tt-smi -r` to reset it and retry.",
+            file=sys.stderr,
+        )
+        raise
 
     # Everything from here to the end of the function runs with the device open, so it
     # all belongs inside this try — model/optimizer construction included. If either
@@ -140,11 +172,22 @@ def main() -> int:
         model = TransformerModelFactory(yaml_config).create_model()
         optimizer = create_optimizer(model, yaml_config)
 
+        # ttml's train() sets the progress bar's val_loss to a copy of train_loss whenever
+        # step % eval_every == 0 or step == 1 — it is not a real validation number. Tell the
+        # operator before the bar starts printing it, not after they've already trusted it.
+        print(
+            "note: the progress bar's val_loss is ttml's placeholder (a copy of "
+            "train_loss); the real validation loss is computed after training and "
+            "printed below."
+        )
         # train() takes exactly (cfg, model, optim, train_ids, use_ddp, use_tp) — no val_ids.
         train_losses, _ = train(cfg, model, optimizer, train_ids, False, False)
         val_loss = evaluate(model, val_ids, cfg)
-        print(f"\nfirst train loss : {train_losses[0]:.4f}")
-        print(f"last  train loss : {train_losses[-1]:.4f}")
+        if train_losses:
+            print(f"\nfirst train loss : {train_losses[0]:.4f}")
+            print(f"last  train loss : {train_losses[-1]:.4f}")
+        else:
+            print("\nno training steps ran (--steps 0); no train loss to report.")
         print(f"real  val   loss : {val_loss:.4f}")
     finally:
         # Let ttml close the device — bypassing this triggers a teardown abort in
