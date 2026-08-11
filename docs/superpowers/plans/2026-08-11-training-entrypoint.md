@@ -302,7 +302,8 @@ chunk size proven to be a memory knob rather than a correctness knob."
 - Test: `tests/test_trainconfig.py`
 
 **Interfaces:**
-- Consumes: `train.tokenize.TokenStats`
+- Consumes: nothing — this is pure config assembly. (`TokenStats` is consumed by Task 3,
+  not here.)
 - Produces:
   - `SEQ_LEN = 256`, `VOCAB_SIZE = 32000` — module constants
   - `build_yaml_config(tokenizer_dir, model_config_path, *, batch_size, max_steps, ...) -> dict`
