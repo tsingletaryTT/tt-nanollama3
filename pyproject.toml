@@ -1,0 +1,19 @@
+[project]
+name = "tt-nanollama3"
+version = "0.1.0"
+description = "NanoLlama3 — a Tenstorrent-first model, trained, packaged, and served on TT tooling"
+requires-python = ">=3.10"
+dependencies = [
+    "tokenizers>=0.21",
+    "transformers>=4.52",
+    "huggingface_hub>=0.36",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.setuptools]
+packages = ["train", "convert"]
