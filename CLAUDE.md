@@ -94,3 +94,36 @@ A whole-branch review caught three things worth not rediscovering:
   are *exactly* the separator (after stripping) to the literal text `</s>`, which the
   tokenizer maps to the eos special id; lines that merely mention the separator inside
   other text are left alone, since a substring replace would corrupt real prose.
+
+## `feat/training-entrypoint` (2026-08-11)
+
+Wrote `train/run.py`, the hardware entrypoint that actually trains NanoLlama3 on Blackhole.
+tt-train's own Python trainer (`examples/python/transformers/training.py`) doesn't run
+against the current tree — three independent breaks (stale `trainer` module import, an
+extra `val_ids` argument `train()` doesn't accept, a `TrainingConfig` missing the `seq_len`
+`train()` reads) plus a hardcoded `shakespeare.txt` data path — so this entrypoint reuses
+`TransformerModelFactory`, `create_optimizer`, `initialize_device`, `set_seed`, and `train()`
+itself, and supplies our corpus, our tokenizer, `seq_len`, and a real `evaluate()`. That last
+part matters: ttml's `train()` fills `val_losses` by copying the last training loss under a
+comment calling it placeholder behavior, so a val number straight out of `train()` means
+nothing — `evaluate()` runs the model in eval mode over held-out tokens with its own
+`get_batch_ttml`/`build_causal_mask` calls and averages properly.
+
+**Tokenizing the real corpus** (Task 1's pipeline, run against the actual TinyStories
+corpus): `TokenStats(total_tokens=127635889, train_tokens=114872301, val_tokens=12763588,
+vocab_size=32000)` — inside the 1.3–1.6×10^8 estimate, vocab exactly on target.
+
+**A real 20-step run on p300c/Blackhole**, batch size 64, seq_len 256:
+
+- First train loss: `10.6875` — matches the freshly-initialized-model expectation of
+  `ln(32000) ≈ 10.4` closely enough to confirm the vocab/model setup is right.
+- Last train loss: `7.4688`, monotonically non-increasing across all 20 steps (one flat
+  step at 8.0625→8.0625, otherwise strictly down).
+- Real validation loss (our `evaluate()`, 10 sampled batches, not `train()`'s placeholder):
+  `7.0281` — distinct from the last train loss, so the loop was not bypassed.
+- Step 1 took 18.73s (kernel compilation, not model performance); steps 2–20 averaged
+  ~0.12–0.14 s/step (climbing to ~7.15 it/s by the end) — that second number is the one
+  that reflects the model.
+
+No checkpoint is written (`model_save_interval` is 0 in `RunConfig`/`build_yaml_config`) —
+that's Stage 3's job, once we've read `ttml/checkpointing.py`'s format.
