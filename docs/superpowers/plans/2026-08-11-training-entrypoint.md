@@ -51,8 +51,8 @@ Two further behaviors we must work around rather than inherit:
 | `train/tokenization.py` | Corpus text → token-id `.npy` arrays, chunked; train/val split |
 | `train/config.py` | Assemble the tt-train YAML dict + a `RunConfig` carrying every field `train()` reads |
 | `train/run.py` | Hardware entrypoint: build model/optimizer, run training, real validation, checkpoint |
-| `tests/test_tokenization.py` | Chunked encoding, split boundaries, dtype, resume-on-existing |
-| `tests/test_trainconfig.py` | Config assembly, `seq_len` propagation, vocab agreement |
+| `tests/test_tokenization.py` | Chunked encoding, split boundaries, dtype, `val_fraction`/`chunk_lines` guards |
+| `tests/test_trainconfig.py` | Config assembly, `seq_len` propagation, optimizer section |
 
 `tokenization.py` is separate from `data.py` because they have different lifetimes and different failure modes: `data.py` is a one-time corpus fetch, `tokenization.py` is re-run whenever the tokenizer changes. (Originally named `tokenize.py`; renamed in the whole-branch fix wave because it shadowed the stdlib `tokenize` module — see Task 1.)
 
@@ -856,6 +856,24 @@ documented placeholder that copies the training loss."
 **Type consistency.** `TOKEN_DTYPE`/`TokenStats` are defined in Task 1 and consumed by name in Task 3. `SEQ_LEN`, `RunConfig`, `build_yaml_config`, `run_config_from_yaml` are defined in Task 2 and used with the same signatures in Task 3. `train()` is called with exactly the six parameters `ttml/common/trainer.py:49` declares.
 
 **Verified before writing, not assumed.** `train()`'s signature, `TrainingConfig`'s missing `seq_len`, the placeholder validation, `prepare_data`'s hardcoded corpus path, and the three independent breaks in `training.py` were all read from source in `~/tt-metal` rather than inferred. Plan 1's lesson was that unverified plan assertions ship verbatim.
+
+**Required check for future plans — the one this plan failed.** *Every capability named in a
+table, an Interfaces list, or a Constraints bullet must resolve to a named test or a named
+line of embedded code, or be struck from the plan.*
+
+The whole-branch review identified this as the generative cause of the defects across both
+plans: they cluster not in the embedded code blocks but in the plan's **summary layers**
+making claims the code never implements. This plan's File Structure table promised
+`test_tokenization.py` would cover "resume-on-existing" (no such behavior or test exists) and
+`test_trainconfig.py` would cover "vocab agreement" (delivered as `assert VOCAB_SIZE == 32000`,
+a tautology that cannot fail). Both are corrected above. The Constraints twice documented
+`tt-smi -r` as the operator remedy while no code emitted it, and Task 2's Interfaces list
+misattributed `TokenStats`.
+
+The cause is structural: summary layers and embedded code are written in separate passes, and
+the Self-Review section checked only the code blocks — type consistency and placeholders —
+never the tables against the code. Applied before execution, the check above would have caught
+all four.
 
 ## Known risks
 
