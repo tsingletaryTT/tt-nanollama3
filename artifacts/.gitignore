@@ -1,0 +1,4 @@
+# Corpus and tokenizer artifacts are built, not committed. The tokenizer is small
+# enough to publish with the model bundle; the corpus is ~2 GB and never belongs in git.
+*
+!.gitignore

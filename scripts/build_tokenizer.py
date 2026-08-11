@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
+"""Build the corpus and tokenizer artifacts NanoLlama3 trains against.
+
+    python scripts/build_tokenizer.py --corpus-mb 512
+
+Downloading the full TinyStories train split takes a while and most of it is not needed
+to fit a 32K vocabulary, so ``--corpus-mb`` caps what the tokenizer trains on. The cap
+applies to whole lines only.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from convert.tokenizer import VOCAB_SIZE, train_bpe  # noqa: E402
+from train.data import fetch_corpus, prepare_corpus  # noqa: E402
+
+ROOT = Path(__file__).resolve().parent.parent
+ARTIFACTS = ROOT / "artifacts"
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--corpus-mb", type=int, default=512,
+                        help="Megabytes of corpus to keep for tokenizer training "
+                             "(default: 512). Whole lines only.")
+    parser.add_argument("--vocab-size", type=int, default=VOCAB_SIZE,
+                        help=f"Total vocabulary including specials (default: {VOCAB_SIZE}).")
+    args = parser.parse_args()
+
+    raw_dir = ARTIFACTS / "raw"
+    corpus_out = ARTIFACTS / "corpus" / "corpus.txt"
+    tok_out = ARTIFACTS / "tokenizer"
+
+    print(f">> Fetching TinyStories into {raw_dir}")
+    raw = fetch_corpus(raw_dir, split="train")
+
+    print(f">> Preparing corpus (cap {args.corpus_mb} MB) -> {corpus_out}")
+    stats = prepare_corpus(raw, corpus_out, max_bytes=args.corpus_mb * 1024 * 1024)
+    print(f"   {stats.line_count:,} lines, {stats.bytes_written:,} bytes, "
+          f"truncated={stats.truncated}")
+
+    print(f">> Training {args.vocab_size}-token BPE -> {tok_out}")
+    train_bpe(corpus_out, tok_out, vocab_size=args.vocab_size)
+
+    print("\nDone. Artifacts:")
+    print(f"  corpus:    {corpus_out}")
+    print(f"  tokenizer: {tok_out}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
