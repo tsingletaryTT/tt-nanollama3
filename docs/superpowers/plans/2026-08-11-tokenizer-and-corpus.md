@@ -471,8 +471,11 @@ def train_bpe(corpus: Path, out_dir: Path, vocab_size: int = VOCAB_SIZE) -> Path
     """Train a byte-level BPE over ``corpus`` and export it to ``out_dir``.
 
     ``vocab_size`` is the **total** including ``SPECIAL_TOKENS`` — the trainer is given
-    the full target and reserves the specials itself, so the exported vocabulary is
-    exactly ``vocab_size`` and matches what the model config declares.
+    the full target and reserves the specials itself. It is a **ceiling, not a promise**:
+    BPE stops early when the corpus runs out of pairs worth merging, so a small corpus
+    yields fewer tokens (the test fixture exhausts at 378 against a 500 target). The
+    production corpus in Task 3 is far larger than needed to reach 32000 exactly, which
+    is what tt-train's model config declares.
     """
     from tokenizers import Tokenizer, decoders, pre_tokenizers, processors, trainers
     from tokenizers.models import BPE
