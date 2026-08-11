@@ -1,0 +1,107 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
+"""Assemble the tt-train config for a NanoLlama3 run.
+
+Two things this module exists to get right:
+
+1. **``seq_len``.** ``ttml.common.trainer.train()`` reads ``cfg.seq_len`` for
+   ``build_causal_mask()`` and ``get_batch_ttml()``, but ``ttml.common.config.TrainingConfig``
+   never defines it — the value lives on ``TransformerConfig`` as ``max_sequence_length``.
+   Handing ``train()`` a bare ``TrainingConfig`` raises ``AttributeError`` before it trains.
+   ``RunConfig`` copies it across explicitly.
+2. **The tokenizer path.** ttml resolves ``tokenizer_path`` relative to
+   ``$TT_METAL_HOME/tt-train`` (``ttml/common/data.py:91``), which is *not* where our
+   tokenizer lives. We bypass ttml's data loading entirely (see ``train/run.py``), so this
+   path is recorded for provenance rather than consumed by ttml.
+
+No ttnn/ttml imports here — this is dict and attribute work.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Dict
+
+#: tt-train's ``nanollama3.yaml`` declares ``max_sequence_length: 256``.
+SEQ_LEN = 256
+
+#: Must equal the tokenizer's vocabulary (Plan 1 pins it at exactly this).
+VOCAB_SIZE = 32000
+
+
+class RunConfig:
+    """Every attribute ``ttml.common.trainer.train()`` reads, plus what our loop needs.
+
+    Deliberately a plain object rather than a subclass of ttml's ``TrainingConfig``: the
+    fields ``train()`` requires are not the fields that class provides, and inheriting
+    would hide exactly the mismatch this exists to fix.
+    """
+
+    def __init__(self, tc: Dict[str, Any]):
+        self.seq_len = int(tc.get("seq_len", SEQ_LEN))
+        self.steps = int(tc.get("max_steps", 20))
+        self.batch_size = int(tc.get("batch_size", 64))
+        self.validation_batch_size = int(
+            tc.get("validation_batch_size", max(self.batch_size // 2, 1))
+        )
+        self.gradient_accumulation_steps = int(tc.get("gradient_accumulation_steps", 1))
+        self.eval_every = int(tc.get("eval_every", 200))
+        self.save_every = int(tc.get("model_save_interval", 0))
+        self.checkpoint_dir = tc.get("checkpoint_dir", "artifacts/checkpoints")
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return (f"RunConfig(seq_len={self.seq_len}, steps={self.steps}, "
+                f"batch_size={self.batch_size}, eval_every={self.eval_every})")
+
+
+def build_yaml_config(
+    tokenizer_dir: str,
+    model_config_path: str,
+    *,
+    seq_len: int = SEQ_LEN,
+    batch_size: int = 64,
+    max_steps: int = 20,
+    eval_every: int = 200,
+    gradient_accumulation_steps: int = 1,
+    checkpoint_dir: str = "artifacts/checkpoints",
+) -> Dict[str, Any]:
+    """Build the config dict ``TransformerModelFactory`` and ``RunConfig`` consume."""
+    if seq_len > SEQ_LEN:
+        raise ValueError(
+            f"seq_len {seq_len} exceeds the model's max_sequence_length ({SEQ_LEN}); "
+            "the RoPE tables and causal mask are built for that length."
+        )
+    return {
+        "training_config": {
+            "seed": 5489,
+            "seq_len": seq_len,
+            "batch_size": batch_size,
+            "max_steps": max_steps,
+            "eval_every": eval_every,
+            "gradient_accumulation_steps": gradient_accumulation_steps,
+            "model_save_interval": 0,
+            "checkpoint_dir": checkpoint_dir,
+            "tokenizer_type": "bpe",
+            "tokenizer_path": tokenizer_dir,
+            "model_config": model_config_path,
+            # REQUIRED: ttml.common.utils.create_optimizer raises
+            # ValueError("training_config must contain an 'optimizer' section") without
+            # this, and passes the dict straight to the C++ optimizer factory. Values
+            # match tt-train's own training_shakespeare_nanollama3.yaml.
+            "optimizer": {
+                "type": "AdamW",
+                "lr": 0.0003,
+                "beta1": 0.9,
+                "beta2": 0.999,
+                "epsilon": 1.0e-8,
+                "weight_decay": 0.01,
+                "amsgrad": False,
+                "stochastic_rounding": False,
+            },
+        },
+        "device_config": {"mesh_shape": [1, 1], "enable_ddp": False, "enable_tp": False},
+    }
+
+
+def run_config_from_yaml(yaml_config: Dict[str, Any]) -> RunConfig:
+    """Extract the run config from an assembled YAML dict."""
+    return RunConfig(yaml_config.get("training_config", {}))
