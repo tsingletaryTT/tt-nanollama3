@@ -55,3 +55,40 @@ fits v4 perfectly, and the weights are ours outright — no redistribution quest
 - If the board times out on device open, `tt-smi -r` first. Common on p300c/QB2.
 - `max_sequence_length` is 256, so the manifest's `max_model_len` must be 256. Don't promise
   more than the model was trained for.
+
+## `feat/tokenizer-and-corpus` (2026-08-11)
+
+Built the corpus-prep and tokenizer pipeline the model needs before any training run:
+`train/data.py` (fetch + normalize TinyStories), `convert/tokenizer.py` (32K byte-level
+BPE, exported for both ttml load paths), and `scripts/build_tokenizer.py` (the script that
+actually produces the shipped artifacts). Real numbers from the production run: the 2.2 GB
+raw download (2,227,753,162 bytes) prepares down to 536,870,849 bytes / 3,509,269 lines at
+the 512 MB cap, and the tokenizer trained on that reaches exactly 32000 tokens — no
+shortfall.
+
+A whole-branch review caught three things worth not rediscovering:
+
+- **`vocab_size` is a ceiling, not a promise.** `BpeTrainer` stops merging once the corpus
+  runs out of pairs worth learning — a small corpus (or a small `--corpus-mb`) silently
+  under-shoots the target. `scripts/build_tokenizer.py` now reloads the export via
+  `load_exported()` and hard-fails (non-zero exit) if the achieved vocabulary doesn't
+  match the requested one, rather than printing "Done" over a mismatch that would only
+  surface later as an embedding-shape failure in tt-train.
+- **`PreTrainedTokenizerFast` overrides `add_prefix_space` on wrapping.** Setting
+  `pre_tokenizers.ByteLevel(add_prefix_space=True)` on the backend tokenizer is not
+  enough — `PreTrainedTokenizerFast.__init__` (transformers 4.52.4) applies its own
+  `add_prefix_space=False` default onto the wrapped tokenizer, silently discarding it.
+  Merges were being *learned* with prefix-space on but *applied* with it off. Fix: pass
+  `add_prefix_space=True` to the `PreTrainedTokenizerFast(...)` constructor itself, and
+  verify by reading the exported `tokenizer.json` back — don't assume the flag survived
+  wrapping. One consequence: decode() now legitimately produces a leading space on text
+  that doesn't already start with whitespace — that's the injected prefix space coming
+  back out, not data loss.
+- **TinyStories' `<|endoftext|>` separator must be mapped to `</s>`, not left as prose.**
+  Passed through unmodified, it's four ordinary subword tokens per occurrence (655,578
+  occurrences in the production corpus — 18.7% of all lines), a wasted vocabulary slot on
+  the subword `endoftext`, and — critically — zero real appearances of `</s>` in training
+  data, so the model never learns a stop token. `prepare_corpus` now rewrites lines that
+  are *exactly* the separator (after stripping) to the literal text `</s>`, which the
+  tokenizer maps to the eos special id; lines that merely mention the separator inside
+  other text are left alone, since a substring replace would corrupt real prose.
