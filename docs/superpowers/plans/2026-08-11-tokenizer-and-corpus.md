@@ -708,6 +708,21 @@ Final artifact numbers differ from the first run because `</s>` is 9 bytes short
 `<|endoftext|>`, so more whole lines fit the same 512 MB cap: **3,548,279 lines /
 536,870,821 bytes**, vocabulary exactly **32000**, with **662,878** `</s>` lines.
 
+### Known gaps carried forward (accepted, not fixed)
+
+- **The revision pin only binds on a cold cache.** `fetch_corpus` returns early when the file
+  already exists locally, so `revision=CORPUS_REVISION` is never evaluated on a cache hit — it
+  was not evaluated during this branch's own regeneration run. A pre-existing local file that
+  differs from the pinned revision would be used silently. The pin does its job on a fresh
+  machine, which is the case reproducibility actually cares about, but a integrity check
+  against the pinned revision on cache hit would close it properly.
+- **Two test-tightness gaps.** The rewritten-separator test asserts `line_count` but not
+  `bytes_written`, so the byte-budget half of that behavior is correct by construction and
+  corroborated by the production numbers rather than pinned by an assertion. And the tokenizer
+  round-trip test uses `.strip()`, which would still pass if a regression produced two leading
+  spaces instead of the one documented prefix space; comparing against `" " + text` would pin
+  the documented mechanism exactly.
+
 ### Two structural notes for future plans
 
 - **This plan's code blocks are the code**, transcribed verbatim by implementers. That means
