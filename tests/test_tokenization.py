@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from convert.tokenizer import train_bpe
-from train.tokenize import TOKEN_DTYPE, TokenStats, tokenize_corpus
+from train.tokenization import TOKEN_DTYPE, TokenStats, tokenize_corpus
 
 
 @pytest.fixture(scope="module")
@@ -50,7 +50,7 @@ def test_split_fraction_and_totals(tiny_corpus, tiny_tokenizer, tmp_path):
     assert stats.train_tokens == len(train)
     assert stats.val_tokens == len(val)
     assert stats.total_tokens == len(train) + len(val)
-    # 10% val, within one chunk's rounding
+    # 10% val, within int() truncation's rounding
     assert abs(stats.val_tokens / stats.total_tokens - 0.1) < 0.02
 
 
@@ -86,3 +86,14 @@ def test_eos_survives_tokenization(tiny_tokenizer, tmp_path):
     tokenize_corpus(corpus, tiny_tokenizer, tmp_path / "tokens", val_fraction=0.0)
     ids = np.load(tmp_path / "tokens" / "train_ids.npy")
     assert 2 in ids.tolist(), "eos id 2 absent — separators are not reaching the token stream"
+
+
+def test_rejects_val_fraction_above_one(tiny_corpus, tiny_tokenizer, tmp_path):
+    """val_fraction > 1.0 makes `split` negative and `ids[:negative]` silently drops data."""
+    with pytest.raises(ValueError, match="val_fraction"):
+        tokenize_corpus(tiny_corpus, tiny_tokenizer, tmp_path / "tokens", val_fraction=1.5)
+
+
+def test_rejects_non_positive_chunk_lines(tiny_corpus, tiny_tokenizer, tmp_path):
+    with pytest.raises(ValueError, match="chunk_lines"):
+        tokenize_corpus(tiny_corpus, tiny_tokenizer, tmp_path / "tokens", chunk_lines=0)

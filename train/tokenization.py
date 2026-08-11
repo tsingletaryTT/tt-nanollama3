@@ -15,9 +15,10 @@ No ttnn/ttml imports: this runs on any machine.
 
 from __future__ import annotations
 
+import argparse
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import numpy as np
 
@@ -49,6 +50,11 @@ def tokenize_corpus(
     to its runs.
     """
     from transformers import AutoTokenizer
+
+    if not 0.0 <= val_fraction <= 1.0:
+        raise ValueError(f"val_fraction must be in [0.0, 1.0], got {val_fraction}")
+    if chunk_lines <= 0:
+        raise ValueError(f"chunk_lines must be > 0, got {chunk_lines}")
 
     corpus, tokenizer_dir, out_dir = Path(corpus), Path(tokenizer_dir), Path(out_dir)
     if not corpus.is_file():
@@ -92,3 +98,35 @@ def tokenize_corpus(
         val_tokens=int(len(val_ids)),
         vocab_size=int(tok.vocab_size),
     )
+
+
+def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--corpus", default="artifacts/corpus/corpus.txt",
+                    help="Path to the prepared corpus text file.")
+    p.add_argument("--tokenizer", default="artifacts/tokenizer",
+                    help="Directory holding the trained tokenizer.")
+    p.add_argument("--out", default="artifacts/tokens",
+                    help="Directory to write train_ids.npy / val_ids.npy into.")
+    p.add_argument("--val-fraction", type=float, default=0.1,
+                    help="Fraction of the token stream (tail) held out for validation.")
+    p.add_argument("--chunk-lines", type=int, default=50_000,
+                    help="Corpus lines encoded per tokenizer call (a memory knob only).")
+    return p.parse_args(argv)
+
+
+def main() -> int:
+    args = _parse_args()
+    stats = tokenize_corpus(
+        Path(args.corpus),
+        Path(args.tokenizer),
+        Path(args.out),
+        val_fraction=args.val_fraction,
+        chunk_lines=args.chunk_lines,
+    )
+    print(stats)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
