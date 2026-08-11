@@ -62,9 +62,11 @@ Built the corpus-prep and tokenizer pipeline the model needs before any training
 `train/data.py` (fetch + normalize TinyStories), `convert/tokenizer.py` (32K byte-level
 BPE, exported for both ttml load paths), and `scripts/build_tokenizer.py` (the script that
 actually produces the shipped artifacts). Real numbers from the production run: the 2.2 GB
-raw download (2,227,753,162 bytes) prepares down to 536,870,849 bytes / 3,509,269 lines at
+raw download (2,227,753,162 bytes) prepares down to 536,870,821 bytes / 3,548,279 lines at
 the 512 MB cap, and the tokenizer trained on that reaches exactly 32000 tokens — no
-shortfall.
+shortfall. (Line count is higher than a naive pre-fix estimate would suggest: `</s>` is 9
+bytes shorter than `<|endoftext|>`, so once separator lines are rewritten, more whole
+lines fit under the same 512 MB cap before truncation kicks in.)
 
 A whole-branch review caught three things worth not rediscovering:
 
@@ -85,7 +87,7 @@ A whole-branch review caught three things worth not rediscovering:
   that doesn't already start with whitespace — that's the injected prefix space coming
   back out, not data loss.
 - **TinyStories' `<|endoftext|>` separator must be mapped to `</s>`, not left as prose.**
-  Passed through unmodified, it's four ordinary subword tokens per occurrence (655,578
+  Passed through unmodified, it's four ordinary subword tokens per occurrence (662,878
   occurrences in the production corpus — 18.7% of all lines), a wasted vocabulary slot on
   the subword `endoftext`, and — critically — zero real appearances of `</s>` in training
   data, so the model never learns a stop token. `prepare_corpus` now rewrites lines that
