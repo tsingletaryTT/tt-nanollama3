@@ -28,6 +28,31 @@ to the tt-kernel maintainers.
 trained: `~/tt-metal/tt-train/checkpoints/nanollama3_char_3k.pkl_final.pkl`. Being an LLM, it
 fits v4 perfectly, and the weights are ours outright — no redistribution question.
 
+## Licensing — a relationship to maintain, not a one-time file
+
+This repo is **Apache-2.0**, matching tt-metal and tt-vscode-toolkit. Every source file carries
+an SPDX header. That much is settled. What needs *maintaining* is the honesty of the
+provenance section in `README.md`, because two upstreams are not simply Apache-2.0:
+
+- **TinyStories is CDLA-Sharing-1.0**, a share-alike *data* license — not permissive. We do not
+  redistribute the corpus (it downloads from the Hub at a pinned revision), and we do **not**
+  assert that weights trained on it fall outside "Data Derivative". Do not quietly upgrade that
+  hedge into a claim.
+- **Mini-LLM declares no license** (verified via the GitHub API — `license: None`), so it grants
+  no rights. It is credited for architectural *choices*, which come from published papers; our
+  implementation derives from tt-train's `nanollama3` config and `ttml`, not its source. Keep
+  that distinction sharp — a credit is not a license inheritance.
+
+**Rules for future work:**
+- New source files get the SPDX header pair. No exceptions.
+- Adding a dependency, corpus, or checkpoint source means adding its license to the README's
+  provenance section *in the same change* — not later.
+- **When weights are finally published**, the model card must name the corpus and its license
+  explicitly, and describe the model as a demonstration rather than a capable general model.
+  At ~22M parameters over a fraction of an epoch, any other framing would be false.
+- If a future corpus is more permissive (or more restrictive) than TinyStories, the provenance
+  section changes with it. It is not boilerplate.
+
 ## Key decisions
 
 - **~22M params, 32K BPE, small real corpus.** Uses the existing `nanollama3.yaml` unchanged.
