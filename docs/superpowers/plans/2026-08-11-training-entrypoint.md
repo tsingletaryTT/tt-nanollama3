@@ -653,10 +653,14 @@ def main() -> int:
     set_seed(yaml_config["training_config"]["seed"])
     initialize_device(yaml_config)
 
-    model = TransformerModelFactory(yaml_config).create_model()
-    optimizer = create_optimizer(model, yaml_config)
-
+    # The try must open immediately after the device does. Model and optimizer
+    # construction can raise (shape mismatch, on-device OOM), and anything that escapes
+    # while the device is open triggers the MetalContext::destroy_all_instances teardown
+    # abort. Everything between device-open and close belongs under this one finally.
     try:
+        model = TransformerModelFactory(yaml_config).create_model()
+        optimizer = create_optimizer(model, yaml_config)
+
         # train() takes exactly (cfg, model, optim, train_ids, use_ddp, use_tp) — no val_ids.
         train_losses, _ = train(cfg, model, optimizer, train_ids, False, False)
         val_loss = evaluate(model, val_ids, cfg)
