@@ -15,5 +15,10 @@ dev = ["pytest>=7.0"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
-[tool.setuptools]
-packages = ["train", "convert"]
+[tool.setuptools.packages.find]
+# Discovery by pattern, not an explicit list: Task 1 ships only `train/`, and
+# `convert/` arrives in Task 2. An explicit `packages = ["train", "convert"]` makes
+# `pip install -e .` fail until Task 2 lands, and bare flat-layout auto-discovery
+# fails the other way once it does ("Multiple top-level packages discovered in a
+# flat-layout"). Include patterns match whatever exists, in both states.
+include = ["train*", "convert*"]
