@@ -16,7 +16,7 @@
 - All new files carry an Apache-2.0 SPDX header: `# SPDX-License-Identifier: Apache-2.0` and `# SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC`
 - Python 3.10+
 - **Vocabulary size is exactly 32000**, to match `~/tt-metal/tt-train/configs/model_configs/nanollama3.yaml` (`vocab_size: 32000`). Special tokens count toward this total.
-- **Neither `train/` nor `convert/` may import `ttnn`, `ttml`, or `torch`.** These modules must run on a machine with no Tenstorrent hardware.
+- **Neither `train/` nor `convert/` may import `ttnn` or `ttml`.** These modules must run on a machine with no Tenstorrent hardware and no tt-metal checkout. `torch` is *not* banned — `transformers` imports it transitively, and CPU torch runs anywhere.
 - `ttml` resolves `tokenizer_path` **relative to `$TT_METAL_HOME/tt-train`** (`sources/ttml/ttml/common/data.py:91`). Our exports live under `artifacts/tokenizer/` in this repo; wiring the path into a training config is Plan 2's job, not this plan's.
 - `ttml` accepts a tokenizer as **either** a directory (`AutoTokenizer.from_pretrained(path, local_files_only=True)`, `data.py:93`) **or** a single file (`PreTrainedTokenizerFast(tokenizer_file=path)`, `data.py:96`). Both forms must work.
 - Corpus: `roneneldan/TinyStories`, file `TinyStoriesV2-GPT4-train.txt` (and `TinyStoriesV2-GPT4-valid.txt` for validation). Verified present on the Hub.
@@ -380,13 +380,25 @@ def test_ttml_file_load_path(exported: Path):
 
 
 def test_convert_module_imports_no_tenstorrent():
-    """convert/ must run on a machine with no hardware."""
+    """convert/ must run on a machine with no hardware and no tt-metal checkout.
+
+    Checked in a subprocess: this test session has already imported plenty, so
+    inspecting our own sys.modules would prove nothing. torch is deliberately not
+    banned — transformers imports it transitively and CPU torch runs anywhere.
+    """
+    import subprocess
     import sys
 
-    import convert.tokenizer  # noqa: F401
-
-    for banned in ("ttnn", "ttml", "torch"):
-        assert banned not in sys.modules, f"convert.tokenizer pulled in {banned}"
+    probe = (
+        "import sys; import convert.tokenizer; "
+        "bad=[m for m in ('ttnn','ttml') if m in sys.modules]; "
+        "print(','.join(bad))"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", probe],
+        capture_output=True, text=True, check=True, cwd=str(Path(__file__).parent.parent),
+    )
+    assert out.stdout.strip() == "", f"convert.tokenizer pulled in: {out.stdout.strip()}"
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -403,7 +415,9 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'convert.tokenizer'`
 # SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
 """Conversion utilities: tokenizer export and checkpoint conversion.
 
-Nothing here may import ttnn, ttml, or torch — these run anywhere.
+Nothing here may import ttnn or ttml — these must run on a machine with no
+Tenstorrent hardware and no tt-metal checkout. (torch arrives transitively via
+transformers and is fine; it is CPU-only here.)
 """
 ```
 
