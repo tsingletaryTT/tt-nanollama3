@@ -875,6 +875,18 @@ the Self-Review section checked only the code blocks — type consistency and pl
 never the tables against the code. Applied before execution, the check above would have caught
 all four.
 
+## Carried forward (accepted, not fixed)
+
+- **The vocab guards use bare `assert`, which `python -O` strips.** They exist to catch a
+  token stream that doesn't match the model's vocabulary — a failure that otherwise surfaces
+  as garbage output or an on-device fault with no diagnostic. Under `-O` they vanish silently,
+  which is the worst case for a guard against silent corruption. Converting them to explicit
+  `if ...: raise ValueError(...)` is the right fix; deferred because nothing here runs under
+  `-O` today. **Plan 3 should not add more bare-`assert` guards.**
+- **`int(train_ids.max())` raises an unguarded `ValueError` on a zero-length array**, rather
+  than the clean message the neighbouring file-existence checks produce. Low severity — an
+  empty token file is separately detectable — but the asymmetry is arbitrary.
+
 ## Known risks
 
 - **`create_optimizer` and `initialize_device` signatures are taken from `training.py`'s usage**, which is otherwise stale code. If either differs, Task 3 Step 4 will fail fast at startup — check `ttml/common/utils.py` before assuming the model is at fault.
