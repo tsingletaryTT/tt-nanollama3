@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
 """Map ttml tensor names and layouts onto Hugging Face Llama conventions.
 
-Three things here are not guessable from a tensor alone, and each is a way to produce a
+Four things here are not guessable from a tensor alone, and each is a way to produce a
 model that loads cleanly and is silently wrong:
 
 1. **Weight tying.** The checkpoint has ``llama/fc/weight`` and *no* embedding tensor, so
@@ -11,6 +11,12 @@ model that loads cleanly and is silently wrong:
 2. **Fused K+V.** ``kv_linear`` packs both projections into one tensor; the split point
    comes from ``num_groups × head_dim``, which lives in the header, not the array.
 3. **Leading unit dims.** ttml stores 2-D weights as ``(1, 1, out, in)``.
+4. **RoPE row layout.** ``q_linear``/``k_proj`` rows are ordered for ttml's *interleaved*
+   RoPE pairing; HF Llama's ``rotate_half`` expects *split-halves* pairing. Copying rows
+   straight through (as an earlier version of this converter did) is invisible to every
+   shape/name check -- the tensor is the right shape, in the right place, with the right
+   name -- and produces a model that loads, ties weights, and generates plausible fluent
+   text while being numerically wrong. See ``permute_rope_qk`` below.
 
 Pure numpy. No ttnn, no ttml.
 """
@@ -101,3 +107,46 @@ def split_kv(tensor: np.ndarray, *, num_groups: int, head_dim: int):
         )
     half = expected // 2
     return arr[:half], arr[half:]
+
+
+def permute_rope_qk(tensor: np.ndarray, *, num_heads: int, head_dim: int) -> np.ndarray:
+    """Reorder q/k projection rows from ttml's RoPE convention to HF Llama's.
+
+    RoPE rotates a head's activations in 2-D planes, pairing up rows of the projection
+    weight two at a time. Two incompatible conventions exist for *which* two rows form a
+    pair, and nothing about a weight matrix's shape, name, or values reveals which one its
+    author assumed:
+
+    - **Interleaved** (ttml's convention here, and original Meta Llama's): row ``2i`` pairs
+      with row ``2i + 1`` -- adjacent rows.
+    - **Split-halves** (HF Llama's ``rotate_half``/``apply_rotary_pos_emb``): row ``i``
+      pairs with row ``i + head_dim // 2`` -- a row and its counterpart in the second half
+      of the head.
+
+    Copying rows straight through mismatches these pairings, which degrades attention
+    quality without producing an error or obviously-garbage output: the resulting model
+    still loads, ties its embedding correctly, and generates locally-fluent text, so this
+    is invisible to every check *except* an actual loss comparison against a known-good
+    target. This was measured directly (numerical verification, hf-conversion plan Task 3):
+    on the real checkpoint, HF-side validation loss with rows copied straight through was
+    3.20 nats against a training-time target of 1.8781 nats; applying exactly this
+    permutation to ``q_proj``/``k_proj`` and nothing else brought it to 1.927 nats. See
+    CLAUDE.md's "numerical verification finds a real bug" section for the full writeup.
+
+    This is the same row permutation Meta's own ``convert_llama_weights_to_hf.py`` applies
+    when converting original-format (interleaved) Llama checkpoints to HF's format --
+    not something invented for this project.
+
+    Applies to ``q_proj`` and ``k_proj`` only, never ``v_proj``: RoPE rotates queries and
+    keys before the attention dot product, but values pass through unrotated.
+
+    ``num_heads`` is the tensor's own head count -- ``num_attention_heads`` for q_proj,
+    ``num_key_value_heads`` (ttml's ``num_groups``) for k_proj -- never hardcoded, since
+    grouped-query attention gives k_proj fewer heads than q_proj over the same head_dim.
+    """
+    out_features, in_features = tensor.shape
+    return (
+        tensor.reshape(num_heads, head_dim // 2, 2, in_features)
+        .transpose(0, 2, 1, 3)
+        .reshape(out_features, in_features)
+    )

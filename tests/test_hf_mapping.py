@@ -5,7 +5,7 @@
 import numpy as np
 import pytest
 
-from convert.hf_mapping import MLP_ROLES, map_name, split_kv, squeeze_leading
+from convert.hf_mapping import MLP_ROLES, map_name, permute_rope_qk, split_kv, squeeze_leading
 
 
 def test_tied_embedding_maps_to_both_targets():
@@ -96,3 +96,44 @@ def test_split_kv_rejects_wrong_row_count():
 
 def test_mlp_roles_follow_swiglu_convention():
     assert MLP_ROLES == {"w1": "gate_proj", "w2": "down_proj", "w3": "up_proj"}
+
+
+def test_permute_rope_qk_preserves_shape():
+    # 2 heads x head_dim 4 = 8 output rows, hidden 3
+    t = np.arange(8 * 3, dtype=np.float32).reshape(8, 3)
+    out = permute_rope_qk(t, num_heads=2, head_dim=4)
+    assert out.shape == (8, 3)
+
+
+def test_permute_rope_qk_is_a_permutation_not_a_copy_or_a_loss():
+    """Every row of the input must appear exactly once in the output -- this is a
+    reordering of rows, not a projection that could quietly drop or duplicate data."""
+    t = np.arange(8 * 3, dtype=np.float32).reshape(8, 3)
+    out = permute_rope_qk(t, num_heads=2, head_dim=4)
+    in_rows = {tuple(row) for row in t}
+    out_rows = {tuple(row) for row in out}
+    assert in_rows == out_rows
+    assert len(out) == len(t)
+
+
+def test_permute_rope_qk_swaps_the_inner_two_row_blocks_per_head():
+    """Interleaved -> split-halves: within each head's head_dim rows, the permutation
+    groups rows by their position mod 2 (even rows, then odd rows) -- e.g. for head_dim=4,
+    rows [0,1,2,3] of a head become [0,2,1,3]. Pinned against a hand-computed example so a
+    future refactor can't silently invert or scramble the permutation while keeping the
+    'it's some permutation of the same rows' test above green."""
+    t = np.arange(8 * 1, dtype=np.float32).reshape(8, 1)
+    out = permute_rope_qk(t, num_heads=2, head_dim=4)
+    # Head 0 (rows 0-3): interleaved order [0,1,2,3] -> split-halves order [0,2,1,3].
+    # Head 1 (rows 4-7): interleaved order [4,5,6,7] -> split-halves order [4,6,5,7].
+    expected = np.array([[0], [2], [1], [3], [4], [6], [5], [7]], dtype=np.float32)
+    assert np.array_equal(out, expected)
+
+
+def test_permute_rope_qk_handles_grouped_query_attention_head_counts():
+    """k_proj has fewer heads than q_proj under GQA (ttml's num_groups); num_heads must be
+    the tensor's own head count, not hardcoded, or a GQA model gets the wrong block size."""
+    # 3 groups x head_dim 64 x hidden 384, matching this project's real k_proj shape.
+    t = np.arange(192 * 384, dtype=np.float32).reshape(192, 384)
+    out = permute_rope_qk(t, num_heads=3, head_dim=64)
+    assert out.shape == (192, 384)

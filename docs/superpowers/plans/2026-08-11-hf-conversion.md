@@ -607,20 +607,33 @@ Expected, honestly: TinyStories-flavoured English with simple sentence structure
 
 Compute HF-side loss on held-out validation tokens and compare with the training run's **1.8781**. They should be close. A large gap points at a layout error that entropy alone did not catch.
 
+**Correction (found while executing Task 3, 2026-08-11): the command below originally passed pre-shifted `input_ids`/`labels` through the `labels=` kwarg.** `LlamaForCausalLM`'s own loss function (`transformers.loss.loss_utils.ForCausalLMLoss`) shifts `labels` internally, so pre-shifting and then passing through `labels=` shifts a *second* time — every prediction gets compared against the token two positions ahead, not one. Run as originally written, this reported 8.53 nats on the real model, which looked like a much worse bug than the real one turned out to be. The corrected version below computes cross-entropy directly against `logits`, skipping `labels=` entirely, and also matches the training run's own sampling (`train.run.evaluate` via `ttml.common.data.get_batch`: 10 batches of 32 windows drawn uniformly at random across the *whole* validation set) rather than one contiguous block from the front, so the two numbers are actually comparable:
+
 ```bash
 python -c "
 import numpy as np, torch
 from transformers import AutoModelForCausalLM
 m = AutoModelForCausalLM.from_pretrained('artifacts/hf').eval()
-val = np.load('artifacts/tokens/val_ids.npy')[:256*20].astype('int64').reshape(20, 256)
-x = torch.from_numpy(val)
+val = np.load('artifacts/tokens/val_ids.npy')
+seq_len, batch_size, num_batches = 256, 32, 10
+n = len(val) - seq_len - 1
+rng = np.random.default_rng(0)
+losses = []
 with torch.no_grad():
-    out = m(x[:, :-1], labels=x[:, 1:])
-print('HF-side val loss:', float(out.loss))
+    for _ in range(num_batches):
+        ix = rng.integers(0, n, size=(batch_size,))
+        x = np.stack([val[i:i+seq_len] for i in ix], axis=0).astype('int64')
+        y = np.stack([val[i+1:i+seq_len+1] for i in ix], axis=0).astype('int64')
+        logits = m(torch.from_numpy(x)).logits
+        loss = torch.nn.functional.cross_entropy(
+            logits.reshape(-1, logits.size(-1)).float(), torch.from_numpy(y).reshape(-1)
+        )
+        losses.append(float(loss))
+print('HF-side val loss:', sum(losses) / len(losses))
 "
 ```
 
-Report the number. Within ~0.2 nats of 1.8781 is a pass; a gap of 1+ nats means the conversion is wrong.
+Report the number. Within ~0.2 nats of 1.8781 is a pass; a gap of 1+ nats means the conversion is wrong. (This is exactly what happened on the first real run of this plan: the straight-copied RoPE row layout scored 3.20 nats here — a real 1.32-nat gap, not a double-shift artifact — and was root-caused to `q_proj`/`k_proj` needing an interleaved-to-split-halves row permutation. See `convert.hf_mapping.permute_rope_qk` and this project's `CLAUDE.md`.)
 
 - [ ] **Step 4: Record results in CLAUDE.md and commit**
 

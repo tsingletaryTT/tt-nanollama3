@@ -7,11 +7,30 @@ from pathlib import Path
 import pytest
 
 HF = Path("artifacts/hf")
+VAL_IDS = Path("artifacts/tokens/val_ids.npy")
 
 pytestmark = pytest.mark.skipif(
     not (HF / "config.json").is_file(),
     reason="no converted model; run scripts/convert_checkpoint.py first",
 )
+#: The loss-comparison test additionally needs tokenized validation data; skip just that
+#: test (not the whole module) when it's absent so a machine with a converted model but no
+#: token cache still runs the structural/entropy tests above.
+_no_val_ids = pytest.mark.skipif(
+    not VAL_IDS.is_file(),
+    reason="no validation tokens; run train/tokenization.py first",
+)
+
+#: The training run's real held-out validation loss (ttml's own evaluate(), 10 batches of
+#: 32 randomly-sampled 256-token windows). See CLAUDE.md's "numerical verification finds a
+#: real bug" section for how this number was derived and cross-checked.
+TRAINING_VAL_LOSS = 1.8781
+#: Tasks 1-2 produce a directory that loads cleanly whether or not the conversion is
+#: correct; this tolerance is what actually discriminates. A gap this small can come from
+#: fp32-CPU-vs-bf16-device precision and different random validation samples; a gap of
+#: 1+ nats (as the straight-copied RoPE layout produced, before it was fixed -- see
+#: convert.hf_mapping.permute_rope_qk) means a real layout bug, not sampling noise.
+LOSS_TOLERANCE = 0.2
 
 
 def test_loads_with_automodel():
@@ -60,3 +79,57 @@ def test_next_token_distribution_is_not_uniform():
     probs = torch.softmax(logits.float(), dim=-1)
     entropy = -(probs * probs.clamp_min(1e-12).log()).sum().item()
     assert entropy < 7.0, f"next-token entropy {entropy:.2f} nats is near-uniform (10.37)"
+
+
+@_no_val_ids
+def test_validation_loss_matches_the_training_run():
+    """The check every other test in this file is structurally incapable of doing.
+
+    A wrong RoPE layout, a backwards K/V split, or swapped gate/up all produce a model
+    that loads cleanly, ties its embedding, emits finite non-uniform logits, and *generates
+    plausible fluent text* -- every test above this one would pass. This is the one that
+    actually caught it: before ``convert.hf_mapping.permute_rope_qk`` existed, this
+    computation returned 3.20 nats against a target of 1.8781 (a 1.32-nat gap) despite every
+    structural and entropy check passing.
+
+    Two things about this computation matter and are easy to get backwards:
+
+    1. **No double shift.** ``LlamaForCausalLM``'s own loss function shifts ``labels``
+       internally (``transformers.loss.loss_utils.ForCausalLMLoss``). Passing
+       already-shifted ``input_ids``/``labels`` through the ``labels=`` kwarg -- as an
+       earlier, incorrect version of this check did -- shifts a second time and reports a
+       number close to the *uniform* ceiling regardless of whether the model is any good.
+       This computes cross-entropy directly against ``logits`` instead, taking the
+       ``labels=`` kwarg out of the picture entirely.
+    2. **Random windows, not one contiguous block.** The training run's own validation loss
+       (``train.run.evaluate``) averages 10 batches of 32 windows sampled uniformly across
+       the *whole* validation set (``ttml.common.data.get_batch``), not one block from the
+       front -- matched here so the two numbers are comparable.
+    """
+    import numpy as np
+    import torch
+    from transformers import AutoModelForCausalLM
+
+    m = AutoModelForCausalLM.from_pretrained(str(HF)).eval()
+    val = np.load(VAL_IDS)
+    seq_len, batch_size, num_batches = 256, 32, 10
+    n = len(val) - seq_len - 1
+    rng = np.random.default_rng(0)
+    losses = []
+    with torch.no_grad():
+        for _ in range(num_batches):
+            ix = rng.integers(0, n, size=(batch_size,))
+            x = np.stack([val[i:i + seq_len] for i in ix], axis=0).astype("int64")
+            y = np.stack([val[i + 1:i + seq_len + 1] for i in ix], axis=0).astype("int64")
+            logits = m(torch.from_numpy(x)).logits
+            loss = torch.nn.functional.cross_entropy(
+                logits.reshape(-1, logits.size(-1)).float(), torch.from_numpy(y).reshape(-1)
+            )
+            losses.append(float(loss))
+    mean_loss = sum(losses) / len(losses)
+    gap = abs(mean_loss - TRAINING_VAL_LOSS)
+    assert gap <= LOSS_TOLERANCE, (
+        f"HF-side val loss {mean_loss:.4f} nats is {gap:.4f} nats from the training run's "
+        f"{TRAINING_VAL_LOSS} (tolerance {LOSS_TOLERANCE}) -- suspect a layout bug "
+        f"(RoPE interleaving, K/V split, or gate/up swap), not sampling noise."
+    )

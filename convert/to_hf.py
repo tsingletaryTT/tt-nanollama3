@@ -21,7 +21,7 @@ from typing import Any, Dict
 import numpy as np
 
 from convert.checkpoint_reader import read_checkpoint_meta, read_tensors
-from convert.hf_mapping import map_name, split_kv, squeeze_leading
+from convert.hf_mapping import map_name, permute_rope_qk, split_kv, squeeze_leading
 
 _REQUIRED = ("vocab_size", "seq_len", "intermediate_dim", "weight_tying",
              "rms_norm_eps", "weights_dtype", "transformer_config")
@@ -85,8 +85,20 @@ def convert_checkpoint(ckpt: Path, tokenizer_dir: Path, out_dir: Path) -> Dict[s
         if target is None:
             continue
         if name.endswith("attention/kv_linear/weight"):
+            # split_kv squeezes leading unit dims internally before splitting.
             k, v = split_kv(tensor, num_groups=int(tc["num_groups"]), head_dim=head_dim)
-            out[target[0]], out[target[1]] = k, v
+            # RoPE applies to keys, never to values (see permute_rope_qk's docstring for
+            # why the straight-copy version of this line shipped a numerically wrong
+            # model that still loaded and generated plausible text).
+            out[target[0]] = permute_rope_qk(
+                k, num_heads=int(tc["num_groups"]), head_dim=head_dim
+            )
+            out[target[1]] = v
+        elif name.endswith("attention/q_linear/weight"):
+            arr = squeeze_leading(tensor)
+            out[target] = permute_rope_qk(
+                arr, num_heads=config["num_attention_heads"], head_dim=head_dim
+            )
         elif isinstance(target, tuple):
             # Tied embedding: one tensor, both destinations.
             arr = squeeze_leading(tensor)
