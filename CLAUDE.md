@@ -152,3 +152,41 @@ vocab_size=32000)` — inside the 1.3–1.6×10^8 estimate, vocab exactly on tar
 
 No checkpoint is written (`model_save_interval` is 0 in `RunConfig`/`build_yaml_config`) —
 that's Stage 3's job, once we've read `ttml/checkpointing.py`'s format.
+
+## `feat/checkpointing` (2026-08-11)
+
+Added a validated checkpoint header schema over `ttml.checkpointing` (`train/checkpoint.py`)
+and periodic save/resume to the training entrypoint (`train/run.py`, calling `train()` in
+`--save-every`-sized chunks so the same `optimizer` object persists across calls — AdamW's
+moments carry over rather than resetting each chunk). Then ran the first real training run
+worth keeping.
+
+**The real run**, p300c/Blackhole, `--steps 3000 --save-every 500 --batch-size 64`:
+
+- First train loss `10.6875` (≈`ln(32000)`, correct init), last train loss `1.9219`, real
+  validation loss (our own `evaluate()`, 10 sampled batches, not `train()`'s placeholder)
+  `1.8781`. The curve is a clean log shape — steep for the first ~300 steps, then a steadily
+  decelerating decline into a noisy 1.9–2.1 band for the back half — not a plateau, not
+  divergence, and (as expected for a raw per-batch metric) not step-to-step monotonic: roughly
+  half of all individual steps ticked up rather than down, while every windowed average kept
+  falling.
+- Steady state `~0.134 s/step` (7.44–7.50 it/s), matching Plan 2's 0.12–0.14 s/step. Unlike
+  Plan 2, this run's first step showed no visible compiler-warmup stall — most likely because
+  Task 2's same-shapes hardware runs earlier today had already warmed the on-disk kernel
+  cache; not confirmed by inspecting the cache directly, so treat as a plausible explanation,
+  not a verified one.
+- Total wall clock `~6 min 47 s` (process start to final printed loss), including all six
+  checkpoint writes — the writes did not add a visible cost on top of compute; every 500-step
+  chunk took the same ~67.1 s regardless.
+- Six checkpoints, `nanollama3_step00000500.pkl` through `nanollama3_step00003000.pkl`
+  (`artifacts/checkpoints/`, gitignored), 132,185,963 bytes each, final one at step 3000 as
+  requested.
+
+**This is a demonstration, not a capable model.** `3000 × 64 × 256 ≈ 49.2M tokens` is about
+**0.43 of one epoch** over the 114.9M-token training split — this run never saw even half the
+corpus once. TinyStories is also a synthetic, deliberately simple corpus (short children's
+stories, small effective vocabulary, regular grammar, built so small models can fit it), so a
+low loss here is expected and does not indicate general language competence — no text was
+decoded from this checkpoint to check. Full numbers, the reconstructed per-step curve, and
+self-review are in
+[`task-3-report.md`](.superpowers/sdd/2026-08-11-checkpointing/task-3-report.md).
