@@ -38,7 +38,7 @@ record 0) and from `ttml/models/llama.hpp:24-40`:
 | `vocab_size` | 32000 | not padded — see §7 |
 | `intermediate_dim` | 1024 | explicit in config, so the `4d·2/3` rounding at `ttml/modules/llama_block.cpp:22-23` is **not** used |
 | `dropout_prob` | 0.0 | so dropout is identity in both train and eval |
-| `rms_norm_eps` | 1e-5 | C++ default, `ttml/modules/rms_norm_module.hpp:17,23` — not settable from YAML |
+| `rms_norm_eps` | 1e-5 | C++ default, `ttml/modules/rms_norm_module.hpp:17,23`. **The header field is descriptive, not authoritative** — `LlamaBlock` constructs `RMSNormLayer(embedding_size)` with the default argument (`ttml/modules/llama_block.cpp:47-48`) and nothing plumbs a YAML value through, so the value is fixed by the C++ regardless of what the header says. |
 | `weight_tying` | Enabled | |
 | weights dtype | bfloat16 | |
 
@@ -171,8 +171,12 @@ time).
 
 ## 3. RoPE — **interleaved**, `(x[2i], x[2i+1])`
 
-This is the item that broke Plan 4, so it is derived three independent ways below and all
-three agree.
+This is the item that broke Plan 4, so it is established four ways below. They are not four
+independent derivations — §3.1 and §3.2/§3.3 read the same op from different angles — but they
+are four *mutually consistent lines of evidence* of different kinds: a numerical one (the
+frequency table), a structural one (the rotation matrix and the kernel that applies it), an
+architectural one (a tiling constraint that makes the alternative impossible), and an
+intentional one (ttml's own importer converting the other convention into this one).
 
 **Citations.** `ttml/ops/rope_op.cpp:191-235` (`gen_freqs`), `:237-248` (`gen_trans_mat`),
 `:250-299` (`build_rope_params`), `:112-189` (`rope`), and the ttnn kernel that actually does
@@ -197,8 +201,11 @@ inv_freq[i] = theta ^ ( -2·floor(i/2) / Dh )
 ```
 
 which means `inv_freq[2j] == inv_freq[2j+1] == theta^(-2j/Dh)`. **Adjacent channels share a
-frequency.** That alone is the interleaved signature — a split-halves layout would instead give
-`inv_freq[j] == inv_freq[j + Dh/2]`.
+frequency**, whereas a split-halves layout would give `inv_freq[j] == inv_freq[j + Dh/2]`.
+
+This is a *necessary* condition for interleaved pairing and is flatly inconsistent with
+split-halves, but on its own it is not sufficient — it says which channels share a frequency,
+not which channels get rotated into each other. The pairing itself is fixed by §3.2 + §3.3.
 
 Then, `ttml/ops/rope_op.cpp:214-229`:
 
@@ -231,7 +238,32 @@ rot[2j+1] = Σ_k x[k]·T[k, 2j+1] = x[2j]·(+1)   =  x[2j]
 
 The 2×2 blocks land on *adjacent* channel pairs. Because `TILE_SIZE = 32` is even and
 `Dh = 64 = 2 tiles`, the same 32×32 matrix tiles across the head dim without disturbing any
-pair. This is the second, independent statement that pairs are `(2j, 2j+1)`.
+pair. This fixes the pairing as `(2j, 2j+1)`.
+
+#### The tiling makes split-halves structurally impossible
+
+`rotary_embedding_llama.cpp:93-96` applies that one 32×32 tile to each head-dim tile
+**independently**:
+
+```cpp
+for (uint32_t j = 0; j < Wt; ++j) {
+    matmul_tiles(in_cb, trans_mat_cb, j, in1_index, j);   // in1_index == 0, never reassigned (:65)
+    pack_tile(j, rotated_in_interm_cb, j);
+}
+```
+
+`in1_index` is initialised to `0` at `:65` and never modified, so every one of the `Wt`
+head-dim tiles is multiplied by the *same* single `trans_mat` tile, and tile `j`'s output
+depends only on tile `j`'s input. With `Dh = 64`, `Wt = 2`.
+
+Split-halves pairing would require mixing column `i` with column `i + Dh/2 = i + 32` — i.e.
+tile 0 with tile 1. **A per-tile 32×32 matmul cannot express that**, whatever the matrix
+contains: there is no data path between the two tiles in this op. So the op is *architecturally
+incapable* of split-halves RoPE at this head dim.
+
+This is the strongest of the four arguments, because it does not depend on reading the
+frequency table correctly, on my sign conventions for `x @ T`, or on anyone's intent — it is a
+constraint on what the kernel can compute at all.
 
 ### 3.3 The kernel that combines them
 
@@ -254,7 +286,7 @@ out[2j+1] = x[2j+1]·cos_j + x[2j]·sin_j
 with `cos_j = cos(p · theta^(−2j/Dh))`, `sin_j = sin(p · theta^(−2j/Dh))`, `p` = absolute
 position. That is exactly the standard 2-D rotation applied to the pair `(x[2j], x[2j+1])`.
 
-### 3.4 Third, independent confirmation — ttml's own HF importer
+### 3.4 Confirmation of intent — ttml's own HF importer
 
 ttml's safetensors loader permutes HF `q_proj`/`k_proj` rows on the way in
 (`ttml/models/llama.cpp:64-91`, called at `:551` for Q with `n_heads`, at `:569` for K with
@@ -277,10 +309,13 @@ split-halves → interleaved on import. `v_proj` gets **no** permutation
 > "Meta/original Llama" layout), *not* split-halves `(x[i], x[i+Dh/2])` (the HF
 > `LlamaAttention` layout).**
 >
-> **Confidence: very high.** Three mutually independent derivations agree: the frequency
-> table's `floor(i/2)`, the 2×2 block-diagonal `trans_mat` combined with the ttnn kernel's
-> `x·cos + (x@T)·sin`, and ttml's own HF importer explicitly un-permuting split-halves into
-> interleaved.
+> **Confidence: very high.** Four mutually consistent lines of evidence: the frequency table's
+> `floor(i/2)` (§3.1, necessary-not-sufficient); the 2×2 block-diagonal `trans_mat` combined
+> with the ttnn kernel's `x·cos + (x@T)·sin` (§3.2-3.3, which fixes the pairing); the per-tile
+> `matmul_tiles` loop that makes split-halves structurally impossible at `Dh = 64` (§3.3, the
+> strongest); and ttml's own HF importer explicitly un-permuting split-halves into interleaved
+> (§3.4, confirming intent). §8.1 then confirms it end-to-end: the split-halves variant costs
+> 1.28 nats (≈12 SE).
 
 Consequently, the pairing acts on the rows of `q_linear`/`kv_linear`'s weight **within each
 head**: for query head `h`, RoPE pairs weight rows `h·Dh + 2j` and `h·Dh + 2j + 1`.
@@ -414,33 +449,71 @@ scale = 1 / sqrt(head_dim) = 1/8
 
 ### 5.2 Causal mask — additive, large negative, applied to the raw scores
 
-Training passes **no** mask tensor: `masks_tensor` in `nano_gpt/main.cpp:538` is declared
-`std::optional` and never assigned before being returned at `:626`. With `mask == nullopt`,
-`scaled_dot_product_attention` selects `AttentionMaskType::Causal`
-(`scaled_dot_product_attention.cpp:250-255`) and the kernel generates the mask itself. The
-writer emits two reusable tiles (`sdpa_fw_writer_kernel.cpp:52-61`):
+**This checkpoint took the `Arbitrary` path, not the built-in `Causal` one.** The driver is
+`train/run.py:150` → `ttml.common.trainer.train()`, and that function builds an explicit mask:
 
-> `tile[0]` = causal-diagonal: `0.0` on/below diagonal (kept), `−1e9` above (masked).
-> `tile[1]` = all `−1e9`: applied on K tiles strictly past the diagonal.
+```python
+causal_mask = build_causal_mask(cfg.seq_len)                    # trainer.py:73
+tt_mask = ttml.autograd.Tensor.from_numpy(
+    causal_mask, ttnn.Layout.TILE, ttnn.DataType.BFLOAT16)      # trainer.py:74-76  [1,1,T,T] bf16
+...
+logits = model(tt_x, tt_mask)                                   # trainer.py:102
+```
 
-and the compute kernel **adds** them (in FP32, via packer L1 accumulation) onto the QK^T scores
-(`sdpa_fw_compute_kernel.cpp:174-190`). So: **additive mask, `0` for keep and a large negative
-constant (`−1e9`) for masked, applied to the score before the softmax.** No multiplicative
-masking, no post-softmax renormalisation.
+with `build_causal_mask` = `np.tril(np.ones((1, 1, T, T), dtype=np.float32))`, **1 = attend**
+(`ttml/ttml/common/utils.py:160-169`). nanollama3's own validation loop does the same
+(`train/run.py:79-87`). Because a mask tensor is present, `scaled_dot_product_attention` sets
+`mask_type = AttentionMaskType::Arbitrary` (`scaled_dot_product_attention.cpp:252-255`), so the
+kernel's `USE_ATTN_MASK` branch runs and its built-in `CAUSAL_MASK` branch does **not**.
+
+*(An earlier draft of this document justified the same conclusion from
+`nano_gpt/main.cpp:538`, the C++ example driver, which does leave `masks_tensor` unset. That is
+not our entry point. The arithmetic below is unchanged, but the justification was wrong — and
+"confident claim about which code path ran, derived from the wrong entry point" is precisely
+the failure mode this document exists to prevent, so it is recorded rather than quietly
+overwritten.)*
+
+**The two branches coincide numerically**, which is what makes this a cross-check rather than a
+correction. Both produce an **additive** `0 / −1e9`:
+
+*Arbitrary* (`sdpa_compute_utils.hpp:67-98`), given mask `m ∈ {0, 1}` and score `s`:
+
+```
+mask_tile(s, m)            -> s·m                       (masked positions zeroed)
+add_unary_tile(m, −1.0)    -> m − 1  ∈ {−1, 0}
+mul_unary_tile(m, 1e9)     -> (m−1)·1e9 ∈ {−1e9, 0}
+add_binary_tile(s, m)      -> s·m + (m−1)·1e9
+```
+
+so attend (`m=1`) → `s`, masked (`m=0`) → `−1e9`.
+
+*Causal* (`sdpa_fw_writer_kernel.cpp:52-61`) pre-bakes two reusable tiles — `tile[0]` = `0.0`
+on/below the diagonal and `−1e9` above, `tile[1]` = all `−1e9` for K tiles strictly past the
+diagonal — which the compute kernel adds in FP32 via packer L1 accumulation
+(`sdpa_fw_compute_kernel.cpp:174-190`).
+
+On a `tril` pattern the two are the same function. The constant is the same in both:
+`BF16_NEG_LARGE_BITS = 0xCE6E`, "upper 16 bits of `-1e9F` (bfloat16)"
+(`ttml/metal/common/dataflow_utils.hpp:46`).
+
+So: **additive mask, `0` for keep and `−1e9` for masked, applied to the score before the
+softmax.** No multiplicative masking, no post-softmax renormalisation. A NumPy reference should
+use `softmax(QK^T/sqrt(Dh) + causal_neg_inf)`.
 
 One implementation detail worth recording: the scale is folded into the softmax exponent rather
-than applied to the scores up front. `sdpa_compute_utils.hpp:167-174` computes
+than applied to the scores up front, and the `Arbitrary` mask path says so explicitly
+(`sdpa_compute_utils.hpp:86-88`: "Scaling is NOT applied here — it is deferred to after
+max-subtraction for better numerical precision"). `sdpa_compute_utils.hpp:167-174` then computes
 `exp(scale · (score − rowmax))` where `score = QK^T + mask`. The kernel therefore evaluates
 `softmax(scale·(QK^T + mask))`, whereas the composite path evaluates
 `softmax(scale·QK^T + mask)` (`scaled_dot_product_attention.cpp:152-179`). The two differ only
-in whether the mask constant is `−1e9` or `−1.25e8`; both are `−inf` for every practical
-purpose after `exp`. **A NumPy reference should use `softmax(QK^T/sqrt(Dh) + causal_neg_inf)`.**
+in whether the effective mask constant is `−1e9` or `−1.25e8`; both are `−inf` for every
+practical purpose after `exp`.
 
-If a mask tensor *is* supplied, `mask_type` becomes `Arbitrary`
-(`scaled_dot_product_attention.cpp:252-255`) and the built-in causal pattern is **not**
-additionally applied — the supplied `[1, 1, S, S]` mask (1 = keep, 0 = mask; transformed to
-`0 / −1e9` by `apply_mask_on_reg`, `sdpa_fw_compute_kernel.cpp:212`) must itself be causal. Not
-our path, but it is a trap worth naming.
+**Trap worth naming:** under `Arbitrary` the built-in causal pattern is *not* additionally
+applied — the supplied `[1,1,S,S]` mask must itself be causal, and here it is. Anyone who
+passes a non-causal mask (or an all-ones one) gets a non-causal model with no complaint from
+the kernel.
 
 ### 5.3 GQA head→group mapping
 
@@ -548,6 +621,15 @@ if (config.weight_tying == WeightTyingType::Enabled) {
 checkpoint contains **50** tensors — 6 blocks × 8 + `llama/ln_fc/gamma` + `llama/fc/weight` —
 and **no `llama/tok_emb/weight` at all**. Verified directly against the checkpoint manifest.
 
+*Which* of the two names survives is not luck: `m_named_modules` is a `std::map`, not an
+`unordered_map` (`ttml/modules/module_base.hpp:31`), and the comment immediately above it
+(`:27-30`) says this is deliberate — "we need to keep order of iteration for serialization …
+special case for weight tying in transformers … stored/loaded name is the same between
+different runs". The BFS in `parameters()` therefore visits modules in lexicographic order,
+`"fc"` sorts before `"tok_emb"`, and the pointer-dedup keeps whichever name it reaches first.
+So `llama/fc/weight` is the stable, reproducible name for the tied tensor — which is also the
+name ttml's own importer targets under tying (`ttml/models/llama.cpp:464-466`).
+
 ### 7.2 Both ends are unscaled
 
 - **Embedding lookup**: `embedding_op` (`ttml/ops/embedding_op.cpp:16-28`) is `untilize` →
@@ -652,57 +734,83 @@ actually encodes.
 
 Mean next-token cross-entropy, and the same run with one convention deliberately broken:
 
-| variant | mean CE (nats) |
-|---|---|
-| **as derived above** | **1.847** |
-| RoPE changed to split-halves `(x[i], x[i+Dh/2])` | 3.131 |
-| GQA broadcast changed to `tile` instead of `repeat_interleave` | 3.717 |
-| fused `kv` split changed to V-before-K | 7.603 |
+| variant | mean CE (nats) | Δ vs derived | in SE |
+|---|---|---|---|
+| **as derived above** | **1.847** (sd 0.315, **SE 0.112**) | — | — |
+| RoPE changed to split-halves `(x[i], x[i+Dh/2])` | 3.131 | +1.284 | 11.5 |
+| GQA broadcast changed to `tile` instead of `repeat_interleave` | 3.717 | +1.870 | 16.8 |
+| fused `kv` split changed to V-before-K | 7.603 | +5.756 | 51.6 |
 
-The training run's own reported loss at step 3000 is **1.8781**. The derived reference lands at
-1.847 — within noise of it (the two are not the same measurement: 1.8781 is a running loss over
-training batches, 1.847 is a point estimate over eight validation windows, so exact agreement is
-not expected and the small gap is not evidence of anything).
+**Dispersion matters here, so it is reported rather than left implicit.** Per-window spread is
+large (sd ≈ 0.315 nats across the eight windows), giving SE of the mean ≈ **0.112 nats** and a
+2σ detection floor of ≈ **0.22 nats**. This instrument is *coarse*: it cannot see anything
+smaller than roughly a fifth of a nat.
+
+The training run's own reported loss at step 3000 is **1.8781**; the derived reference lands at
+1.847, a gap of 0.031 — **0.3 SE**, comfortably inside noise. (The two are also not the same
+measurement: 1.8781 is a running loss over training batches, 1.847 a point estimate over eight
+validation windows. Agreement this close is not evidence of anything beyond "no gross error".)
 
 Two things are worth drawing out:
 
-1. **The check discriminates.** Each of the three riskiest layout conventions, when flipped,
-   moves the loss by 1.3–5.8 nats. These are not conventions that a loss gate would let through.
+1. **Coarse, but decisive for its actual purpose.** The three ablations sit at 12–52 SE. Layout
+   errors of the kind this document exists to prevent are enormous on this scale; there is no
+   risk of one hiding in the noise.
 2. **The split-halves variant lands at 3.13, and Plan 4's broken model measured 3.20.** That is
-   a close reproduction of the historical failure, which is independent evidence that the bug
-   Plan 4 shipped was exactly this pairing and that §3's verdict is the correction for it.
+   a close reproduction of the historical failure — independent evidence that the bug Plan 4
+   shipped was exactly this pairing, and that §3's verdict is the correction for it.
 
-What this does *not* establish: that the NumPy reference matches ttml's device output to within
-1e-3 logits. Loss agreement at ~0.03 nats is a far coarser instrument, and a subtle error (a
-wrong epsilon placement, say) would hide comfortably inside it. That is the whole reason the
-next task exists. See Q1 and Q6 in §9.
+What this does **not** establish: that the NumPy reference matches ttml's device output to
+within 1e-3 logits. A 0.22-nat floor is four orders of magnitude coarser than the tolerance the
+next task wants to assert, and a genuinely subtle error hides inside it without difficulty —
+moving the epsilon outside the sqrt costs 0.0002 nats (0.0 SE), i.e. is completely invisible
+here. That is the whole reason the next task exists. See Q1 and Q6 in §9.
 
 ---
 
 ## 9. Open questions
 
 Recorded rather than guessed, per the plan's rule. None of these blocks writing the reference,
-but each is a real gap.
+but each is a real gap. **Q2 and Q4 have since been closed** and are kept here, marked, rather
+than deleted — a closed question with its evidence is more useful to the next reader than a
+silent absence. Q1 is the one that carries a consequence for the next task.
 
-**Q1 — Device activation precision, and therefore the achievable tolerance.**
-Weights are bfloat16 and matmul accumulation is configured via
-`core::ComputeKernelConfig::precise()` at several call sites (e.g.
-`ttml/ops/rope_op.cpp:162`), but I did not trace what dtype *activations* carry between ops on
-device, nor what `precise()` resolves to per-op. A float64 NumPy reference will therefore not
-agree with the device to anywhere near float precision; the dominant error term is ttml's own
-bf16 rounding, not any disagreement in convention. **To resolve:** read
-`ttml/core/compute_kernel_config.cpp` and the `autograd::Tensor` construction path, or simply
-measure — run the NumPy reference in float32 *and* in a bf16-rounded mode and compare the
-spread. **Consequence for this plan:** the 1e-3 logit tolerance should be validated against a
-NumPy-vs-NumPy control before it is asserted as a NumPy-vs-HF gate, otherwise a failure is
-ambiguous between "conversion is wrong" and "tolerance was never achievable".
+**Q1 — Device numerical precision, and therefore the achievable tolerance. This is the one that
+matters.**
 
-**Q2 — `fmod(theta_mat, 2π)` (`ttml/ops/rope_op.cpp:221`).**
-ttml reduces the angle to the principal range before taking sin/cos; a naive NumPy `rope` does
-not. Mathematically identical; in float32 the two round differently, and the difference grows
-with position. At `S = 256` and `theta = 500000` the largest angle is ~255 rad, so the effect
-should be well under the 1e-3 budget — but I have not measured it. **To resolve:** compute both
-ways in float32 and diff, or just apply the `fmod` in the reference to remove the question.
+There is a concrete, identified instance, not just a general worry: **ttml's RMSNorm computes
+its mean in bfloat16.** `rmsnorm_fw_program_factory.cpp:157-158` packs both the mean divisor and
+epsilon as bf16 constants:
+
+```cpp
+uint32_t packed_scaler = pack_two_bfloat16_to_uint32(1.F / static_cast<float>(num_inner));
+uint32_t packed_eps    = pack_two_bfloat16_to_uint32(args.epsilon);
+```
+
+`1/384 = 0.0026041667` is not representable in bfloat16 (8-bit significand); the nearest bf16
+value is off by roughly 0.1–0.2% relative. That error enters `mean(x²)` systematically, and so
+enters every one of the 13 RMSNorm calls in the forward pass. **No float32 NumPy reference can
+reproduce it**, because it is not a rounding difference the reference could match — it is a
+different divisor. This argues concretely that a **1e-3 NumPy-vs-device logit tolerance is not
+achievable**, independent of anything else.
+
+Still untraced: the accumulation and output dtype of `ttnn_fixed::matmul`
+(`ttml/ttnn_fixed/matmuls.cpp`), which governs every projection and the QK^T/AV products, and
+what `core::ComputeKernelConfig::precise()` resolves to per-op. Those are the remaining terms.
+
+**Consequence for the next task — the important part:** the 1e-3 tolerance is a
+**NumPy-vs-HF-conversion** budget, and both sides of *that* comparison are float32 host
+arithmetic, so it may well be fine. What it must **not** be read as is a NumPy-vs-device budget.
+And a NumPy-vs-NumPy control should be run before the gate is asserted, otherwise a failure is
+ambiguous between "the conversion is wrong" and "the tolerance was never achievable".
+
+**Q2 — `fmod(theta_mat, 2π)` — CLOSED, immaterial.**
+`ttml/ops/rope_op.cpp:221` reduces the angle to the principal range before sin/cos; a naive
+NumPy `rope` does not. Measured: running the §8 reference in float32 with and without
+`np.fmod(ang, 2π)` gives mean CE **1.8470 both ways** — identical to four decimal places
+(Δ = −0.00002, 0.0 SE). At `S = 256` the largest angle is ~255 rad, well inside float32's exact
+range for this reduction. **No action needed**, though applying the `fmod` costs nothing if a
+reader wants to remove the question entirely.
 
 **Q3 — `RotaryEmbeddingParams::theta` is never populated.**
 `build_rope_params` (`ttml/ops/rope_op.cpp:287-298`) sets every field *except* `.theta`, so the
@@ -714,13 +822,13 @@ tt-train tree including tests and the distributed model variants. **Flagged beca
 later reads `params.theta` expecting the configured value will get `10000` and produce a
 plausible-but-wrong model — the same failure shape as the Plan 4 bug.
 
-**Q4 — Exact numeric value of the causal mask constant.**
-The writer names it `BF16_NEG_LARGE_BITS` and the source comment says `−1e9`
-(`ttml/metal/ops/sdpa_fw/device/kernels/dataflow/sdpa_fw_writer_kernel.cpp:55-61`); I did not
-resolve the constant's definition. Any true `−inf` in the reference gives exactly 0 after
-`exp`, whereas `−1e9/8 ≈ −1.25e8` also underflows to 0 in float32, so I believe this cannot
-matter. **To resolve:** find `BF16_NEG_LARGE_BITS`'s definition if a bit-exact comparison is
-ever wanted.
+**Q4 — Value of the causal mask constant — CLOSED.**
+`constexpr uint16_t BF16_NEG_LARGE_BITS = 0xCE6E;  // upper 16 bits of -1e9F (bfloat16)`
+(`ttml/metal/common/dataflow_utils.hpp:46`, used at `:275` by `fill_causal_mask_tile`). So the
+constant is exactly `−1e9` rounded to bf16, matching the `1e9` multiplier the `Arbitrary` path
+uses (§5.2) — the two mask branches agree on the value as well as the form. Both `−1e9` and
+`−1e9/8 ≈ −1.25e8` underflow to exactly 0 after `exp`, identically to a true `−inf`, so a
+reference using `−np.inf` is correct. **No action needed.**
 
 **Q5 — Whether ttml's `softmax` differs from a textbook softmax.**
 The fused kernel uses an online/flash formulation with running max and log-sum-exp
@@ -732,15 +840,31 @@ path. **To resolve:** read `ttml/metal/ops/softmax/`.
 
 **Q6 — No ttml activation was ever captured; §8.1 is an end-to-end proxy, not an op-level check.**
 Every convention above is read off source. §8.1 then runs the derived reference and shows it
-reproduces the checkpoint's training loss (1.847 vs 1.8781) while three deliberately-broken
-variants do not — which is real evidence, and much stronger than the four checks Plan 4 passed,
-but it is still a single scalar at the end of a six-block stack. An error that costs less than
-~0.05 nats would not show up. **To resolve:** capture per-layer activations from an actual ttml
-forward pass and diff them against the reference block by block, which localises a convention
-error to one op instead of leaving a whole-model mismatch to bisect. **Consequence:** if the
-next task's HF-vs-NumPy comparison fails at 1e-3, §8.1 does *not* license concluding "the NumPy
-side is right, so the converter is wrong" — both sides remain suspects until an op-level trace
-says otherwise.
+reproduces the checkpoint's training loss (1.847 vs 1.8781, 0.3 SE) while three
+deliberately-broken variants do not — real evidence, and much stronger than the four checks Plan
+4 passed, but still a single scalar at the end of a six-block stack.
+
+**Its detection floor is ≈0.22 nats (2σ), not the "~0.05" an earlier draft of this section
+claimed** — the per-window sd is 0.315 across eight windows, so SE ≈ 0.112. That is about 4×
+coarser than stated, and the corrected figure is the one to reason with.
+
+Measured examples of what does and does not hide inside it:
+
+| perturbation | mean CE | Δ | visible? |
+|---|---|---|---|
+| eps moved *outside* the sqrt | 1.8467 | −0.0002 (0.0 SE) | **no — invisible** |
+| `1 + gamma` instead of `gamma` | 3.6238 | +1.777 (15.9 SE) | yes, loud |
+| embedding scaled by `sqrt(384)` | 10.7208 | +8.874 (79.6 SE) | yes, very loud |
+
+So the genuinely §8.1-invisible set is essentially **just epsilon placement** — the other
+"quiet-looking" conventions turn out to be loud. Useful to know when deciding where to look
+first if the harness misbehaves.
+
+**To resolve:** capture per-layer activations from an actual ttml forward pass and diff them
+against the reference block by block, which localises a convention error to one op instead of
+leaving a whole-model mismatch to bisect. **Consequence:** if the next task's HF-vs-NumPy
+comparison fails at 1e-3, §8.1 does *not* license concluding "the NumPy side is right, so the
+converter is wrong" — both sides remain suspects until an op-level trace says otherwise.
 
 ---
 
@@ -749,20 +873,25 @@ says otherwise.
 | # | Item | Verdict | Confidence | Basis |
 |---|---|---|---|---|
 | 1 | RMSNorm | `gamma · x / sqrt(mean(x²) + eps)`, eps **inside** the sqrt, added to the mean of squares; plain `gamma`, not `1+gamma`; eps = 1e-5 | High | Fused kernel + composite agree |
-| 2 | **RoPE pairing** | **Interleaved `(x[2i], x[2i+1])`** — *not* split-halves | **Very high** | Three independent derivations (§3.1, §3.2-3.3, §3.4) |
+| 2 | **RoPE pairing** | **Interleaved `(x[2i], x[2i+1])`** — *not* split-halves | **Very high** | Four consistent lines of evidence (§3.1-3.4), incl. the per-tile matmul impossibility proof; ablation costs 1.28 nats (12 SE) |
 | 2b | RoPE freq / caches | `inv_freq[i] = θ^(−2·floor(i/2)/Dh)`, angle = `pos · inv_freq`; `neg_*` caches are backward-only | High | `gen_freqs`, `build_rope_params` comments |
 | 3 | `grouped_heads_creation` | **K first**, then V, each `G·Dh` wide; head-major contiguous `Dh` slices; plain reshape+transpose | High | ttnn reader/writer kernels + backward `concat({k,v})` + HF importer |
 | 4 | SDPA scale | `1/sqrt(head_dim)` = 1/8 | High | Program factory + composite agree |
-| 4b | Causal mask | **Additive**: 0 keep / large-negative mask, added pre-softmax; training supplies no mask tensor so the kernel's own causal mask applies | High | Writer kernel comments + compute kernel + `main.cpp` never assigning `masks_tensor` |
+| 4b | Causal mask | **Additive**: 0 keep / `−1e9` masked, added pre-softmax. This checkpoint used the **`Arbitrary`** path (`trainer.py` passes an explicit `tril` mask), which coincides numerically with the built-in `Causal` path | High | `trainer.py:73-76,102` + `utils.py:160-169` + both kernel branches (§5.2) |
 | 4c | GQA mapping | `kv_group = q_head // (H/G)` — `repeat_interleave`, not `tile` | High | Fused reader + composite reshape agree |
 | 5 | SwiGLU | `(silu(x @ w1ᵀ) * (x @ w3ᵀ)) @ w2ᵀ`; SiLU on the **w1** branch | High | Fused + composite agree; shape asserts; HF importer mapping |
 | 6 | Embedding / output | One tied `[32000, 384]` tensor; gather in, `@ Wᵀ` out; **no scaling at either end**; no `tok_emb/weight` in the checkpoint; vocab unpadded | High | Construction + `parameters()` dedup + checkpoint manifest |
-| — | End-to-end behaviour | Reference reproduces the training loss (1.847 vs 1.8781); each broken variant costs 1.3–5.8 nats | High as a proxy, coarse as a gate | §8.1 |
-| — | Numerical tolerance | **Unresolved** | — | Q1 |
-| — | `fmod` rounding | **Unresolved (believed immaterial)** | — | Q2 |
+| — | End-to-end behaviour | Reference reproduces the training loss (1.847 vs 1.8781, 0.3 SE); ablations cost 12–52 SE | Decisive for layout errors; **floor ≈0.22 nats** | §8.1 |
+| — | Numerical tolerance | **Unresolved, and now known to be a real obstacle** — RMSNorm's mean divisor is bf16 | — | Q1 |
+| — | `fmod` rounding | **Closed** — identical to 4 d.p. | — | Q2 |
+| — | Mask constant | **Closed** — `0xCE6E` = `−1e9` in bf16 | — | Q4 |
 | — | `params.theta` inert | **Believed inert, not proven** | — | Q3 |
 
-Six of six requested items resolved with high or very-high confidence; three genuine
-uncertainties recorded in §9, none of them a convention question — Q1 is about achievable
-precision, Q2 about float rounding, Q3 about a latent trap in ttml rather than about this
-forward pass.
+Six of six requested items resolved with high or very-high confidence. Of the original six open
+questions, **two are now closed** (Q2, Q4). The four that remain are not convention questions:
+Q1 is about achievable numerical precision (and has hardened from a worry into an identified
+obstacle), Q3 is a latent trap in ttml rather than a fact about this forward pass, Q5 is a gap
+only for the non-production composite path, and Q6 is about the coarseness of the end-to-end
+check.
+
+**If you read only one open question, read Q1.**
