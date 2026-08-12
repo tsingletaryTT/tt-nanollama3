@@ -156,7 +156,7 @@ def test_validate_rejects_future_format():
 
 def test_checkpoint_path_is_step_numbered():
     p = checkpoint_path(Path("/ckpt"), 2500)
-    assert p == Path("/ckpt/nanollama3_step2500.pkl")
+    assert p == Path("/ckpt/nanollama3_step00002500.pkl")  # zero-padded; see the sort test
 
 
 def test_checkpoint_paths_sort_lexicographically_by_step():
