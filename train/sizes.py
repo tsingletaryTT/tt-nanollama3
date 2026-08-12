@@ -61,6 +61,27 @@ TILE = 32
 BLACKHOLE_P300C_GRID: Tuple[int, int] = (10, 11)
 
 
+def best_grid_for(
+    tiles: int, grid: Tuple[int, int] = BLACKHOLE_P300C_GRID
+) -> Optional[Tuple[int, int, int]]:
+    """Largest ``(cores, rows, cols)`` within ``grid`` that divides ``tiles`` evenly.
+
+    Utilisation-maximising, deliberately unlike ``ModelArgs.find_grid``, which sorts
+    candidates by closeness to a hardcoded target of 32 cores and so leaves most of a
+    larger grid idle (22 cores of 110 at 3520 tiles, where 110 are available).
+
+    Returns None when no sub-grid divides the tile count.
+    """
+    max_rows, max_cols = grid
+    best: Optional[Tuple[int, int, int]] = None
+    for rows in range(1, max_rows + 1):
+        for cols in range(1, max_cols + 1):
+            cores = rows * cols
+            if tiles % cores == 0 and (best is None or cores > best[0]):
+                best = (cores, rows, cols)
+    return best
+
+
 @dataclass(frozen=True)
 class ModelSize:
     """One architecture: the ttml config fields, plus where its YAML lives.
@@ -84,6 +105,10 @@ class ModelSize:
     dropout_prob: float = 0.0
     model_type: str = "llama"
     runner_type: str = "default"
+
+    #: SwiGLU inner dimension. ``None`` means "let ttml derive it" (the usual case) —
+    #: :meth:`intermediate_dim` then reproduces ttml's own rule. Set it only to override.
+    intermediate_dim_override: Optional[int] = None
 
     #: One-line note on why this size exists. Shown by ``describe()``.
     rationale: str = ""
@@ -129,7 +154,55 @@ class ModelSize:
             )
         return self.embedding_dim // TILE
 
+    @property
+    def intermediate_dim(self) -> int:
+        """SwiGLU inner dimension, reproducing ttml's own derivation.
+
+        From ``tt-train/sources/ttml/modules/llama_block.cpp:15-24``::
+
+            uint32_t multiple_of = 256;
+            unrounded = (uint32_t)((float)(4 * embedding_size) * (2.0f / 3.0f));
+            hidden_size = ((unrounded + multiple_of - 1) / multiple_of) * multiple_of;
+
+        i.e. 8/3 of the embedding dimension, rounded **up** to a multiple of 256. The
+        ``int()`` below is deliberate: it reproduces the C++ float-to-uint32 truncation
+        before rounding, which is not the same as rounding the exact rational.
+
+        The model config YAML normally omits this, so it is derived rather than declared —
+        which makes it exactly the kind of value that can silently disagree between
+        training and conversion. ``tests/test_sizes.py`` pins the 384 case against the
+        real converted model's ``intermediate_size`` (1024).
+        """
+        if self.intermediate_dim_override is not None:
+            return self.intermediate_dim_override
+        multiple_of = 256
+        unrounded = int(float(4 * self.embedding_dim) * (2.0 / 3.0))
+        return ((unrounded + multiple_of - 1) // multiple_of) * multiple_of
+
+    @property
+    def ffn_tiles(self) -> int:
+        """SwiGLU inner dimension in tiles.
+
+        Worth looking at separately from :attr:`tiles`: the MLP holds most of a
+        transformer's parameters and most of its matmul work, and its dimension is
+        derived, not chosen. A size can have mediocre hidden-dimension utilisation and
+        good FFN utilisation, or the reverse — ``dim=1024`` gives 32 cores on the hidden
+        dimension but 88 on the FFN, while ``dim=2560`` gives 80 and 72 respectively.
+        """
+        return self.intermediate_dim // TILE
+
     # -- hardware consequences -----------------------------------------------------
+
+    def best_ffn_core_grid(
+        self, grid: Tuple[int, int] = BLACKHOLE_P300C_GRID
+    ) -> Optional[Tuple[int, int, int]]:
+        """:meth:`best_core_grid`, but for the SwiGLU inner dimension."""
+        return best_grid_for(self.ffn_tiles, grid)
+
+    def ffn_core_utilisation(self, grid: Tuple[int, int] = BLACKHOLE_P300C_GRID) -> float:
+        """Fraction of the grid the MLP's inner dimension can occupy (0.0-1.0)."""
+        best = self.best_ffn_core_grid(grid)
+        return 0.0 if best is None else best[0] / (grid[0] * grid[1])
 
     def best_core_grid(
         self, grid: Tuple[int, int] = BLACKHOLE_P300C_GRID
@@ -143,14 +216,7 @@ class ModelSize:
 
         Returns None when no sub-grid divides the tile count.
         """
-        max_rows, max_cols = grid
-        best: Optional[Tuple[int, int, int]] = None
-        for rows in range(1, max_rows + 1):
-            for cols in range(1, max_cols + 1):
-                cores = rows * cols
-                if self.tiles % cores == 0 and (best is None or cores > best[0]):
-                    best = (cores, rows, cols)
-        return best
+        return best_grid_for(self.tiles, grid)
 
     def core_utilisation(self, grid: Tuple[int, int] = BLACKHOLE_P300C_GRID) -> float:
         """Fraction of the compute grid a hidden-dimension shard can occupy (0.0-1.0)."""
@@ -183,7 +249,7 @@ class ModelSize:
 
     def to_transformer_config(self) -> dict:
         """The ``transformer_config`` block as ttml expects to read it from YAML."""
-        return {
+        cfg = {
             "model_type": self.model_type,
             "num_heads": self.num_heads,
             "num_groups": self.num_groups,
@@ -195,6 +261,11 @@ class ModelSize:
             "runner_type": self.runner_type,
             "theta": self.theta,
         }
+        # ttml derives the SwiGLU inner dimension when the key is absent, so emit it only
+        # when this size deliberately overrides that derivation.
+        if self.intermediate_dim_override is not None:
+            cfg["intermediate_dim"] = self.intermediate_dim_override
+        return cfg
 
     def load_yaml_transformer_config(self) -> dict:
         """Read this size's YAML and return its ``transformer_config`` block."""
@@ -205,12 +276,16 @@ class ModelSize:
         """Human-readable summary, including the hardware consequences."""
         best = self.best_core_grid(grid)
         grid_s = f"{best[1]}x{best[2]} = {best[0]} cores" if best else "no fitting grid"
+        fbest = self.best_ffn_core_grid(grid)
+        ffn_s = f"{fbest[1]}x{fbest[2]} = {fbest[0]} cores" if fbest else "no fitting grid"
         return (
             f"{self.name}: dim={self.embedding_dim} ({self.tiles} tiles), "
             f"blocks={self.num_blocks}, heads={self.num_heads}/{self.num_groups} groups, "
             f"head_dim={self.head_dim}, seq={self.max_sequence_length}\n"
             f"  best core grid : {grid_s} "
             f"({100 * self.core_utilisation(grid):.0f}% of {grid[0]}x{grid[1]})\n"
+            f"  ffn ({self.intermediate_dim}) : {ffn_s} "
+            f"({100 * self.ffn_core_utilisation(grid):.0f}%)\n"
             f"  servable meshes: widths {self.servable_mesh_widths()}\n"
             f"  {self.rationale}"
         )
@@ -237,6 +312,27 @@ SIZES: Dict[str, ModelSize] = {
             "either was measured. Kept as the baseline, not as a template."
         ),
     ),
+    "1024": ModelSize(
+        name="1024",
+        embedding_dim=1024,
+        num_blocks=8,
+        num_heads=16,
+        num_groups=4,
+        vocab_size=32000,
+        max_sequence_length=256,
+        theta=500000.0,
+        rationale=(
+            "The multi-chip-capable size. num_groups=4 admits mesh widths {1,2,4}, so "
+            "single-chip, N300/P300 and a 4-chip QuietBox 2 all satisfy "
+            "tt_transformers' head-divisibility assertions — which 384 cannot. "
+            "1024 % 128 == 0, so the hidden dimension also splits into whole tiles "
+            "under 4-way tensor parallelism. Chosen over larger candidates because its "
+            "DERIVED FFN (2816 = 88 tiles = 8x11) fits this harvested grid exactly at "
+            "80%, where dim=2560 reaches only 65% on the FFN despite better hidden-dim "
+            "utilisation. NOT YET TRAINED — registered so the multi-chip and packaging "
+            "paths can be exercised."
+        ),
+    ),
 }
 
 #: The size used when nothing is specified. Deliberately the original model, so every
@@ -261,6 +357,7 @@ def get_size(name: Optional[str] = None) -> ModelSize:
 
 __all__ = [
     "BLACKHOLE_P300C_GRID",
+    "best_grid_for",
     "DEFAULT_SIZE",
     "MODEL_CONFIG_DIR",
     "ModelSize",

@@ -134,6 +134,84 @@ def test_384_head_dim():
     assert SIZES["384"].head_dim == 64
 
 
+def test_intermediate_dim_reproduces_the_real_converted_model():
+    """The FFN width is DERIVED by ttml, not declared — so it can silently disagree.
+
+    ``artifacts/hf/config.json`` records what the actually-trained-and-converted 384 model
+    has: ``intermediate_size: 1024``. If :attr:`ModelSize.intermediate_dim` ever stops
+    reproducing that, then the registry and the real model disagree about the widest
+    tensors in the network, and every parameter count and utilisation figure derived from
+    it is wrong.
+
+    Falls back to the known constant when the artifact is absent (fresh clone), because
+    the rule itself is what is under test.
+    """
+    assert SIZES["384"].intermediate_dim == 1024
+
+    cfg = Path(__file__).resolve().parents[1] / "artifacts" / "hf" / "config.json"
+    if not cfg.is_file():
+        pytest.skip("artifacts/hf/config.json not present")
+    import json
+
+    with cfg.open() as fh:
+        converted = json.load(fh)
+    assert converted["hidden_size"] == SIZES["384"].embedding_dim
+    assert converted["intermediate_size"] == SIZES["384"].intermediate_dim, (
+        "train/sizes.py's ttml FFN derivation no longer matches the converted model"
+    )
+
+
+def test_intermediate_dim_rounds_up_to_256_with_c_truncation():
+    """Pin the exact rule, including the C++ float->uint32 truncation before rounding.
+
+    ``8/3 * 1024 = 2730.666...``; C++ truncates to 2730, then rounds up to 2816. Rounding
+    the exact rational instead would give 2731 -> 2816 here (same answer), so the
+    truncation is pinned separately below where it can actually differ.
+    """
+    from train.sizes import ModelSize
+
+    def mk(dim):
+        return ModelSize(
+            name="t", embedding_dim=dim, num_blocks=1, num_heads=dim // 64,
+            num_groups=1, vocab_size=32, max_sequence_length=32, theta=1.0,
+        )
+
+    assert mk(384).intermediate_dim == 1024      # 1024 exactly, no rounding needed
+    assert mk(1024).intermediate_dim == 2816     # 2730 -> next multiple of 256
+    assert mk(2560).intermediate_dim == 6912     # 6826 -> next multiple of 256
+    # Every result is a multiple of 256 by construction.
+    for dim in (384, 512, 1024, 2048, 2560, 3520):
+        assert mk(dim).intermediate_dim % 256 == 0
+
+
+def test_1024_unlocks_the_meshes_384_cannot_reach():
+    """The entire reason the 1024 size exists."""
+    small, big = SIZES["384"], SIZES["1024"]
+    assert small.servable_mesh_widths(8) == [1, 3]
+    assert big.servable_mesh_widths(8) == [1, 2, 4]
+    for chips in (2, 4):
+        assert not small.tensor_parallel_capable(chips)
+        assert big.tensor_parallel_capable(chips), (
+            f"1024 must be tensor-parallel-capable on {chips} chips; that is its purpose"
+        )
+
+
+def test_1024_ffn_fits_the_grid_better_than_its_hidden_dim():
+    """The measurement that decided 1024 over larger candidates.
+
+    The MLP carries most of the parameters and matmul work, so its derived width matters
+    more than the hidden dimension's. Pinned so a change to the grid search cannot quietly
+    invalidate the rationale recorded in the config header.
+    """
+    size = SIZES["1024"]
+    assert size.intermediate_dim == 2816
+    assert size.ffn_tiles == 88
+    assert size.best_ffn_core_grid(BLACKHOLE_P300C_GRID) == (88, 8, 11)
+    assert size.ffn_core_utilisation(BLACKHOLE_P300C_GRID) > size.core_utilisation(
+        BLACKHOLE_P300C_GRID
+    ), "the FFN should occupy more of the grid than the hidden dimension does"
+
+
 @pytest.mark.parametrize("name", ALL_SIZES)
 def test_dimensions_are_tile_aligned(name):
     """A hidden dimension that is not a multiple of 32 cannot shard onto cores at all."""

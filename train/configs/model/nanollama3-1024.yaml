@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
+#
+# NanoLlama3-1024 — the multi-chip-capable size.
+#
+# WHY THIS EXISTS. The 384 model cannot be served on more than one chip:
+# `tt_transformers` asserts `n_heads % cluster_shape[1] == 0` AND
+# `n_kv_heads % cluster_shape[1] == 0` (models/tt_transformers/tt/model_config.py:687-691),
+# and `num_groups: 3` admits only mesh widths {1, 3}. That single choice — made to match
+# tt-train's shipped example, before anyone measured its consequence — put every multi-chip
+# code path in tt-kernel and the vLLM plugin permanently out of reach for this project.
+#
+# This size is chosen so those paths become reachable:
+#
+#   num_groups: 4   -> servable mesh widths {1, 2, 4}: single chip, N300/P300, and a
+#                      4-chip QuietBox 2 all satisfy the assertion pair.
+#   embedding_dim   -> 1024 % (32 * 4) == 0, so the hidden dimension splits into whole
+#                      tiles per chip under 4-way tensor parallelism.
+#   num_heads: 16   -> head_dim 64, matching the 384 model, so the RoPE/GQA conversion
+#                      logic in convert/ is exercised unchanged rather than specially.
+#
+# GRID ARITHMETIC on Blackhole p300c (11x10 = 110 cores):
+#
+#   embedding_dim 1024 ->  32 tiles -> 4x8  =  32 cores (29% of the grid)
+#   intermediate  2816 ->  88 tiles -> 8x11 =  88 cores (80% of the grid)
+#
+# The FFN number is the interesting one and the reason 1024 was preferred over larger
+# candidates. The MLP holds most of the parameters and most of the matmul work, and its
+# dimension is *derived* from embedding_dim by ttml
+# (`modules/llama_block.cpp:15-24`: 8/3 of the embedding dim, rounded up to a multiple of
+# 256) rather than chosen. At 1024 that derivation lands on 2816 = 88 tiles = 8x11, which
+# fits this harvested grid exactly. dim=2560, despite better hidden-dimension utilisation
+# (73%), derives an FFN of 6912 = 216 tiles whose best fit is only 72 cores (65%).
+#
+# NOT YET TRAINED. This architecture is registered, validated, and packaged-for, but no
+# weights exist. It is here so the multi-chip and packaging paths can be exercised;
+# training it is a separate, much larger job than the 384 model was (roughly an order of
+# magnitude more parameters, on a corpus that ct8 already showed to be the binding
+# constraint at ~80M).
+transformer_config:
+  model_type: "llama"
+  num_heads: 16
+  num_groups: 4
+  embedding_dim: 1024
+  dropout_prob: 0.0
+  num_blocks: 8
+  vocab_size: 32000
+  max_sequence_length: 256
+  runner_type: default
+  theta: 500000.0
