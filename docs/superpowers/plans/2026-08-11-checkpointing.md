@@ -515,3 +515,20 @@ Nothing in the tables above claims coverage that no task delivers.
 - **Conversion needs a device, and that shapes the next plan.** `load_checkpoint` restores *in place* into live `NamedParameters`, so reading weights requires constructing the model first — which requires hardware. The canonical `load_for_inference` does exactly this. The next plan should therefore split conversion in two: an on-device export dumping plain tensors, then a pure-CPU step assembling HF `config.json` + safetensors. Do not assume conversion can run anywhere.
 - **Resume restores weights and optimizer, not the data cursor.** ttml's `get_batch` samples random windows via `np.random.randint` each call, so there is no cursor to restore — but it also means a resumed run does not continue the same data order. The canonical example captures RNG state in its header for this reason; we do not, because random-window sampling makes it cosmetic here. If sequential batching is ever adopted, this becomes real and the header must grow an RNG field.
 - **`cfg.steps` is mutated in the chunk loop.** `RunConfig` is ours and nothing else reads it mid-run, so this is safe today, but it means `cfg.steps` no longer reflects the user's requested total after the first chunk. Read `args.steps` for that.
+
+## Carried forward (accepted, not fixed)
+
+- **`scripts/backfill_checkpoint_headers.py` hardcodes run facts, and the guard is documentation
+  rather than code.** `KNOWN_BATCH_SIZE = 64` and `BACKFILL_TRANSFORMER_CONFIG` are applied with
+  unconditional `setdefault`, with no runtime check that a given checkpoint actually came from a
+  batch-size-64 run. The only runtime guard verifies tensor dtype, not architecture or batch
+  size. Pointed at a checkpoint from a differently-configured run it would silently stamp wrong
+  `batch_size`/`tokens_seen`/`intermediate_dim` — worse than missing metadata, because it looks
+  authoritative. Contained today: it is a one-time migration tool, invoked from nothing but its
+  own tests, and the six checkpoints it processed are known to match. **Anyone re-using it must
+  update the constants by hand, and nothing will catch a mistake.**
+- **`model_config_path` points outside the repo** (`/home/ttuser/tt-metal/...`), unversioned and
+  mutable by any tt-metal update, so the architecture record it references can change without the
+  checkpoint changing. Mitigated in practice because the enriched header now captures the derived
+  architecture directly, but making provenance immune to that drift (hashing or copying the yaml
+  into the checkpoint) is a separate, larger scope worth its own plan.
