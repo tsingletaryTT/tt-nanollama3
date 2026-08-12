@@ -1,6 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 <!-- SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC -->
 
+
+> **Conceptual companion:** [Why the numerics are hard, even building Tenstorrent-first](why-the-numerics-are-hard.md) — the retrospective on *why* these defects cluster where they do: continuous gates certifying discrete outputs, block float's correlated error, decode as a feedback loop, and why a small undertrained model is the worst case for all three.
+
 # Model development troubleshooting
 
 Field notes from building, training, and converting NanoLlama3 on Tenstorrent hardware. Every
