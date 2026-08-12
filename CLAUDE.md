@@ -623,3 +623,70 @@ none changing a measured number, several requiring one. No training re-run;
 
 Test suite: **154 passed** (151 pre-existing + 3 new: the epsilon-probe test and the two
 import-purity tests), 0 skipped, 0 failed.
+
+## `feat/real-training` — the multi-epoch run: gammas fixed, model measurably better (2026-08-12)
+
+Three tasks. Task 1 fixed the frozen-gamma bug found in `feat/numpy-parity`'s postmortem
+(`stochastic_rounding: true`, `train/configs/nanollama3_bpe_v2.yaml`). Task 2 added periodic
+real validation (`--val-every`) and an unconditional startup warning when
+`stochastic_rounding` is disabled. Task 3 ran the real thing.
+
+**The run:** `python train/run.py --config train/configs/nanollama3_bpe_v2.yaml --steps
+21034 --save-every 2000 --val-every 1000 --batch-size 64 --checkpoint-dir
+artifacts/checkpoints-v2` — 21,034 steps (3.000036 epochs over the 114.9M-token training
+split), one p300c, 47m13s wall clock, ~7.42 steps/s. `stochastic_rounding: True` confirmed
+at startup before trusting the run; the step-2000 checkpoint's gammas were checked for
+degeneracy (sd range 2.02e-2..8.21e-2, all nonzero) before letting the remaining ~43 minutes
+proceed. **`artifacts/checkpoints/` and `artifacts/hf/` were never touched** — both baseline
+directories' mtimes predate this session.
+
+**The curve:** train loss 10.6875 → 1.375. Validation fell steeply for ~8000 steps
+(2.1969 → 1.5695) then flattened into a noisy 1.45–1.53-nat band for the remaining 13,000
+steps (62% of the run) while train loss kept falling — a mild overfitting signature, but not
+a clean "turn": the best val value (1.4563 @ step 17,000) and the final one (1.4602 @ step
+21,034) differ by only 0.004 nats, well inside noise. Full curve (22 points) in
+`artifacts/checkpoints-v2/val_losses.jsonl` and `.superpowers/sdd/2026-08-12-real-training-run/task-3-report.md`.
+Read plainly: this corpus/architecture pair has largely exhausted what steps 8000–21,034 had
+left to teach it about held-out loss — evidence for Plan 8's dataset-blend rationale, not for
+training longer on the same mix.
+
+**Paired comparison (the number that matters):** `convert/ttml_forward.py`'s pure-NumPy
+forward pass, 32 seed-0 256-token windows, baseline (`nanollama3_step00003000.pkl`) vs. new
+final checkpoint. Baseline mean CE 1.8733 (sd 0.3242, reproducing the brief's cited
+1.8781/0.315); new mean CE 1.4228 (sd 0.2908). **Paired diff (baseline − new): +0.4505 nats,
+sd 0.0878, SE 0.0155 — every one of 32 windows favors the new checkpoint**, and the smallest
+per-window improvement (0.27 nats) alone exceeds the baseline's single-model noise floor
+(0.315). Not noise, by a wide margin.
+
+**Norm-swap ablation, re-measured.** With real gammas (block 3: `attention_norm` mean
+0.9658 vs `mlp_norm` mean 0.9577, genuinely distinct), swapping the two is no longer
+literally invisible: **delta +0.0018 nats** (was exactly 0.0000 on the baseline, 5.86e-6
+through the HF parity gate). Still an order of magnitude under the per-window noise floor
+and far smaller than the other documented ablations (attention-block swap +4.70, gate/up
++0.43, K/V +5.75) — the Plan-4 blind spot is closed in principle, but this ablation alone
+remains a weak instrument for this error class; the structural/permutation tests
+(`test_hf_mapping.py`, `test_numpy_parity.py`) stay the more reliable defense.
+
+**Generated samples, same prompt (`"Once upon a time, there was a little"`), verbatim, not
+cherry-picked:**
+
+> Baseline (step 3000): Once upon a time, there was a little girl named Lucy. Lucy loved to
+> play with her toys. One day, Lucy saw a big, thick, pretty toy in the box. Lucy wanted to
+> play with the toy, so she went to the box and pushed it with her hands. The toy made a
+> loud noise and stopped working. Lucy
+
+> New (step 21034): Once upon a time, there was a little boy named Tim. Tim loved to play
+> with his toys. One day, Tim saw a big, high chair in the store. He wanted to ride the
+> chair, but it was too high for him. Tim saw a tall man named Bob. He asked, "Bob, can you
+> help me get
+
+**Visibly better, or only numerically better?** Mostly the latter. Both samples are fluent,
+loop-free, single-character TinyStories prose — the new one has a slightly clearer causal
+chain on this one draw, but it is a difference of degree, not a qualitative leap. The ~24%
+relative reduction in held-out cross-entropy (every window improved) is real and repeatable;
+the prose improvement is real but easy to miss without the paired numbers. Both are honest
+findings, not a contradiction.
+
+Test suite: **176 passed, 0 skipped** (up from 175 passed/1 skipped —
+`test_checkpoint_gammas_are_not_degenerate[checkpoints-v2]` now runs against a real
+checkpoint and passes). Full detail: `.superpowers/sdd/2026-08-12-real-training-run/task-3-report.md`.
