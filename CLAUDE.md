@@ -688,3 +688,105 @@ regeneration. Regenerated `artifacts/hf/` via `scripts/convert_checkpoint.py`:
 `tokenizer_class` now `PreTrainedTokenizerFast`, `config.json`'s `max_position_embeddings`
 still 256. `scripts/chat.py` smoke-tested against the regenerated artifact: loads with no
 warnings, reports `context 256`, generates coherent completions.
+
+## `feat/real-training` — the multi-epoch run: gammas fixed, model measurably better (2026-08-12)
+
+Three tasks. Task 1 fixed the frozen-gamma bug found in `feat/numpy-parity`'s postmortem
+(`stochastic_rounding: true`, `train/configs/nanollama3_bpe_v2.yaml`). Task 2 added periodic
+real validation (`--val-every`) and an unconditional startup warning when
+`stochastic_rounding` is disabled. Task 3 ran the real thing. **Fix round 1 (below) corrects
+two overstated interpretations an independent review caught — see
+`task-3-review.md` for the full evidence; every underlying measured number was reproduced
+exactly and none of them changed.**
+
+**Before the run:** disk was at 98% / 93 GB free (down from the ~140 GB the brief cited at
+dispatch). First checkpoint measured (not assumed) at 132,186,302 bytes; `AdamWFullPrecision`
+was never needed (Task 1's fix keeps the format unchanged), so all 11 checkpoints from this
+run are that same size — 1.454 GB total, in line with the brief's ~1.3 GB estimate.
+
+**The run:** `python train/run.py --config train/configs/nanollama3_bpe_v2.yaml --steps
+21034 --save-every 2000 --val-every 1000 --batch-size 64 --checkpoint-dir
+artifacts/checkpoints-v2` — 21,034 steps (3.000036 epochs over the 114.9M-token training
+split), one p300c, 47m13s wall clock, ~7.42 steps/s. `stochastic_rounding: True` confirmed
+at startup before trusting the run; the step-2000 checkpoint's gammas were checked for
+degeneracy (sd range 2.02e-2..8.21e-2, all nonzero) before letting the remaining ~43 minutes
+proceed. **`artifacts/checkpoints/` was never touched by this task** (still `2026-08-11
+17:57`, unchanged). **`artifacts/hf/` was also not written by this task**, but its files do
+carry today's date (08:21) — that's Plan 6 Task 1's own deliberate regeneration, an hour
+before this run started, not something Task 3 did.
+
+**The curve:** train loss 10.6875 → 1.375. Validation fell steeply for ~8000 steps
+(2.1969 → 1.5695) then flattened for the remaining 13,000 steps (62% of the run) into a
+1.46–1.59-nat band (one outlier at step 9000, 1.59375; excluding it, the rest sit in
+1.45–1.53) while train loss kept falling — a mild overfitting signature, but not a clean
+"turn": the best val value (1.4563 @ step 17,000) and the final one (1.4602 @ step 21,034)
+differ by only 0.004 nats, well inside noise. Full curve (22 points) in
+`artifacts/checkpoints-v2/val_losses.jsonl` and `.superpowers/sdd/2026-08-12-real-training-run/task-3-report.md`.
+Read plainly: this corpus/architecture pair has largely exhausted what steps 8000–21,034 had
+left to teach it about held-out loss — evidence for Plan 8's dataset-blend rationale, not for
+training longer on the same mix.
+
+**Paired comparison (the number that matters):** `convert/ttml_forward.py`'s pure-NumPy
+forward pass, 32 seed-0 256-token windows, baseline (`nanollama3_step00003000.pkl`) vs. new
+final checkpoint. Baseline mean CE 1.8733 (sd 0.3242, reproducing the brief's cited
+1.8781/0.315); new mean CE 1.4228 (sd 0.2908). **Paired diff (baseline − new): +0.4505 nats,
+sd of the paired differences 0.0878, SE 0.0155 — every one of 32 windows favors the new
+checkpoint.** The two models' per-window losses correlate at r = 0.9651 (hard windows are
+hard for both), which is *why* the paired sd (0.0878) is the right yardstick here and not
+either model's own unpaired sd (~0.30–0.32) — comparing the paired difference against an
+unpaired sd is exactly the mistake this brief warned about, and an earlier draft of this
+entry made it (0.27 does not exceed 0.315). Measured correctly: even the **smallest**
+per-window improvement (0.2709 nats) is **3.1 paired sds** above zero, and the mean is
+**29 SE** from zero (0.4505 / 0.0155). Not noise, by a wide margin.
+
+**Norm-swap ablation, re-measured — two swaps, and the result is real but far below what
+this project's tests can detect.** `docs/model-development-troubleshooting.md`'s "+0.0000 ←
+blind spot" row and the pinned `test_parity_gate_is_blind_to_a_norm_swap_on_the_real_checkpoint`
+both refer to the **canonical** swap — block 0 ↔ block 1 `attention_norm`/`input_layernorm`
+gammas, confirmed here still exactly 0.000000 on the baseline. On the new checkpoint that
+canonical swap now costs **+0.00652 nats** (sd 0.0066, t = 5.6, 25/32 windows worse). A
+second, gentler within-layer swap (block 3's `attention_norm` ↔ `mlp_norm`, the one this
+task originally measured) costs **+0.0018 nats** (sd 0.0040, t = 2.5, only 22/32 windows
+worse — 10 of 32 actually get *better*, an inconsistent sign that a small sample has a real
+chance of reading backwards). **Neither swap is anywhere close to something this project's
+loss-based checks would actually catch**: even the larger, canonical effect (0.0065) is ~45×
+below either model's per-window sd (~0.29–0.32) and ~31× below the project's own 0.2-nat
+detection floor; the smaller swap is ~163× and ~113× below those same floors respectively.
+Correctly stated, the Plan-4 blind spot is closed only in the narrow sense that the number is
+no longer *identically* zero — **a norm mis-mapping of this kind still slips past every
+loss-based gate this project ships**, at the sample sizes those gates actually use (8–32
+windows). This ablation alone remains a weak-to-useless instrument for this error class; the
+structural/permutation tests (`test_hf_mapping.py`, `test_numpy_parity.py`'s per-destination
+gamma checks) stay the actually-reliable defense. (The companion HF-parity-gate figure for
+the canonical swap was not re-measured on this checkpoint; the previously-cited `5.86e-6` is
+inherited from the plan and does not match the parity test's own docstring number for the
+same swap, so it is dropped here rather than repeated unverified.)
+
+**Generated samples, same prompt (`"Once upon a time, there was a little"`), verbatim, not
+cherry-picked, unseeded (`do_sample=True, temperature=0.8, top_p=0.95`, no seed — not
+reproducible by construction):**
+
+> Baseline (`artifacts/hf`, step 3000): Once upon a time, there was a little girl named Lucy.
+> Lucy loved to play with her toys. One day, Lucy saw a big, thick, pretty toy in the box.
+> Lucy wanted to play with the toy, so she went to the box and pushed it with her hands. The
+> toy made a loud noise and stopped working. Lucy
+
+> New (step 21034), sampled from `artifacts/hf-v2-scratch/` — a scratch conversion made only
+> for this comparison, which has **not** been through the parity gate (that gate is pinned to
+> the baseline checkpoint): Once upon a time, there was a little boy named Tim. Tim loved to
+> play with his toys. One day, Tim saw a big, high chair in the store. He wanted to ride the
+> chair, but it was too high for him. Tim saw a tall man named Bob. He asked, "Bob, can you
+> help me get
+
+**Visibly better, or only numerically better?** Mostly the latter. Both samples are fluent,
+loop-free, single-character TinyStories prose — the new one has a slightly clearer causal
+chain on this one draw, but it is a difference of degree, not a qualitative leap. The ~24%
+relative reduction in held-out cross-entropy (every window improved) is real, repeatable, and
+verified straight from the `.pkl` checkpoints (unaffected by the sample's own unverified
+conversion); the prose improvement is real but easy to miss without the paired numbers. Both
+are honest findings, not a contradiction.
+
+Test suite: **176 passed, 0 skipped** on this machine (`test_checkpoint_gammas_are_not_degenerate[checkpoints-v2]`
+stops skipping once `artifacts/checkpoints-v2/` exists locally — no test was added by this
+task, so a fresh clone without `artifacts/` will still show skips). Full detail:
+`.superpowers/sdd/2026-08-12-real-training-run/task-3-report.md`.

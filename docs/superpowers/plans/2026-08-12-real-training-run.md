@@ -28,7 +28,7 @@ At `batch_size=64`, `seq_len=256`, one step consumes **16,384 tokens**. Confirme
 | Target | Steps | Est. wall clock at 0.134 s/step |
 |---|---|---|
 | 1 epoch | 7,011 | ~16 min |
-| **3 epochs** | **21,033** | **~47 min** |
+| **3 epochs** | **21,034** | **~47 min** |
 | 4 epochs | 28,044 | ~63 min |
 
 Under an hour of compute for the whole thing.
@@ -129,16 +129,27 @@ ttml's own `val_losses` is a documented placeholder that copies the training los
 
 - [ ] **Step 1: Check the hardware is free and estimate storage**
 
-Checkpoints are ~132 MB each at the current format. At `--save-every 2000` over 21,033 steps that is 10 checkpoints ≈ 1.3 GB. Confirm free disk before starting (the volume was at 96% with ~140 GB free).
+Checkpoints are ~132 MB each at the current format. At `--save-every 2000` over 21,034 steps that is 10 checkpoints ≈ 1.3 GB. Confirm free disk before starting (the volume was at 96% with ~140 GB free).
 
 If `AdamWFullPrecision` was used, checkpoints may be larger — measure the first one rather than assuming.
 
 - [ ] **Step 2: Run**
 
 ```bash
-python train/run.py --steps 21033 --save-every 2000 --val-every 1000 \
+python train/run.py --config train/configs/nanollama3_bpe_v2.yaml \
+  --steps 21034 --save-every 2000 --val-every 1000 \
   --batch-size 64 --checkpoint-dir artifacts/checkpoints-v2
 ```
+
+**`--config` is not optional.** Task 1 deliberately left `build_yaml_config`'s
+`stochastic_rounding` default at `False` so existing callers were not silently changed —
+which means omitting this flag runs the *old* configuration and reproduces the frozen-gamma
+bug for 47 minutes, producing another model whose norm layers never learned. The loss curve
+would look perfectly healthy the entire time.
+
+**Before trusting the run, verify the config took effect:** after the first checkpoint lands
+(step 2000), run the gamma-degeneracy test against it. If the gammas are degenerate, kill the
+run — 4 minutes wasted instead of 47.
 
 Expect ~47 minutes. Use a long timeout; background and poll rather than assuming failure. **Do not start a second run concurrently.**
 

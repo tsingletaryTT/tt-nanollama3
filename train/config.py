@@ -19,7 +19,10 @@ No ttnn/ttml imports here — this is dict and attribute work.
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from pathlib import Path
+from typing import Any, Dict, Union
+
+import yaml
 
 #: tt-train's ``nanollama3.yaml`` declares ``max_sequence_length: 256``.
 SEQ_LEN = 256
@@ -63,8 +66,24 @@ def build_yaml_config(
     eval_every: int = 200,
     gradient_accumulation_steps: int = 1,
     checkpoint_dir: str = "artifacts/checkpoints",
+    stochastic_rounding: bool = False,
 ) -> Dict[str, Any]:
-    """Build the config dict ``TransformerModelFactory`` and ``RunConfig`` consume."""
+    """Build the config dict ``TransformerModelFactory`` and ``RunConfig`` consume.
+
+    ``stochastic_rounding`` defaults to ``False`` (ttml's own default,
+    ``optimizers/optimizer_registry.cpp:37``) to keep every existing call site's behaviour
+    unchanged. **This is the flag whose absence produced 13 permanently-frozen RMSNorm
+    gammas** in the original 3000-step run: bfloat16 parameters at 1.0 have a step size (ulp)
+    of 0.0039, an order of magnitude larger than the ~3e-4 Adam updates those gammas
+    received, so every update rounded deterministically back to 1.0 and was discarded. With
+    stochastic rounding on, a rounding direction is chosen probabilistically weighted by how
+    close the true update lands to each representable bfloat16 value, so a stream of
+    sub-ulp updates accumulates real drift instead of vanishing every single time. See
+    ``tests/test_training_config.py`` and
+    ``docs/superpowers/specs/2026-08-11-followups.md`` item 1. Callers that want the fix
+    pass ``stochastic_rounding=True`` directly, or point ``train/run.py --config`` at
+    ``train/configs/nanollama3_bpe_v2.yaml`` (see ``apply_optimizer_override`` below).
+    """
     if seq_len > SEQ_LEN:
         raise ValueError(
             f"seq_len {seq_len} exceeds the model's max_sequence_length ({SEQ_LEN}); "
@@ -98,7 +117,7 @@ def build_yaml_config(
                 "epsilon": 1.0e-8,
                 "weight_decay": 0.01,
                 "amsgrad": False,
-                "stochastic_rounding": False,
+                "stochastic_rounding": stochastic_rounding,
             },
         },
         "device_config": {"mesh_shape": [1, 1], "enable_ddp": False, "enable_tp": False},
@@ -108,3 +127,37 @@ def build_yaml_config(
 def run_config_from_yaml(yaml_config: Dict[str, Any]) -> RunConfig:
     """Extract the run config from an assembled YAML dict."""
     return RunConfig(yaml_config.get("training_config", {}))
+
+
+def apply_optimizer_override(
+    yaml_config: Dict[str, Any], override_path: Union[str, "Path"]
+) -> Dict[str, Any]:
+    """Replace ``yaml_config["training_config"]["optimizer"]`` with the block from a file.
+
+    ``train/run.py`` assembles its config entirely from CLI flags via ``build_yaml_config``
+    — there is no on-disk "the" training config to load. This function is the bridge to a
+    real, on-disk *recipe* file such as ``train/configs/nanollama3_bpe_v2.yaml`` (a copy of
+    the nanollama3 BPE recipe with ``stochastic_rounding: true`` added), for a caller that
+    wants to opt into a config-file-defined optimizer without a dedicated CLI flag for every
+    future tweak.
+
+    Deliberately narrow: only the ``optimizer`` sub-block is taken from ``override_path``.
+    Per-invocation operational knobs (``--steps``, ``--batch-size``, ``--checkpoint-dir``,
+    ...) keep coming from the CLI, exactly as before — this does not turn ``train/run.py``
+    into a general YAML-config loader, it only answers "which optimizer recipe" question.
+
+    Mutates and returns ``yaml_config`` for convenient chaining; raises ``ValueError`` if
+    the override file doesn't have the expected ``training_config.optimizer`` shape, so a
+    typo'd path produces a clear failure instead of a silent no-op.
+    """
+    override_path = Path(override_path)
+    with override_path.open("r", encoding="utf-8") as f:
+        override = yaml.safe_load(f)
+    try:
+        optimizer = override["training_config"]["optimizer"]
+    except (KeyError, TypeError) as e:
+        raise ValueError(
+            f"{override_path} does not have a training_config.optimizer block to apply"
+        ) from e
+    yaml_config.setdefault("training_config", {})["optimizer"] = optimizer
+    return yaml_config
