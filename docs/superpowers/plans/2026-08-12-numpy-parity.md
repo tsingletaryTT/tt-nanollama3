@@ -5,7 +5,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Validate the Hugging Face conversion against an independently-derived NumPy reimplementation of ttml's forward pass, at ~1e-3 logit tolerance instead of ~0.2 nats.
+**Goal:** Validate the Hugging Face conversion against an independently-derived NumPy reimplementation of ttml's forward pass, at a logit tolerance materially tighter than the loss gate's ~0.2 nats. The exact tolerance is **measured, not assumed** — see "On the achievable tolerance" below.
 
 **Architecture:** `convert/ttml_forward.py` implements ttml's Llama forward in pure NumPy, reading raw checkpoint tensors and using **ttml's own conventions** — interleaved RoPE, ttml's tensor layouts, no HF permutation. `tests/test_numpy_parity.py` compares its logits against the converted HF model's on a fixed token window.
 
@@ -61,6 +61,26 @@ out  = out_linear(heads_fusion(attn))
 - `ops::grouped_heads_creation` — exactly how the fused `kv` splits into K and V, and how heads are laid out.
 - `ops::scaled_dot_product_attention` — the scaling factor and mask convention.
 - `ops::swiglu` — which of `w1`/`w3` is gated and which is lifted.
+
+## On the achievable tolerance — corrected after Task 1
+
+This plan originally promised ~1e-3. Task 1's review found concrete evidence that is not
+reachable against the device, and the reason is worth stating so nobody re-asserts it:
+
+ttml packs the RMSNorm mean divisor as **bfloat16** — `pack_two_bfloat16_to_uint32(1.F / num_inner)`
+(`rmsnorm_fw_program_factory.cpp:157`), and `packed_eps` likewise. bf16's 8-bit significand gives
+ttml's `mean(x²)` a systematic ~0.1–0.2% relative error that **no float32 NumPy reference can
+reproduce**. `ttnn_fixed::matmul`'s accumulation and output dtype remain untraced and may add more.
+
+Two consequences bind Task 3:
+
+- **Measure before asserting.** Run a NumPy-vs-NumPy control (fp32 vs bf16-rounded activations)
+  to establish what agreement is *possible*, then set the gate from that. Asserting an
+  unreachable tolerance makes every failure ambiguous between "the converter is wrong" and
+  "the tolerance was never achievable" — the worst possible property for a diagnostic.
+- **Disagreement does not automatically indict the converter.** Task 1's loss check has a
+  measured standard error of ~0.102 nats (per-window sd ≈ 0.29 over 8 windows), so it cannot
+  license trusting the NumPy path over the converter. On disagreement, both paths are suspect.
 
 ## Global Constraints
 
