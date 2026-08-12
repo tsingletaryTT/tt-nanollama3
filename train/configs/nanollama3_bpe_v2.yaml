@@ -62,7 +62,15 @@ training_config:
     weight_decay: 0.01
     amsgrad: false
     stochastic_rounding: true   # <-- the fix. v1 left this unset (defaulted to false).
+# NOT READ BY train/run.py. `apply_optimizer_override` takes only the `optimizer` block above;
+# every other key in this file is documentation. The device config train/run.py actually uses is
+# hardcoded at train/config.py:123 -- and it is identical to what's recorded here, so this block
+# describes the real run accurately. But editing it does NOTHING: change `mesh_shape` here and
+# you still get a single-chip run, with a config file that reads as though you didn't. To go
+# multi-chip, edit train/config.py (and see the README's note on why that is not a one-line
+# change -- DDP multiplies the effective batch size, which moves the step budget and the LR).
 device_config:
-  mesh_shape: [1, 1]
+  mesh_shape: [1, 1]        # one device. Dev host is a QuietBox 2 (4 Blackhole chips on two
+                            # dual-chip p300 cards, 2x2 ring); 3 of 4 idle during a run.
   enable_ddp: false
   enable_tp: false

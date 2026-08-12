@@ -123,7 +123,7 @@ The parity gate (`tests/test_numpy_parity.py`) must still pass — it is the che
 
 - **What it is:** a ~22M-parameter Llama-3-style model trained from scratch on Tenstorrent Blackhole with `ttml`, as a demonstration of an end-to-end TT-native pipeline.
 - **Honest capability framing:** 49,152,000 tokens ≈ **0.43 of one epoch** over its training split, on TinyStories — a synthetic corpus of simple children's stories with a small vocabulary and deliberately regular grammar. Low loss there is unsurprising. **It is not a capable general model.**
-- **Measured numbers:** first train loss 10.6875 (≈ `ln(32000) = 10.37`), final 1.9219, held-out validation 1.8781; 3000 steps in 6 min 47 s on 4× p300c at ~0.134 s/step.
+- **Measured numbers:** first train loss 10.6875 (≈ `ln(32000) = 10.37`), final 1.9219, held-out validation 1.8781; 3000 steps in 6 min 47 s on a single Blackhole chip at ~0.134 s/step (`mesh_shape [1, 1]`; the dev host is a QuietBox 2 with four chips, but training uses one).
 - **Corpus and licence:** TinyStories (`roneneldan/TinyStories`) is **CDLA-Sharing-1.0**, a share-alike data licence. Whether weights trained on CDLA-Sharing data are a "Data Derivative" is unsettled; we do not assert they are not. State this plainly.
 - **Known limitation:** all 13 RMSNorm gammas are frozen at exactly 1.0 — bf16 parameters at 1.0 have a ulp of 0.0039 while Adam updates were ~3.6e-4, and `stochastic_rounding` was off. The model trained with its norm layers effectively frozen. Link the remedies.
 - **Verification:** the conversion is validated against an independently-derived NumPy reimplementation of ttml's forward pass, agreeing to ~1e-5 on logits.

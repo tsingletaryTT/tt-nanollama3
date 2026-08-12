@@ -16,8 +16,8 @@ trained, packaged, published, and served entirely on Tenstorrent tooling.
 
 **Working today:** corpus preparation, a 32,000-token BPE tokenizer, a training entrypoint that
 runs on hardware with a real validation loop, checkpointing with resume, and conversion to a
-Hugging Face model directory. **The model has been trained** — 3000 steps, in 6 min 47 s on 4×
-Blackhole p300c — **and the Hugging Face conversion is numerically verified**: HF-side
+Hugging Face model directory. **The model has been trained** — 3000 steps, in 6 min 47 s on a
+single Blackhole p300c — **and the Hugging Face conversion is numerically verified**: HF-side
 validation loss on the converted model is **1.9271**, against **1.8781** from the training
 run's own held-out evaluation, computed the same way (10 batches of 32 randomly-sampled
 256-token windows) so the two numbers are comparable.
@@ -48,7 +48,7 @@ generated sample, reported as a single data point rather than proof of general c
 | Sequence length | 256 |
 | Vocabulary | 32,000 (byte-level BPE, trained here) |
 | Corpus | TinyStories — 127,635,889 tokens (114.9M train / 12.8M validation) |
-| Hardware | Tenstorrent Blackhole (verified on 4× p300c) |
+| Hardware | Tenstorrent Blackhole — trained on **one** p300c (`mesh_shape [1, 1]`, no DDP/TP) |
 
 Architecture parameters come from tt-train's `nanollama3.yaml` and are not redefined here.
 
@@ -57,6 +57,19 @@ initial distribution, where `ln(32000) = 10.37` — falling to **1.9219**, with 
 validation loss of **1.8781** from this repo's own `evaluate()` over 10 sampled batches.
 Steady state ~0.134 s/step (7.44–7.50 it/s); 6 min 47 s wall clock; six checkpoints at steps
 500–3000.
+
+**This runs on one chip.** `train/config.py` sets `device_config` to `mesh_shape: [1, 1]` with
+`enable_ddp` and `enable_tp` both false, so training opens a single device. The host this was
+developed on is a **TT-QuietBox 2** — four Blackhole chips on two dual-chip p300 cards, wired
+as a `P300_X2` 2×2 ring mesh, not four independent boards — and three of those four chips sit
+idle during a run. During the v2 run the working chip drew **82 W at 73 °C** against
+**61–73 W / 63–68 °C** on the idle three; idle Blackhole holds its clock at 1350 MHz, so the
+power gap is a clearer signal than temperature.
+
+Multi-chip data parallelism is supported by tt-train (`enable_ddp: true` with a `[1, 4]` mesh)
+and is **future work here, not something this repo has demonstrated**. It is not a one-line
+config edit — see [`docs/multi-chip-notes.md`](docs/multi-chip-notes.md) for the three known
+catches and why the step budget and learning rate move with it.
 
 Validation coming in below training loss is expected here rather than anomalous: at 0.43 of an
 epoch there is no overfitting, dropout is 0.0, and the final train figure is a single batch
