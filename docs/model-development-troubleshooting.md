@@ -372,3 +372,60 @@ Two habits caught most of them:
 - **If a step produces a number that decides pass/fail, make it a test.** We predicted the RoPE
   trap in advance and still shipped the bug, because the check that would have caught it lived
   in a shell command rather than a test.
+
+## The decode gate that cannot fail the way decode breaks
+
+**Symptom.** A model passes `models/tt_transformers/tests/test_model.py` at PCC 0.994-0.9998
+over nine decode steps, then produces repetitive garbage the moment it is served:
+
+```
+CPU  : " girl named Lily. She loved to play with her toys and make them look nice..."
+TT   : " girl named Lily. Lily. Lily. Lily. She loved to a time, there was a little..."
+```
+
+**Why the gate passes.** The test's decode loop is *teacher-forced*. From the source
+(`test_model.py:393-401`), when a reference model is running:
+
+```python
+_, pt_out_tok = sample_host(ref_output, temperature=0, top_p=0.8)
+pt_decode_input = embd(pt_out_tok)
+# Use the same token for TT model (teacher forcing)
+tt_decode_input = pt_decode_input
+```
+
+The reference model picks each token and **both** models are fed it. The TT model never
+consumes its own output, so per-step error cannot accumulate. Nine steps of teacher-forced
+decode is nine independent one-step checks, not a nine-step generation.
+
+The structure makes this inescapable rather than incidental: the `else` branch *does* feed
+`embd(tt_out_tok)` -- genuine free-running decode -- but only when no reference model is
+running, and in that case **no PCC is computed**. The harness offers
+compared-but-teacher-forced, or free-running-but-unvalidated. Never both.
+
+**What it costs.** Serving is free-running by definition. A model can be certified at
+PCC 0.999 and diverge from the reference within three tokens of real generation. Measured
+on tt-nanollama3:
+
+| Path | Result |
+|---|---|
+| Teacher-forced decode, 9 steps (the gate) | PCC 0.9940-0.9998 |
+| Teacher-forced prefill, 25 steps | 92% top-1 agreement; every disagreement on a near-tie |
+| Free-running decode (serving) | diverges after 2-4 tokens |
+
+**Why small models suffer most.** Compounding only matters when a step is close enough to
+flip. At the divergence point the top two logits were `' She'` 12.375 (p=0.574) and
+`' Lily'` 11.938 (p=0.370) -- a 0.44-logit margin, about nine bf16 ulps. A 22M model
+trained on 0.43 of an epoch has a flat next-token distribution and therefore near-ties
+everywhere. The same absolute error that is invisible on an 8B model flips tokens here.
+
+**What to do instead.** Do not accept a decode PCC as evidence that generation works. Add a
+free-running check: generate N tokens on device, generate N on the CPU reference from the
+same prompt, and compare the token sequences directly. It costs one extra run and it is the
+only thing that measures the failure mode serving actually has. `$qualitative-check` in
+tt-metal's `.agents` skills exists for exactly this, and judges repetition explicitly.
+
+**Do not stop at "it is just precision."** That may be the answer -- but establish it by
+measuring the free-running gap at two precisions, not by assuming. On this model, moving
+from the stock `performance` profile (BFLOAT4_B MLP) to `accuracy` (BFLOAT16 attention,
+BFLOAT8_B MLP) changed the greedy output not at all, which rules precision out as the
+*sole* explanation.

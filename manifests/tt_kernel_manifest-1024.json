@@ -37,7 +37,7 @@
     }
   },
   "env": {
-    "MESH_DEVICE": "P150x4",
+    "MESH_DEVICE": "P300x2",
     "HF_MODEL": "episod/tt-nanollama3-1024"
   }
 }
