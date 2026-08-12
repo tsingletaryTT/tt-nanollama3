@@ -129,7 +129,7 @@ ttml's own `val_losses` is a documented placeholder that copies the training los
 
 - [ ] **Step 1: Check the hardware is free and estimate storage**
 
-Checkpoints are ~132 MB each at the current format. At `--save-every 2000` over 21,033 steps that is 10 checkpoints ≈ 1.3 GB. Confirm free disk before starting (the volume was at 96% with ~140 GB free).
+Checkpoints are ~132 MB each at the current format. At `--save-every 2000` over 21,034 steps that is 10 checkpoints ≈ 1.3 GB. Confirm free disk before starting (the volume was at 96% with ~140 GB free).
 
 If `AdamWFullPrecision` was used, checkpoints may be larger — measure the first one rather than assuming.
 
