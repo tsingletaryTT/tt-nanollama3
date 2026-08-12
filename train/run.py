@@ -163,7 +163,8 @@ def main() -> int:
     # is even open.
     with model_config.open("r", encoding="utf-8") as f:
         model_yaml = yaml.safe_load(f)
-    model_vocab_size = model_yaml["transformer_config"]["vocab_size"]
+    transformer_config = model_yaml["transformer_config"]
+    model_vocab_size = transformer_config["vocab_size"]
     if model_vocab_size != VOCAB_SIZE:
         raise ValueError(
             f"model config declares vocab_size={model_vocab_size} but train.config.VOCAB_SIZE "
@@ -215,7 +216,12 @@ def main() -> int:
             # cfg.steps is still the --steps value here (the chunk loop below hasn't
             # touched it yet) — state the end step now, at the moment the operator is
             # actually looking, since --steps is additive past start_step, not absolute.
-            print(f"  resumed from {resume_path} at step {start_step}; "
+            # created_at is printed alongside the step because latest_checkpoint() picks
+            # the highest-step file in --checkpoint-dir, not the most recently written one
+            # — with one directory shared across runs those can silently differ, so the
+            # operator needs a way to see which run's weights they actually got.
+            print(f"  resumed from {resume_path} at step {start_step} "
+                  f"(created_at={header.get('created_at', 'unknown')}); "
                   f"running {cfg.steps} more steps to step {start_step + cfg.steps}")
 
         # train() takes exactly (cfg, model, optim, train_ids, use_ddp, use_tp) — no val_ids.
@@ -240,7 +246,30 @@ def main() -> int:
                     header=checkpoint.build_header(
                         step, model_config_path=str(model_config),
                         tokenizer_dir=str(ROOT / "artifacts" / "tokenizer"),
-                        total_tokens=int(len(train_ids) + len(val_ids)),
+                        corpus_tokens=int(len(train_ids) + len(val_ids)),
+                        batch_size=args.batch_size,
+                        extra={
+                            "transformer_config": transformer_config,
+                            # These four fields exist only as hardcoded defaults in ttml's
+                            # C++ (LlamaConfig / RMSNormLayer) — nanollama3.yaml never sets
+                            # them, so they cannot be recovered later from the yaml, and
+                            # they are not derivable from the checkpoint's own tensors
+                            # either. They must be captured here, at write time, straight
+                            # from the C++ source, or a later converter has to guess.
+                            # weight_tying is the dangerous one to get wrong: because it is
+                            # on, this checkpoint has no `llama/tok_emb/weight` tensor at
+                            # all (the embedding is tied to `llama/fc/weight`) — a converter
+                            # that doesn't know that produces a model with a
+                            # randomly-initialized embedding table and raises no error.
+                            "intermediate_dim": 1024,
+                            # round_up(4 * embedding_dim * 2/3, 256); llama_block.cpp:15-23.
+                            "weight_tying": True,
+                            # WeightTyingType::Enabled default; models/llama.hpp:35.
+                            "rms_norm_eps": 1e-5,
+                            # RMSNormLayer default; modules/rms_norm_module.hpp:17.
+                            "weights_dtype": "bfloat16",
+                            # All 50 model tensors are BFLOAT16 per this run's manifest.
+                        },
                     ),
                     model_params=model.parameters(), optimizer=optimizer,
                 )
