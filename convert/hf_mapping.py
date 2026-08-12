@@ -65,9 +65,22 @@ def map_name(ttml_name: str) -> Optional[Union[str, Tuple[str, str]]]:
 
 
 def squeeze_leading(tensor: np.ndarray) -> np.ndarray:
-    """Drop ttml's leading unit dimensions: ``(1, 1, out, in)`` -> ``(out, in)``."""
+    """Drop ttml's leading unit dimensions.
+
+    ttml represents every tensor at a fixed rank of 4, padding with leading size-1 axes:
+    a weight matrix is stored as ``(1, 1, out, in)`` and a norm gamma -- a genuine 1-D
+    vector -- is stored as ``(1, 1, 1, hidden)``. The two cases need different amounts of
+    squeezing to reach their real shape, and nothing here is told in advance which one a
+    given tensor is, so the only safe rule is to keep dropping leading unit axes for as
+    long as one remains: ``(out, in)`` stops on its own once ``out`` (never ``1`` for any
+    real weight in this model) becomes the leading dim, while ``(hidden,)`` keeps going
+    all the way down to a true 1-D array. Stopping early at ``ndim == 2`` (as an earlier
+    version of this function did) left gammas one squeeze short, at ``(1, hidden)``
+    instead of ``(hidden,)`` -- a shape `transformers` rejects outright when loading
+    ``LlamaRMSNorm``, rather than silently accepting a wrong tensor.
+    """
     arr = np.asarray(tensor)
-    while arr.ndim > 2 and arr.shape[0] == 1:
+    while arr.ndim > 1 and arr.shape[0] == 1:
         arr = arr[0]
     return arr
 

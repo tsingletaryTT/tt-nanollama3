@@ -81,3 +81,11 @@ def test_end_to_end_against_the_real_checkpoint(tmp_path):
     assert tensors["model.embed_tokens.weight"].shape == (32000, 384)
     assert tensors["model.layers.0.self_attn.k_proj.weight"].shape == (192, 384)
     assert tensors["model.layers.0.mlp.down_proj.weight"].shape == (384, 1024)
+
+    # Norm gammas must land as genuine 1-D vectors, not (1, hidden) -- HF's
+    # LlamaRMSNorm.weight is nn.Parameter(torch.ones(hidden_size)), and a size mismatch
+    # here is exactly the defect that made a previously-emitted model directory fail to
+    # load via transformers.AutoModelForCausalLM.from_pretrained().
+    assert tensors["model.norm.weight"].shape == (384,)
+    assert tensors["model.layers.0.input_layernorm.weight"].shape == (384,)
+    assert tensors["model.layers.0.post_attention_layernorm.weight"].shape == (384,)

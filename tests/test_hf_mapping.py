@@ -49,6 +49,30 @@ def test_squeeze_leaves_two_d_alone():
     assert squeeze_leading(t).shape == (384, 384)
 
 
+def test_squeeze_drops_all_leading_units_down_to_a_1d_gamma():
+    """ttml stores a norm gamma as (1, 1, 1, hidden) -- a real 1-D vector, not a 2-D
+    row. squeeze_leading must not stop early just because ndim happens to hit 2."""
+    t = np.zeros((1, 1, 1, 384), dtype=np.float32)
+    assert squeeze_leading(t).shape == (384,)
+
+
+def test_squeeze_drops_a_single_leading_unit_from_two_d():
+    t = np.zeros((1, 384), dtype=np.float32)
+    assert squeeze_leading(t).shape == (384,)
+
+
+def test_squeeze_leaves_a_true_1d_array_alone():
+    t = np.zeros((384,), dtype=np.float32)
+    assert squeeze_leading(t).shape == (384,)
+
+
+def test_squeeze_does_not_over_squeeze_a_legitimate_2d_weight():
+    """A weight matrix with no leading unit dims at all must come out unchanged --
+    squeezing must only ever remove dims it can prove are ttml padding, not real ones."""
+    t = np.zeros((192, 384), dtype=np.float32)
+    assert squeeze_leading(t).shape == (192, 384)
+
+
 def test_split_kv_halves_the_output_dim():
     # 3 groups x 64 head_dim x 2 (K and V) = 384 rows, hidden 384
     t = np.arange(384 * 384, dtype=np.float32).reshape(384, 384)
