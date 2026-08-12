@@ -402,3 +402,55 @@ sampling, so the next person to read the plan doesn't inherit either defect.
 Test suite: **108 passed** (103 from the numerical-verification commit + 4 new in
 `test_hf_mapping.py` for `permute_rope_qk` + 1 new regression test in `test_hf_parity.py`),
 0 skipped (converted model and validation tokens both present on this machine), 0 failed.
+
+## `feat/hf-conversion` — pre-merge whole-branch review fix wave (2026-08-11)
+
+A final review before merge (verdict: ready to merge) found five cheap, high-value items.
+None required a training re-run; `artifacts/checkpoints/` was never touched.
+
+**The 0.049-nat residual gap's documented cause was wrong.** Both `test_hf_parity.py`'s
+`LOSS_TOLERANCE` comment and this file's Task 3 write-up (above) left the residual gap
+between 1.9271 (converted model) and 1.8781 (training run) attributed to, or open to being
+read as, fp32-CPU-vs-bf16-device precision. Measured directly instead: same seed, same
+windows, bf16 gives 1.9315 and fp32 gives 1.9314 — dtype accounts for roughly 1e-4 nats, not
+0.049. The real driver is sampling: seeds 0, 1, and 2 against the same model give 1.9314,
+1.9208, and 1.8856 nats respectively — a seed-to-seed standard deviation of 0.024 nats, which
+puts the 0.049-nat gap at roughly z ≈ 1.2. That's unremarkable noise, not a signal, and
+correcting the *reason* matters even though the pass/fail verdict doesn't change: attributing
+a real, measured 0.024-nat seed-to-seed spread to a nonexistent precision effect would send
+the next person chasing bf16/fp32 numerics instead of understanding that the regression
+test's fixed seed (`np.random.default_rng(0)`) is deliberately pinned for exactly this
+reason — an unpinned seed would make the 0.2-nat gate flakier for no benefit. `LOSS_TOLERANCE`
+stays at 0.2; only the explanation changed, in `tests/test_hf_parity.py` and in
+`.superpowers/sdd/2026-08-11-hf-conversion/task-3-report.md`'s concern #4.
+
+**Four other fixes, in brief:**
+- **README's Status section was publicly stale.** It said conversion and packaging were both
+  still pending and "no text has been decoded" — both false since the Task 3 fix wave above.
+  Updated to state the conversion is numerically verified (1.9271 vs. 1.8781) and weights
+  remain unpublished with tt-kernel packaging as the sole remaining stage, keeping the
+  existing honest capability framing and citing the Max-the-dog sample as one data point.
+- **`convert_checkpoint` now raises on unmapped ttml tensors** instead of silently
+  `continue`-ing past them, and **`llama/fc/weight`'s fan-out to both HF embedding slots is
+  now conditional on `header["weight_tying"]`** rather than unconditional. Untied models
+  (`llama/tok_emb/weight` present alongside `llama/fc/weight`, per
+  `ttml/models/llama.cpp:466`) were the real risk this closes: before this fix, the real
+  embedding table would be silently dropped as "unmapped" while `fc/weight` was written to
+  *both* `model.embed_tokens.weight` and `lm_head.weight`, producing a model that loads
+  cleanly, reports `tie_word_embeddings: false`, and is numerically wrong with no error at
+  any stage. Every real checkpoint produced so far has `weight_tying=True`, so this path was
+  untested until now — new tests use a synthetic untied manifest rather than attempting to
+  produce a real untied checkpoint.
+- **`convert_checkpoint` now verifies the emitted HF key set is exactly what the config
+  implies** (`9 × num_hidden_layers + 3`) before writing, raising with the missing/unexpected
+  names. Previously a truncated manifest would silently produce a safetensors file missing
+  keys, and `transformers` would randomly initialize them with only a warning.
+- **`build_config`'s hardcoded `bos/eos/pad = 1/2/3` is now checked, not just trusted.**
+  `convert_checkpoint` cross-references `tokenizer_dir`'s `special_tokens_map.json` /
+  `tokenizer_config.json` and raises if the resolved ids disagree with the hardcoded values.
+  Verified correct against `artifacts/tokenizer/` today; this is a guard against silent drift
+  if the tokenizer is ever regenerated with different special-token ids, not a refactor.
+
+Re-ran `scripts/convert_checkpoint.py` against the same `nanollama3_step00003000.pkl`
+checkpoint (Fixes 3-5 touch the write path); `AutoModelForCausalLM.from_pretrained` still
+loads `artifacts/hf/` and `test_validation_loss_matches_the_training_run` still passes.

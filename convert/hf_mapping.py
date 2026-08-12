@@ -35,15 +35,36 @@ MLP_ROLES = {"w1": "gate_proj", "w2": "down_proj", "w3": "up_proj"}
 _BLOCK = re.compile(r"^llama/llama_block_(\d+)/(.+)$")
 
 
-def map_name(ttml_name: str) -> Optional[Union[str, Tuple[str, str]]]:
+def map_name(
+    ttml_name: str, *, weight_tying: bool = True
+) -> Optional[Union[str, Tuple[str, str]]]:
     """HF parameter name for a ttml name.
 
     Returns a single name, a **pair** (tied embedding, or the fused K/V split), or ``None``
     when the tensor has no HF counterpart.
+
+    ``weight_tying`` must reflect the checkpoint header's own ``weight_tying`` field, not be
+    assumed -- see ``ttml/models/llama.cpp``: when tying is enabled there is no
+    ``llama/tok_emb/weight`` tensor at all, and ``llama/fc/weight`` is the *only* tensor,
+    shared by both HF destinations. When tying is disabled, ``llama/tok_emb/weight`` and
+    ``llama/fc/weight`` are two distinct tensors and must map one-to-one to
+    ``model.embed_tokens.weight`` and ``lm_head.weight`` respectively. Getting this backwards
+    is exactly the untied-model failure mode this function exists to prevent: a fixed
+    ``llama/fc/weight -> both destinations`` mapping would silently discard the real
+    embedding table (reported as "unmapped") while duplicating the output projection into
+    the embedding slot too -- a model that loads, claims ``tie_word_embeddings: false``, and
+    is numerically wrong.
     """
     if ttml_name == "llama/fc/weight":
-        # Tied: one tensor, two destinations.
-        return ("model.embed_tokens.weight", "lm_head.weight")
+        if weight_tying:
+            # Tied: one tensor, two destinations.
+            return ("model.embed_tokens.weight", "lm_head.weight")
+        return "lm_head.weight"
+    if ttml_name == "llama/tok_emb/weight":
+        # Only a distinct tensor -- and only mappable -- when tying is disabled. When tying
+        # is enabled this name should never appear in a real checkpoint; returning None lets
+        # the caller's unmapped-tensor check catch that instead of guessing.
+        return None if weight_tying else "model.embed_tokens.weight"
     if ttml_name == "llama/ln_fc/gamma":
         return "model.norm.weight"
 

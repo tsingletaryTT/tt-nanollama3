@@ -12,6 +12,33 @@ def test_tied_embedding_maps_to_both_targets():
     assert map_name("llama/fc/weight") == ("model.embed_tokens.weight", "lm_head.weight")
 
 
+def test_tied_embedding_maps_to_both_targets_explicitly():
+    """weight_tying defaults to True, but the explicit form must agree with the default."""
+    assert map_name("llama/fc/weight", weight_tying=True) == (
+        "model.embed_tokens.weight", "lm_head.weight"
+    )
+
+
+def test_untied_fc_weight_maps_only_to_lm_head():
+    """When weight_tying is off, llama/fc/weight is a distinct tensor from the embedding
+    table and must map to lm_head.weight alone -- fanning it out to both destinations (the
+    old, tying-blind behavior) would duplicate the output projection into the embedding
+    slot while the real embedding table (llama/tok_emb/weight) got silently dropped."""
+    assert map_name("llama/fc/weight", weight_tying=False) == "lm_head.weight"
+
+
+def test_untied_tok_emb_maps_to_embed_tokens():
+    assert map_name("llama/tok_emb/weight", weight_tying=False) == "model.embed_tokens.weight"
+
+
+def test_tied_tok_emb_is_unmapped():
+    """llama/tok_emb/weight should never exist in a real weight_tying=True checkpoint (ttml
+    shares the fc tensor instead of registering a separate one), so this returns None -- the
+    caller's unmapped-tensor check is the right place to catch that surprise, not a guess
+    here about where it should go."""
+    assert map_name("llama/tok_emb/weight", weight_tying=True) is None
+
+
 def test_final_norm_maps():
     assert map_name("llama/ln_fc/gamma") == "model.norm.weight"
 

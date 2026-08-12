@@ -15,19 +15,27 @@ trained, packaged, published, and served entirely on Tenstorrent tooling.
 ## Status
 
 **Working today:** corpus preparation, a 32,000-token BPE tokenizer, a training entrypoint that
-runs on hardware with a real validation loop, and checkpointing with resume. **The model has
-been trained** — 3000 steps, in 6 min 47 s on 4× Blackhole p300c.
+runs on hardware with a real validation loop, checkpointing with resume, and conversion to a
+Hugging Face model directory. **The model has been trained** — 3000 steps, in 6 min 47 s on 4×
+Blackhole p300c — **and the Hugging Face conversion is numerically verified**: HF-side
+validation loss on the converted model is **1.9271**, against **1.8781** from the training
+run's own held-out evaluation, computed the same way (10 batches of 32 randomly-sampled
+256-token windows) so the two numbers are comparable.
 
 **Not done yet:** the trained weights are **not published** — checkpoints are gitignored and
 live only on the machine that produced them, so cloning this repo gets you the pipeline, not a
-model. Hugging Face conversion and tt-kernel packaging are the remaining stages. See
+model. tt-kernel packaging is the remaining stage. See
 [`docs/superpowers/specs/`](docs/superpowers/specs/) for the full arc.
 
 **Calibrate your expectations.** This is a ~22M-parameter model that has seen 49,152,000
 tokens — about **0.43 of one epoch** over its training split — of TinyStories, a synthetic
 corpus of simple children's stories with a small vocabulary and deliberately regular grammar.
-It demonstrates that the pipeline works end to end. It is not a capable general model, and no
-text has been decoded from it yet.
+It demonstrates that the pipeline works end to end. It is not a capable general model. One
+generated sample, reported as a single data point rather than proof of general capability:
+
+> Once upon a time, there was a little dog named Max. Max loved to play with his ball. One day,
+> Max saw a big ball in the park. Max wanted to play with the ball, but he was very dirty. Max
+> had an idea. He would push the ball with his paws to clean it.
 
 ## The model
 

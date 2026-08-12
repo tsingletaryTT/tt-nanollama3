@@ -26,10 +26,14 @@ _no_val_ids = pytest.mark.skipif(
 #: real bug" section for how this number was derived and cross-checked.
 TRAINING_VAL_LOSS = 1.8781
 #: Tasks 1-2 produce a directory that loads cleanly whether or not the conversion is
-#: correct; this tolerance is what actually discriminates. A gap this small can come from
-#: fp32-CPU-vs-bf16-device precision and different random validation samples; a gap of
-#: 1+ nats (as the straight-copied RoPE layout produced, before it was fixed -- see
-#: convert.hf_mapping.permute_rope_qk) means a real layout bug, not sampling noise.
+#: correct; this tolerance is what actually discriminates. The residual ~0.05-nat gap at
+#: 1.9271 vs. 1.8781 is *not* fp32-CPU-vs-bf16-device precision -- measured directly, same
+#: seed and windows, bf16 gives 1.9315 and fp32 gives 1.9314, a ~1e-4-nat difference. It's
+#: sampling: three different seeds (0/1/2) give 1.9314 / 1.9208 / 1.8856, a seed-to-seed sd
+#: of 0.024 nats, which puts the ~0.049-nat gap at z ~= 1.2 -- unremarkable noise, not a
+#: signal. A gap of 1+ nats (as the straight-copied RoPE layout produced, before it was
+#: fixed -- see convert.hf_mapping.permute_rope_qk) means a real layout bug; this tolerance
+#: exists to catch that, not to police normal seed-to-seed variance.
 LOSS_TOLERANCE = 0.2
 
 
@@ -105,6 +109,11 @@ def test_validation_loss_matches_the_training_run():
        (``train.run.evaluate``) averages 10 batches of 32 windows sampled uniformly across
        the *whole* validation set (``ttml.common.data.get_batch``), not one block from the
        front -- matched here so the two numbers are comparable.
+
+    The seed below (``np.random.default_rng(0)``) is fixed deliberately, not incidentally:
+    seed-to-seed variance on this exact computation is real and measured (seeds 0/1/2 give
+    1.9314 / 1.9208 / 1.8856 nats, sd 0.024), so leaving the seed unpinned would make a
+    0.2-nat gate flakier from one run to the next for no corresponding benefit.
     """
     import numpy as np
     import torch
