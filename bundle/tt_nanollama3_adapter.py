@@ -6,16 +6,41 @@
 WHAT THIS IS
 ------------
 This module is the ``main_class`` the Tenstorrent vLLM plugin imports for this model
-(``entrypoint.class`` in ``tt_kernel_manifest.json``). It deliberately adds **no model
-code**: tt-nanollama3 is a standard HF Llama and the stock
-``models.tt_transformers.tt.generator_vllm:LlamaForCausalLM`` serves it correctly. All
-this module does is apply one narrowly-scoped patch to tt-metal *before* re-exporting
-that class, then get out of the way.
+(``entrypoint.class`` in ``tt_kernel_manifest.json``). It adds **no model code**:
+tt-nanollama3 is a standard HF Llama and the stock
+``models.tt_transformers.tt.generator_vllm:LlamaForCausalLM`` computes it. This module
+carries only what tt-metal gets wrong or defaults badly for a model this small:
+
+1. a runtime **patch** to ``ModelArgs.find_grid`` (without it the model cannot run at all
+   on a harvested Blackhole -- see below), and
+2. a **precision default** of ``accuracy`` rather than ``performance`` (see
+   ``DEFAULT_OPTIMIZATIONS``).
 
 The point being demonstrated: **a model can carry the tt-metal change it needs, in its
-own distribution bundle, without that change having to land upstream first.** The patch
-travels with the bundle, applies at import time in the serving process, and is inert
-everywhere else.
+own distribution bundle, without that change having to land upstream first.** Both travel
+with the bundle, apply at import time in the serving process, and are inert everywhere
+else.
+
+KNOWN UNFIXED DEFECT -- READ BEFORE TRUSTING OUTPUT
+---------------------------------------------------
+Generation on the served path is **wrong**, and neither item above fixes it. Greedy
+decoding collapses into a repetition loop (" girl named Lily. Lily. Lily. Lily.") where
+the same weights on CPU produce coherent prose (" girl named Lily. She loved to play with
+her toys...").
+
+Localised, with precision held at ``accuracy``: given the **same** 13-token context, a
+fresh prefill returns ``' She'`` (matching CPU) while arriving at that identical context
+through 4 decode steps returns ``' Lily'``. Same server, same context, different answer
+depending on the path taken -- so the error is in the **decode / KV-cache path**, not the
+weights, the conversion, the ``find_grid`` patch, or precision.
+
+Supporting measurement: teacher-forced (re-prefilling each prefix) per-step top-1
+agreement with CPU is 23/25 = 92%, and every disagreement sits on a near-tie -- mean logit
+gap 0.093 where they differ versus 2.299 where they agree. Prefill is sound.
+
+Note that the tt_transformers PCC gate passed at 0.9940-0.9998 while this defect was
+present: it exercises prefill far harder than long decode. **A green PCC is not evidence
+of correct generation.**
 
 THE BUG BEING PATCHED
 ---------------------
@@ -61,6 +86,7 @@ deleted along with the ``platform.ttnn`` floor that pins this bundle below it.
 from __future__ import annotations
 
 import logging
+import os
 
 from models.tt_transformers.tt.model_config import ModelArgs
 
@@ -149,8 +175,70 @@ def restore_patches():
 # happens before any ModelArgs is constructed, so the shim is in place before first use.
 _patch_find_grid()
 
-# Re-export the stock class unchanged. tt-nanollama3 needs no bespoke model code -- the
-# only reason this module exists is the patch above.
-from models.tt_transformers.tt.generator_vllm import LlamaForCausalLM  # noqa: E402
+from models.tt_transformers.tt.generator_vllm import (  # noqa: E402
+    LlamaForCausalLM as _StockLlamaForCausalLM,
+)
 
-__all__ = ["LlamaForCausalLM", "restore_patches"]
+#: Precision profile. ``DecodersPrecision.performance`` -- the stock default -- serves the
+#: MLP ``w1``/``w3`` projections as **BFLOAT4_B** and ``wqkv``/``wo``/``w2`` as BFLOAT8_B.
+#: Those defaults are tuned for 8B-70B models, where 4-bit MLP weights are survivable
+#: because there is enormous redundancy to absorb the error. This model has
+#: ``hidden_size=384`` and ~22M parameters; there is no such headroom.
+#:
+#: Switching to ``accuracy`` moves ``wqkv``/``wo`` to BFLOAT16 and ``w1``/``w3`` from
+#: BFLOAT4_B to BFLOAT8_B (verified in the serving log's tensor-cache dtypes).
+#:
+#: **This is a precision decision on its own merits, NOT a bug fix.** It was tried as a
+#: hypothesis for the repetition-loop defect described below and **did not fix it** --
+#: greedy output was materially unchanged under ``accuracy``. It is kept because serving a
+#: 384-dim model's MLP at 4 bits is indefensible regardless, not because it repaired
+#: anything. Do not cite it as the remedy for that defect.
+#:
+#: Overridable via ``TT_NANOLLAMA3_OPTIMIZATIONS`` for A/B testing without a rebuild.
+DEFAULT_OPTIMIZATIONS = os.environ.get("TT_NANOLLAMA3_OPTIMIZATIONS", "accuracy")
+
+
+class LlamaForCausalLM(_StockLlamaForCausalLM):
+    """Stock Llama, with a precision default appropriate to a 22M-parameter model.
+
+    The only behavioural change is ``optimizations``: the base class defaults it to
+    ``"performance"``, this subclass to ``"accuracy"`` (see ``DEFAULT_OPTIMIZATIONS``).
+    Everything else -- prefill, decode, KV cache allocation -- is inherited untouched.
+
+    This is the second half of what this bundle demonstrates: a model can ship not only the
+    tt-metal *patch* it needs but also the tt-metal *configuration* it needs, without either
+    having to become an upstream default that would be wrong for larger models.
+    """
+
+    @classmethod
+    def initialize_vllm_model(
+        cls,
+        hf_config,
+        mesh_device,
+        max_batch_size,
+        max_seq_len,
+        n_layers=None,
+        tt_data_parallel=1,
+        optimizations: str = None,
+    ):
+        # None means "caller expressed no preference" -- apply ours. An explicit value from
+        # the caller still wins, so this is a default, not an override.
+        if optimizations is None:
+            optimizations = DEFAULT_OPTIMIZATIONS
+            logger.info(
+                "tt-nanollama3: using optimizations=%r (stock default is 'performance', "
+                "which serves MLP w1/w3 at BFLOAT4_B -- too coarse for a 384-dim model).",
+                optimizations,
+            )
+        return super().initialize_vllm_model(
+            hf_config,
+            mesh_device,
+            max_batch_size,
+            max_seq_len,
+            n_layers=n_layers,
+            tt_data_parallel=tt_data_parallel,
+            optimizations=optimizations,
+        )
+
+
+__all__ = ["LlamaForCausalLM", "restore_patches", "DEFAULT_OPTIMIZATIONS"]
