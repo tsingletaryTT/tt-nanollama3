@@ -254,3 +254,77 @@ training re-run (the box is shared; the six checkpoints above stand as the run's
 (Per-fix commands and the full post-back-fill verification log for this wave live in the
 review's own working notes, not linked here — see this section for the numbers that matter
 to anyone reading this file without that tree checked out.)
+
+## `feat/hf-conversion` Task 3 — numerical verification finds a real bug (2026-08-11)
+
+Task 3 added `tests/test_hf_parity.py` (4 tests, skip-guarded on `artifacts/hf/config.json`
+existing) and ran the brief's Step 2/3 checks by hand. Structural checks and generation look
+fine; the perplexity cross-check does not, and the gap traces to exactly the failure mode the
+plan's Known Risks called out in advance.
+
+**Structural re-derivation (independent of the controller's numbers, matched exactly):**
+22.025088M params, embed/lm_head tied, `model.norm.weight` shape `(384,)`, next-token entropy
+on "...a little girl named" = **4.7509 nats** (uniform ceiling 10.37), top-5
+`[' Lily',' Lucy',' Jane',' Sue',' Sarah']`.
+
+**Generated sample** (brief's exact command, `do_sample=True, temperature=0.8, top_p=0.95`,
+no seed set, reported verbatim, not cherry-picked):
+
+> Once upon a time, there was a little girl named Lily. Lily had a pretty flower. She loved
+> to dance. She loved to dance. One day, she danced every day, she found a big, blue flower.
+> The flower was very pretty flower in the sun, her dress, and it had a big,
+
+Locally fluent TinyStories-flavoured English, globally drifting and repetitive ("She loved to
+dance. She loved to dance.") — the expected shape for 0.43 of an epoch on a 22M model, not a
+sign of a layout trap on its own.
+
+**Perplexity cross-check — the brief's own Step 3 command has a bug.** Its literal code
+(`m(x[:, :-1], labels=x[:, 1:])`) pre-shifts both `input_ids` and `labels` by hand, but
+`LlamaForCausalLM`'s internal loss function (`ForCausalLMLoss` in
+`transformers.loss.loss_utils`) *also* shifts `labels` internally before computing
+cross-entropy. Passing already-shifted tensors through `labels=` double-shifts, comparing
+each prediction against the token two positions ahead instead of one. Run literally, it
+reports **8.53 nats** — worse than doing nothing. Verified against two independent correct
+formulations (`model(x, labels=x)`, which lets HF do its one intended shift, and manual
+`cross_entropy` on `logits` vs. `x[:, 1:]` with no `labels=` kwarg at all): both agree at
+~3.19–3.20 nats on the same data, confirming the double shift as the reason 8.53 differs from
+the corrected number, not a second bug.
+
+With the shift bug fixed, and sampling matched to how the training run's own `evaluate()`
+computes 1.8781 (`ttml.common.data.get_batch`: 10 batches of 32 random 256-token windows
+drawn uniformly across the *full* 12.76M-token validation set, not one contiguous block) —
+**HF-side val loss = 3.20 nats** (range 3.13–3.27 across the 10 batches). That is **1.32 nats
+above 1.8781** — a fail by the brief's own "1+ nats means the conversion is wrong somewhere
+the entropy check didn't catch" threshold. The entropy and generation checks above did not
+catch this; that is exactly why Task 3's Step 3 exists.
+
+**Root-caused via the brief's own Known Risks, without touching `artifacts/hf/` or any
+tracked file** (all work done against scratch copies under
+`/tmp/.../scratchpad`, using `convert.to_hf.convert_checkpoint` called directly):
+- *Gate/up swap, ruled out.* Swapping `w1`/`w3` in `MLP_ROLES` in-process and reconverting
+  made loss **worse** (3.63 nats), not better — the current `w1=gate_proj`/`w3=up_proj`
+  assignment in `convert/hf_mapping.py` is correct.
+- *RoPE interleaved-vs-split-halves, confirmed as the cause.* `convert/to_hf.py` copies
+  `q_proj`/`k_proj` weight rows straight through with no permutation. Applying the classic
+  Meta-Llama interleaved→split-halves permutation (reshape each head's rows as
+  `(head_dim/2, 2)`, transpose, flatten — the same operation Meta's own
+  `convert_llama_weights_to_hf.py` applies) to `q_proj` and `k_proj` in a scratch copy of the
+  converted weights, with everything else unchanged, brought the same random-batch loss
+  measurement down to **1.927 nats** (range 1.83–2.00) — within 0.05 nats of 1.8781, a clean
+  pass. No source file or artifact was modified to get this number; it is a diagnostic
+  reconversion in `/tmp` only.
+
+**Conclusion: `artifacts/hf/` today is measurably wrong.** It loads without error, ties
+weights correctly, produces finite non-uniform logits, and generates plausible-looking text —
+every check Tasks 1–2 could have run would pass — but its RoPE layout does not match ttml's
+convention, which silently degrades attention quality without producing garbage output. Task
+1/2's test suites (`test_hf_mapping.py`, `test_to_hf.py`) have no test that would catch this;
+`rope_theta` is checked, the row layout within each head is not. Fixing it means permuting
+`q_proj.weight` and `k_proj.weight` rows per-head in `convert/to_hf.py` (not changing
+`hf_mapping.map_name`, which is already correct) and regenerating `artifacts/hf/` — both out
+of Task 3's stated file list (`tests/test_hf_parity.py` only) and off-limits under the
+"never write `artifacts/hf/`" constraint, so left for a follow-up task/plan rather than
+patched here.
+
+Test suite: 103 passed (99 pre-existing + 4 new in `test_hf_parity.py`), 0 skipped (the
+converted model is present), 0 failed.
