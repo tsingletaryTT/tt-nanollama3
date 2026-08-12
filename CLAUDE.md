@@ -454,3 +454,97 @@ stays at 0.2; only the explanation changed, in `tests/test_hf_parity.py` and in
 Re-ran `scripts/convert_checkpoint.py` against the same `nanollama3_step00003000.pkl`
 checkpoint (Fixes 3-5 touch the write path); `AutoModelForCausalLM.from_pretrained` still
 loads `artifacts/hf/` and `test_validation_loss_matches_the_training_run` still passes.
+
+## `feat/numpy-parity` — an independent NumPy reference, and a sharper gate (2026-08-12)
+
+**Why this plan exists.** The HF-conversion loss gate (`test_hf_parity.py`, 0.2-nat
+tolerance) caught the RoPE bug above, but two things about it are uncomfortable: its 2σ
+floor is ~0.22 nats (sampling sd 0.024 × ~9), so anything cheaper than that is invisible; and
+**all 13 RMSNorm gammas in the trained checkpoint are exactly 1.0** (an upstream
+`stochastic_rounding` issue — see `docs/superpowers/specs/2026-08-11-followups.md`), so
+swapping two norms' destinations changes loss by exactly `0.0000`. 23% of the conversion's
+mapping decisions were validated by nothing.
+
+Three tasks: **Task 1** derived ttml's forward pass straight from its C++ source into
+`docs/ttml-forward-reference.md`, deliberately never reading `convert/hf_mapping.py` or
+`convert/to_hf.py` — a NumPy path built from that converter would just agree with its own
+misunderstandings. **Task 2** implemented `convert/ttml_forward.py` from that doc and
+validated it independently by reproducing the training run's own held-out cross-entropy
+(1.8488 measured, vs. training's 1.8781 — see the Task 2 report). **Task 3** (this section)
+built the actual instrument: `tests/test_numpy_parity.py`, comparing the NumPy path's logits
+against `artifacts/hf/`'s logits directly, at a tolerance measured from data rather than
+picked in advance.
+
+### What the parity gate measures, and the tolerance
+
+Both paths run on the host in **float32** (`AutoModelForCausalLM.from_pretrained(...,
+torch_dtype=torch.float32)`), from the same bfloat16-stored checkpoint weights, on a fixed
+seeded window of `val_ids.npy`. This is a **NumPy-vs-HF** comparison, not NumPy-vs-device —
+the earlier (and wrong) worry that a bf16 RMSNorm divisor makes ~1e-3 unreachable bounds a
+device comparison, not this host-vs-host one.
+
+Measured across six seeds/windows before picking a number: max absolute logit difference
+**5.2e-6 to 8.5e-6**; max relative difference (restricted to `|logit| > 0.01` — unrestricted
+relative error is dominated by meaningless blowups near zero-crossings, e.g. two logits of
+-1.05e-5 and -1.15e-5 differ by "8%" while being numerically indistinguishable) **1.4e-4 to
+4.7e-4**; correlation indistinguishable from 1.0 (`1 - corr ≈ 1e-13`). A NumPy-vs-NumPy
+control (float32 throughout vs. bf16-rounded activations at every sub-layer boundary) showed
+this precision effect alone would cost ~0.03 absolute and ~3-4 orders of magnitude more than
+the actual NumPy-vs-HF gap — confirming the tight agreement is real, not an artifact of both
+sides sharing rounding.
+
+Tolerances set from that (all in `tests/test_numpy_parity.py`): `MAX_ABS_TOLERANCE = 1e-3`
+(~100-200x the measured worst case), `MAX_REL_TOLERANCE = 5e-3` floored at `|logit| > 0.01`
+(~10x the measured worst case, and tighter than the plan's own ~1e-2 "something is wrong"
+ballpark by 2x), `MIN_CORRELATION = 0.9999`. Wide margin above measurement noise, and — per
+the not-hollow proof below — many orders of magnitude below what an actual bug produces.
+
+**Proof the gate is not hollow.** Monkeypatching `permute_rope_qk` to the identity function
+(Plan 4's exact historical bug — straight-copied RoPE rows) and reconverting into a scratch
+directory (never touching `artifacts/hf/`) produced max_abs = **4.60**, correlation =
+**0.972** — ~4600x over the abs tolerance's budget. Plan 4's reviewer measured the same bug
+at the loss level as 3.2015 nats against a 1.8781 target; this gate catches the identical
+defect at the logit level, by a much larger margin relative to its own tolerance than the
+loss gate had relative to its.
+
+### What this gate still cannot see
+
+1. **The norm-mapping blind spot this plan exists to close.** On the real checkpoint (all
+   gammas exactly 1.0), swapping two RMSNorm gammas' HF destinations is a no-op — verified
+   directly: swapping block 0's and block 1's `input_layernorm.weight` mapping and
+   reconverting moved max_abs to ~5.9e-6, indistinguishable from the no-swap baseline
+   (~5-9e-6). **The parity gate is exactly as blind to this as the loss gate is, on this
+   checkpoint, for the same reason** (`test_parity_gate_is_blind_to_a_norm_swap_on_the_real_checkpoint`
+   measures and confirms this rather than assuming it). Closed *structurally* instead:
+   `test_convert_checkpoint_places_each_rmsnorm_gamma_at_its_correct_destination` builds a
+   synthetic checkpoint with distinct non-unit gammas and asserts each lands at its correct
+   HF tensor name — a test that runs unconditionally (no `artifacts/` dependency) and stays
+   meaningful regardless of whether the real checkpoint's gammas ever stop being degenerate.
+2. **What neither path implements is invisible to both.** If both the NumPy reference and
+   the converter drop RoPE scaling (the checkpoint header records no `scaling_factor`), they
+   agree with each other and are both wrong relative to ttml's actual runtime behaviour. This
+   harness validates the *conversion* — does `convert/` correctly translate ttml's checkpoint
+   into HF's format — not the checkpoint's *completeness*.
+3. **ttnn's own accumulation/output dtype on real hardware is untraced.** Both paths compared
+   here run entirely on the host; neither touches a Tenstorrent device. This says nothing
+   about NumPy-vs-device agreement, which needs its own (looser) tolerance — Task 1's finding
+   that ttml's RMSNorm kernel packs its mean divisor as bfloat16 bounds *that* comparison, not
+   this one.
+4. **This compares two implementations of the same architecture, not the checkpoint against
+   ground truth.** If ttml's own forward pass itself has a bug relative to what the training
+   run's loss curve implies, nothing here catches it — that anchor is Task 2 Step 3's
+   independent cross-entropy check against the training run's own held-out figure, not this
+   gate.
+
+### The standing skip-guard gap, partially addressed
+
+Task 2's review noted the decisive tests are all `skipif`-guarded on `artifacts/` (gitignored),
+so a CI run can report "N passed" while nothing load-bearing executed. The synthetic
+gamma-mapping test above is deliberately **not** guarded — it needs no real artifacts and
+runs every time — but every other test in `test_numpy_parity.py` still needs the real
+checkpoint, tokenizer, converted `artifacts/hf/`, and `val_ids.npy`, and is still skip-guarded
+on them. The gap is not closed, just narrowed by one genuinely-unconditional test.
+
+Test suite: **151 passed** (146 pre-existing + 5 new in `test_numpy_parity.py`), 0 skipped, 0
+failed on this machine (all `artifacts/` fixtures present); the synthetic gamma test alone
+would still pass, unconditionally, on a machine with none of them.
