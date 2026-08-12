@@ -24,7 +24,9 @@ from __future__ import annotations
 
 import pickle
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, Iterator, List, Tuple
+
+import numpy as np
 
 
 def read_record0(path: Path) -> Tuple[Dict[str, Any], int]:
@@ -78,3 +80,51 @@ def tensor_names(manifest: Dict[str, Any], group: str = "model") -> List[str]:
 
     _walk(manifest[group])
     return sorted(names)
+
+
+def read_tensors(path: Path, group: str = "model") -> Iterator[Tuple[str, np.ndarray]]:
+    """Stream ``(name, array)`` pairs for ``group``, in manifest **declaration order**.
+
+    The tensor records after record 0 are a flat stream, one ``pickle.dump`` per entry, in
+    exactly the order ``ttml.checkpointing._walk`` emitted them while saving — group by
+    group (``model`` before ``optimizer``), and within a group, dict-insertion order.
+    ``load_checkpoint``'s own comment calls this out: "file order owns the stream order".
+
+    That order is **not** alphabetical (see ``tensor_names``, which sorts for readability).
+    Pairing a sorted name list against this stream would silently mis-assign every tensor,
+    so this walks the manifest skeleton itself the same way ``_walk``/``_skip`` do, rather
+    than reusing ``tensor_names()``.
+
+    Groups other than ``group`` are still read from the stream (to keep it aligned for
+    whatever follows) but discarded rather than yielded — the same trade ttml's own
+    ``_skip`` makes. One tensor is unpickled at a time, so peak memory stays at roughly one
+    tensor's worth of data, matching how the file was written.
+    """
+    path = Path(path)
+    record, offset = read_record0(path)
+    manifest = record["manifest"]
+    if group not in manifest:
+        raise ValueError(f"checkpoint manifest has no {group!r} group (has {sorted(manifest)})")
+
+    def _stream(node: Any, f, capture: bool) -> Iterator[Tuple[str, np.ndarray]]:
+        if not isinstance(node, dict):
+            return  # scalar (e.g. optimizer hyperparameters) -- nothing to read
+        if "named_parameters" in node:
+            for name in node["named_parameters"]:
+                try:
+                    data = pickle.load(f)
+                except (pickle.UnpicklingError, EOFError, AttributeError) as e:
+                    raise ValueError(f"{path}: could not read tensor record for {name!r}: {e}") from e
+                if capture:
+                    yield name, data
+            return
+        for sub in node.values():
+            yield from _stream(sub, f, capture)
+
+    def _generate() -> Iterator[Tuple[str, np.ndarray]]:
+        with open(path, "rb") as f:
+            f.seek(offset)
+            for key, skeleton in manifest.items():  # file order owns the stream order
+                yield from _stream(skeleton, f, capture=(key == group))
+
+    return _generate()
