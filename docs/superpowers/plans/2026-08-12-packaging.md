@@ -157,7 +157,19 @@ m = AutoModelForCausalLM.from_pretrained("episod/tt-nanollama3")
 
 Assert the config fields survived the round trip — particularly `max_position_embeddings == 256` and `tie_word_embeddings is True`.
 
-- [ ] **Step 5: Flip public only after Step 4 passes, and re-verify the licence**
+- [ ] **Step 5: The repo stays PRIVATE. Do not flip it public in this task.**
+
+Amended by the user after the plan was written: **the repo is not made public until the model
+is verified running on Tenstorrent hardware through the vLLM plugin** — not merely loading via
+`transformers` on the host.
+
+The reason is sound: a Hub round-trip proves the artifact is well-formed, but this project's
+whole thesis is that well-formed and correct are different things. A model that loads on the
+host and cannot serve on the hardware it was trained on would be a poor thing to have made
+public. Publishing is effectively irreversible — people clone, caches propagate, links get
+shared — so the gate belongs after the strongest evidence, not the earliest.
+
+Flipping public becomes **Task 4 Step 5**, after `tt-kernel serve` answers a real query.
 
 ---
 
@@ -229,7 +241,23 @@ After pushing, re-read the repo's card and record which front-matter fields surv
 
 `tt-kernel pull` onto a clean bundles dir, then `tt-kernel serve`, then query the endpoint. Report the actual response.
 
-- [ ] **Step 4: Record results in CLAUDE.md**
+- [ ] **Step 5: Flip the HF repo public — the final gate**
+
+Only now, and only if all of these hold:
+
+- `tt-kernel pull` + `tt-kernel serve` brought up an endpoint on Tenstorrent hardware
+- a real query returned coherent output (report it verbatim)
+- the model card's front matter has been restored after `tag_repo` damaged it
+- the repo-level licence is still set
+
+**Ask the user before flipping.** Report the serving output first; publishing is their call, not
+a step to take on inference.
+
+If serving does not work — including if Task 3 found the adapter unviable — **the repo stays
+private** and that is a correct outcome. A private repo with verified weights is more useful
+than a public one that cannot serve.
+
+- [ ] **Step 6: Record results in CLAUDE.md**
 
 Including what `tt-kernel push` did to the model card, since that is the finding most useful to the next person.
 
