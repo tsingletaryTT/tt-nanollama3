@@ -26,6 +26,14 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from convert.to_hf import convert_checkpoint  # noqa: E402
+from train.paths import (  # noqa: E402
+    ProtectedPathError,
+    assert_not_protected,
+    read_dir,
+    shared_dir,
+    write_dir,
+)
+from train.sizes import DEFAULT_SIZE, SIZES  # noqa: E402
 
 
 def _newest_checkpoint(checkpoint_dir: Path) -> Path:
@@ -45,17 +53,40 @@ def _newest_checkpoint(checkpoint_dir: Path) -> Path:
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--size", default=DEFAULT_SIZE, choices=sorted(SIZES),
+                   help=f"Model size, which selects the artifact directories "
+                        f"(default: {DEFAULT_SIZE}).")
     p.add_argument("--checkpoint", type=Path, default=None,
                    help="Checkpoint file to convert (default: newest under "
-                        "artifacts/checkpoints).")
-    p.add_argument("--checkpoint-dir", type=Path, default=ROOT / "artifacts" / "checkpoints",
+                        "--checkpoint-dir).")
+    p.add_argument("--checkpoint-dir", type=Path, default=None,
                    help="Directory to pick the newest checkpoint from, when --checkpoint "
-                        "is not given (default: artifacts/checkpoints).")
-    p.add_argument("--tokenizer-dir", type=Path, default=ROOT / "artifacts" / "tokenizer",
-                   help="Directory holding tokenizer.json etc. (default: artifacts/tokenizer).")
-    p.add_argument("--out-dir", type=Path, default=ROOT / "artifacts" / "hf",
-                   help="Output directory for the HF model (default: artifacts/hf).")
+                        "is not given (default: artifacts/<size>/checkpoints, falling back "
+                        "to the legacy flat artifacts/checkpoints when that is where the "
+                        "artifacts actually are).")
+    p.add_argument("--tokenizer-dir", type=Path, default=None,
+                   help="Directory holding tokenizer.json etc. (default: "
+                        "artifacts/tokenizer — shared by every size).")
+    p.add_argument("--out-dir", type=Path, default=None,
+                   help="Output directory for the HF model "
+                        "(default: artifacts/<size>/hf).")
     args = p.parse_args()
+
+    # Reads tolerate the pre-registry flat layout so the baseline artifacts stay findable
+    # where they are; writes are always per-size and are guarded, so a conversion cannot
+    # overwrite the published HF artifact.
+    if args.checkpoint_dir is None:
+        args.checkpoint_dir = read_dir(args.size, "checkpoints")
+    if args.tokenizer_dir is None:
+        args.tokenizer_dir = shared_dir("tokenizer")
+    if args.out_dir is None:
+        args.out_dir = write_dir(args.size, "hf")
+    else:
+        try:
+            assert_not_protected(args.out_dir)
+        except ProtectedPathError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
 
     checkpoint = args.checkpoint or _newest_checkpoint(args.checkpoint_dir)
     if not checkpoint.is_file():

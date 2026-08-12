@@ -57,6 +57,7 @@ from train.config import (  # noqa: E402
     build_yaml_config,
     run_config_from_yaml,
 )
+from train.paths import ProtectedPathError, assert_not_protected, write_dir  # noqa: E402
 from train.sizes import DEFAULT_SIZE, SIZES, get_size  # noqa: E402
 
 
@@ -262,7 +263,13 @@ def main() -> int:
                         "--save-every: a validation boundary does not need to coincide with "
                         "a checkpoint boundary, or vice versa, and each still fires once "
                         "more at the run's final step if --steps isn't an exact multiple.")
-    p.add_argument("--checkpoint-dir", default=str(ROOT / "artifacts" / "checkpoints"))
+    # Default deliberately None, resolved after --size is known (see resolve_checkpoint_dir).
+    # It used to default to artifacts/checkpoints -- the protected baseline -- so a bare
+    # `python train/run.py` wrote into irreplaceable evidence.
+    p.add_argument("--checkpoint-dir", default=None,
+                   help="Where checkpoints are read from and written to "
+                        "(default: artifacts/<size>/checkpoints). Refuses to write to the "
+                        "protected baseline directories regardless of what is passed.")
     p.add_argument("--resume", default=None,
                    help="Checkpoint path to resume from, or 'latest' to pick the newest "
                         "in --checkpoint-dir. --steps then counts steps run in this "
@@ -304,6 +311,19 @@ def main() -> int:
               file=sys.stderr)
         return 1
     print(f"  model size: {size.name} ({model_config.name})")
+
+    # Resolve the checkpoint directory now that the size is known, and guard it. The guard
+    # applies to an explicitly-passed path too, not just the default: the point is that no
+    # invocation can write into the baseline evidence, however it is invoked.
+    if args.checkpoint_dir is None:
+        args.checkpoint_dir = str(write_dir(size, "checkpoints"))
+    else:
+        try:
+            assert_not_protected(args.checkpoint_dir)
+        except ProtectedPathError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+    print(f"  checkpoints: {args.checkpoint_dir}")
 
     yaml_config = build_yaml_config(
         str(ROOT / "artifacts" / "tokenizer"), str(model_config),
