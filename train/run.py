@@ -15,7 +15,18 @@ What we supply: our corpus, our tokenizer, ``seq_len``, and a **real** validatio
 ttml's ``train()`` fills ``val_losses`` with a copy of the training loss under a comment
 calling it placeholder behavior, so a val number from it means nothing.
 
+ttml's ``train()`` has no checkpoint hook of its own, so periodic checkpointing is done by
+calling it repeatedly in chunks of ``--save-every`` steps and saving between chunks (see
+``train.checkpoint``); the optimizer object persists across those calls, so AdamW's moments
+carry over rather than resetting each chunk. ``--resume latest`` (or a specific checkpoint
+path) restores model and optimizer state before training resumes — note that ``--steps`` in
+a ``--resume`` run counts steps to run *from* the checkpoint, not an absolute target step;
+see ``--resume``'s help below. ``--checkpoint-dir`` selects where checkpoints are read from
+and written to.
+
     python train/run.py --steps 20
+    python train/run.py --steps 100 --save-every 25
+    python train/run.py --steps 50 --resume latest
 """
 
 from __future__ import annotations
@@ -84,7 +95,11 @@ def evaluate(model, val_ids: np.ndarray, cfg, batches: int = 10) -> float:
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--tokens-dir", default=str(ROOT / "artifacts" / "tokens"))
-    p.add_argument("--steps", type=int, default=20)
+    p.add_argument("--steps", type=int, default=20,
+                   help="Steps to run in this invocation. With --resume, this many "
+                        "steps run past the checkpoint's step, not up to it — "
+                        "'--resume latest --steps 100' trains to start_step + 100, "
+                        "not to step 100.")
     p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--eval-every", type=int, default=10)
     p.add_argument("--arch", default="blackhole", choices=["blackhole", "wormhole_b0"])
@@ -96,7 +111,9 @@ def main() -> int:
     p.add_argument("--checkpoint-dir", default=str(ROOT / "artifacts" / "checkpoints"))
     p.add_argument("--resume", default=None,
                    help="Checkpoint path to resume from, or 'latest' to pick the newest "
-                        "in --checkpoint-dir.")
+                        "in --checkpoint-dir. --steps then counts steps run in this "
+                        "invocation (additive past the checkpoint's step), not an "
+                        "absolute target step.")
     args = p.parse_args()
 
     tokens = Path(args.tokens_dir)
@@ -195,7 +212,11 @@ def main() -> int:
             header = checkpoint.load(resume_path, model_params=model.parameters(),
                                      optimizer=optimizer)
             start_step = int(header["step"])
-            print(f"  resumed from {resume_path} at step {start_step}")
+            # cfg.steps is still the --steps value here (the chunk loop below hasn't
+            # touched it yet) — state the end step now, at the moment the operator is
+            # actually looking, since --steps is additive past start_step, not absolute.
+            print(f"  resumed from {resume_path} at step {start_step}; "
+                  f"running {cfg.steps} more steps to step {start_step + cfg.steps}")
 
         # train() takes exactly (cfg, model, optim, train_ids, use_ddp, use_tp) — no val_ids.
         # ttml's train() has no checkpoint hook of its own, so we call it in chunks of
