@@ -163,36 +163,94 @@ worth keeping.
 
 **The real run**, p300c/Blackhole, `--steps 3000 --save-every 500 --batch-size 64`:
 
-- First train loss `10.6875` (≈`ln(32000)`, correct init), last train loss `1.9219`, real
-  validation loss (our own `evaluate()`, 10 sampled batches, not `train()`'s placeholder)
-  `1.8781`. Validation coming in *below* that last train figure is expected, not a labeling
-  bug: at 0.43 of an epoch there's no repeated exposure to the data to overfit on, dropout is
-  0.0 so there's no train-time regularization noise either, and the train figure is a single
-  noisy mini-batch while the validation figure averages ten — comparing a lone sample to a
-  ten-batch average will show sampling noise in either direction. That the two numbers differ
-  at all (rather than being identical) is itself the evidence that `evaluate()` genuinely ran,
-  instead of silently falling back to `train()`'s placeholder copy. The curve overall is a
-  clean log shape — steep for the first ~300 steps, then a steadily decelerating decline into
-  a noisy 1.9–2.1 band for the back half — not a plateau, not divergence, and (as expected for
-  a raw per-batch metric) not step-to-step monotonic: of 2999 step-to-step transitions, 1359
-  went up and 1417 went down (223 unchanged), while every windowed average kept falling.
+- First train loss `10.6875` — consistent with a near-uniform initial distribution (uniform
+  over a 32000-token vocabulary would be `ln(32000) ≈ 10.37`; the measured value is 0.31 nats
+  above that, still the expected ballpark for a freshly-initialized model, not an exact
+  match), last train loss `1.9219`, real validation loss (our own `evaluate()`, 10 sampled
+  batches, not `train()`'s placeholder) `1.8781` — perplexity `≈ e^1.8781 ≈ 6.5`. Validation
+  coming in *below* that last train figure is expected, not a labeling bug: at 0.43 of an
+  epoch there's no repeated exposure to the data to overfit on, dropout is 0.0 so there's no
+  train-time regularization noise either, and the train figure is a single noisy mini-batch
+  while the validation figure averages ten — comparing a lone sample to a ten-batch average
+  will show sampling noise in either direction. That the two numbers differ at all (rather
+  than being identical) is itself the evidence that `evaluate()` genuinely ran, instead of
+  silently falling back to `train()`'s placeholder copy.
+- **Windowed-mean loss curve** (300-step windows, reconstructed from all 3000 per-step
+  readings): a clean log shape — steep for the first ~300 steps, then a steadily decelerating
+  decline into a noisy 1.9–2.1 band for the back half — not a plateau, not divergence.
+
+  | Steps       | Mean   | Min    | Max     |
+  |-------------|--------|--------|---------|
+  | 1–300       | 4.4747 | 3.0625 | 10.6875 |
+  | 301–600     | 2.8236 | 2.5469 | 3.1875  |
+  | 601–900     | 2.4894 | 2.2656 | 2.7344  |
+  | 901–1200    | 2.3149 | 2.1250 | 2.4844  |
+  | 1201–1500   | 2.1941 | 2.0469 | 2.3438  |
+  | 1501–1800   | 2.1187 | 1.9688 | 2.2969  |
+  | 1801–2100   | 2.0543 | 1.9141 | 2.2188  |
+  | 2101–2400   | 2.0060 | 1.8750 | 2.2031  |
+  | 2401–2700   | 1.9621 | 1.8594 | 2.1250  |
+  | 2701–3000   | 1.9345 | 1.8125 | 2.0938  |
+
+  As expected for a raw per-batch metric, the curve is *not* step-to-step monotonic: of 2999
+  step-to-step transitions, 1359 went up and 1417 went down (223 unchanged), while every
+  windowed average above kept falling.
 - Steady state `~0.134 s/step` (7.44–7.50 it/s), matching Plan 2's 0.12–0.14 s/step. Unlike
   Plan 2, this run's first step showed no visible compiler-warmup stall — most likely because
   Task 2's same-shapes hardware runs earlier today had already warmed the on-disk kernel
   cache; not confirmed by inspecting the cache directly, so treat as a plausible explanation,
   not a verified one.
 - Total wall clock `~6 min 47 s` (process start to final printed loss), including all six
-  checkpoint writes — the writes did not add a visible cost on top of compute; every 500-step
-  chunk took the same ~67.1 s regardless.
+  checkpoint writes — the writes are bounded below ~0.5 s per write. Measurement resolution
+  here (~±0.25 s per 500-step chunk, from checkpoint-file mtime deltas) exceeds the actual
+  effect size (~0.16 s implied by the chunk-to-chunk variance), so "no visible cost" would
+  overstate what was measured; every 500-step chunk took the same ~67.1 s regardless, which is
+  the tighter, honest claim.
 - Six checkpoints, `nanollama3_step00000500.pkl` through `nanollama3_step00003000.pkl`
-  (`artifacts/checkpoints/`, gitignored), 132,185,963 bytes each, final one at step 3000 as
-  requested.
+  (`artifacts/checkpoints/`, gitignored), 132,185,963 bytes each at the time of this run,
+  final one at step 3000 as requested. (A later header back-fill — see the checkpoint-header
+  fix wave below — added 339 bytes to each file's header record; tensor data is untouched.)
 
 **This is a demonstration, not a capable model.** `3000 × 64 × 256 ≈ 49.2M tokens` is about
 **0.43 of one epoch** over the 114.9M-token training split — this run never saw even half the
 corpus once. TinyStories is also a synthetic, deliberately simple corpus (short children's
 stories, small effective vocabulary, regular grammar, built so small models can fit it), so a
 low loss here is expected and does not indicate general language competence — no text was
-decoded from this checkpoint to check. Full numbers, the reconstructed per-step curve, and
-self-review are in
-[`task-3-report.md`](.superpowers/sdd/2026-08-11-checkpointing/task-3-report.md).
+decoded from this checkpoint to check.
+
+## `feat/checkpointing` — final whole-branch review fix wave (2026-08-11)
+
+A final review before merge found the header schema above missing exactly what it existed
+to prevent: architecture facts a converter can't recover without guessing. Fixed, no
+training re-run (the box is shared; the six checkpoints above stand as the run's evidence):
+
+- **Header now carries `intermediate_dim=1024`, `weight_tying=True`, `rms_norm_eps=1e-5`,
+  `weights_dtype="bfloat16"`, and the full `transformer_config`.** The first three exist only
+  as ttml C++ defaults (`modules/llama_block.cpp`, `models/llama.hpp`,
+  `modules/rms_norm_module.hpp`) — nanollama3.yaml never sets them. `weight_tying` is the one
+  that actually matters: because it's on, these checkpoints have no `llama/tok_emb/weight`
+  tensor at all (confirmed against the manifest — 50 model tensors, none named `tok_emb`); a
+  converter that didn't know would produce a model with a randomly-initialized embedding
+  table and raise no error.
+- **All six existing checkpoints were back-filled in place** with
+  `scripts/backfill_checkpoint_headers.py` — a pure-CPU, stdlib-`pickle`-only rewrite of each
+  file's header record, tensor bytes copied through unchanged. Verified byte-for-byte against
+  a pre-backfill backup: the tail (everything after record 0) is bit-identical; only the
+  header record grew, by exactly 339 bytes per file (132,185,963 → 132,186,302).
+- **`total_tokens` (the whole corpus, 127,635,889) renamed to `corpus_tokens`**, with a new
+  `batch_size` field and a derived `tokens_seen = step * batch_size * seq_len` — the number
+  that actually describes training volume (49,152,000 at step 3000), which `total_tokens`
+  was silently overstating by ~2.6x for anyone reading the header as a model-card source.
+- **`latest_checkpoint()`'s docstring corrected** from "newest" to "highest-step" (it sorts
+  by zero-padded step, not mtime) and `--resume` now prints the loaded header's `created_at`
+  alongside the step, so an operator sharing `artifacts/checkpoints/` across runs can see
+  which run's weights they actually got.
+- **`checkpoint.load()` now validates the header before restoring any tensor**, not after —
+  a bad or future-format header fails fast instead of first mutating the live model.
+- **Added `convert/checkpoint_reader.py`**, a pure-CPU (`pickle`-only, no ttml/ttnn) reader
+  for a checkpoint's header and tensor manifest — what the back-fill script needed, and the
+  first piece of the CPU-side conversion path referenced in the design spec's Known Risks.
+
+(Per-fix commands and the full post-back-fill verification log for this wave live in the
+review's own working notes, not linked here — see this section for the numbers that matter
+to anyone reading this file without that tree checked out.)

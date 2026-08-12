@@ -491,7 +491,14 @@ git commit -m "docs(claude): log the first real NanoLlama3 training run"
 
 **Every capability named above resolves to code or a test.** Applying the rule Plan 2 added after the fact:
 - "Header schema construction and validation" → `build_header`/`validate_header`, tests 1–8
-- "Path conventions" → `checkpoint_path`/`latest_checkpoint`, tests 9–10
+- "Path conventions" → `checkpoint_path` only, via `test_checkpoint_path_is_step_numbered` and
+  `test_checkpoint_paths_sort_lexicographically_by_step`. **Correction (final whole-branch
+  review):** this line originally claimed `latest_checkpoint` too, but neither of those two
+  tests exercises it — `latest_checkpoint` had no direct test at all at this point in the
+  plan. A later review found and fixed the resulting gap (its docstring said "newest" when
+  the code actually picks highest-step, which silently differ once a directory is shared
+  across runs) and added `test_latest_checkpoint_returns_none_for_empty_dir` and
+  `test_latest_checkpoint_picks_highest_step_not_newest_file` to `tests/test_checkpoint.py`.
 - "Chunked training, periodic saves, resume" → Task 2 Steps 1 and 4
 - "No bare `assert` guards" → Task 2 Step 2, an explicit conversion of the two existing ones
 
