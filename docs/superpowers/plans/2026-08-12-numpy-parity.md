@@ -62,25 +62,37 @@ out  = out_linear(heads_fusion(attn))
 - `ops::scaled_dot_product_attention` — the scaling factor and mask convention.
 - `ops::swiglu` — which of `w1`/`w3` is gated and which is lifted.
 
-## On the achievable tolerance — corrected after Task 1
+## On the achievable tolerance — corrected twice
 
-This plan originally promised ~1e-3. Task 1's review found concrete evidence that is not
-reachable against the device, and the reason is worth stating so nobody re-asserts it:
+**First correction (wrong, recorded so nobody repeats it).** After Task 1 I amended this plan to
+say ~1e-3 was unreachable, citing ttml packing the RMSNorm mean divisor as bfloat16
+(`rmsnorm_fw_program_factory.cpp:157-158`, verified) — a systematic ~0.1-0.2% error no float32
+reference reproduces.
 
-ttml packs the RMSNorm mean divisor as **bfloat16** — `pack_two_bfloat16_to_uint32(1.F / num_inner)`
-(`rmsnorm_fw_program_factory.cpp:157`), and `packed_eps` likewise. bf16's 8-bit significand gives
-ttml's `mean(x²)` a systematic ~0.1–0.2% relative error that **no float32 NumPy reference can
-reproduce**. `ttnn_fixed::matmul`'s accumulation and output dtype remain untraced and may add more.
+**That argument is real but does not apply to this gate**, as Task 1's implementer pointed out.
+It bounds a **NumPy-vs-device** comparison. The gate here is **NumPy-vs-HF**: both paths run on
+the host, from the same bf16 weights, and neither touches the device. The device's bf16 divisor
+is irrelevant to it.
 
-Two consequences bind Task 3:
+**What actually bounds this gate** is NumPy's float32 arithmetic versus torch's compute dtype.
+Load the HF model in float32 and both sides are fp32 from identical bf16 weights, so agreement
+should be *tight* — 1e-3 relative is plausible, possibly better. Load it in bfloat16 and the
+gap is dominated by torch's bf16 rounding, which is a property of how you loaded it, not of the
+conversion.
 
-- **Measure before asserting.** Run a NumPy-vs-NumPy control (fp32 vs bf16-rounded activations)
-  to establish what agreement is *possible*, then set the gate from that. Asserting an
-  unreachable tolerance makes every failure ambiguous between "the converter is wrong" and
-  "the tolerance was never achievable" — the worst possible property for a diagnostic.
-- **Disagreement does not automatically indict the converter.** Task 1's loss check has a
-  measured standard error of ~0.102 nats (per-window sd ≈ 0.29 over 8 windows), so it cannot
-  license trusting the NumPy path over the converter. On disagreement, both paths are suspect.
+**Still measure before asserting**, for a different reason than I first gave: the achievable
+figure depends on a dtype choice this plan has not fixed. Task 3 establishes it with a
+NumPy-vs-NumPy control, then sets the gate. An unreachable tolerance makes every failure
+ambiguous between "the converter is wrong" and "the gate was impossible" — the worst property a
+diagnostic can have.
+
+**A separate limit, which does hold.** Task 1's loss check has a measured standard error of
+~0.112 nats (sample sd 0.315 over 8 windows), so its 2σ floor is ≈0.22 nats. It cannot license
+trusting the NumPy path over the converter on disagreement — on disagreement, both are suspect.
+Its ablations move 12-52 SE, so it remains decisive for what it was built to test.
+
+**Untraced, and the one thing that could still surprise us:** `ttnn_fixed::matmul`'s accumulation
+and output dtype. It bounds any future NumPy-vs-device work, not this gate.
 
 ## Global Constraints
 
