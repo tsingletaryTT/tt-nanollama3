@@ -14,15 +14,20 @@ trained, packaged, published, and served entirely on Tenstorrent tooling.
 
 ## Status
 
-**Working today:** corpus preparation, a 32,000-token BPE tokenizer, and a training entrypoint
-that runs on hardware with a real validation loop.
+**Working today:** corpus preparation, a 32,000-token BPE tokenizer, a training entrypoint that
+runs on hardware with a real validation loop, and checkpointing with resume. **The model has
+been trained** — 3000 steps, in 6 min 47 s on 4× Blackhole p300c.
 
-**Not done yet:** there is **no trained checkpoint in this repository.** Training has been
-proven over short runs (20 steps and 5 steps), not run to completion. Checkpointing lands in
-the next plan, followed by a real training run, then Hugging Face conversion and packaging.
-See [`docs/superpowers/specs/`](docs/superpowers/specs/) for the full arc.
+**Not done yet:** the trained weights are **not published** — checkpoints are gitignored and
+live only on the machine that produced them, so cloning this repo gets you the pipeline, not a
+model. Hugging Face conversion and tt-kernel packaging are the remaining stages. See
+[`docs/superpowers/specs/`](docs/superpowers/specs/) for the full arc.
 
-Do not expect usable weights from this repo yet.
+**Calibrate your expectations.** This is a ~22M-parameter model that has seen 49,152,000
+tokens — about **0.43 of one epoch** over its training split — of TinyStories, a synthetic
+corpus of simple children's stories with a small vocabulary and deliberately regular grammar.
+It demonstrates that the pipeline works end to end. It is not a capable general model, and no
+text has been decoded from it yet.
 
 ## The model
 
@@ -39,10 +44,17 @@ Do not expect usable weights from this repo yet.
 
 Architecture parameters come from tt-train's `nanollama3.yaml` and are not redefined here.
 
-Measured on a 20-step smoke run: first loss **10.6875** against a theoretical `ln(32000) ≈
-10.37` for a freshly initialized model, falling to **7.4688**, with a real validation loss of
-**7.0281**. Steady-state throughput was ~0.12–0.14 s/step after an 18.7 s first step that
-times the kernel compiler rather than the model.
+Measured on the 3000-step run: first train loss **10.6875** — consistent with a near-uniform
+initial distribution, where `ln(32000) = 10.37` — falling to **1.9219**, with a real held-out
+validation loss of **1.8781** from this repo's own `evaluate()` over 10 sampled batches.
+Steady state ~0.134 s/step (7.44–7.50 it/s); 6 min 47 s wall clock; six checkpoints at steps
+500–3000.
+
+Validation coming in below training loss is expected here rather than anomalous: at 0.43 of an
+epoch there is no overfitting, dropout is 0.0, and the final train figure is a single batch
+against a ten-batch validation average. That the two differ at all is what confirms the number
+came from our own evaluation rather than tt-train's `val_losses`, which is a documented
+placeholder that copies the training loss.
 
 ## History
 
