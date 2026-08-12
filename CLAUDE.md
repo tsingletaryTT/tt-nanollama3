@@ -623,3 +623,68 @@ none changing a measured number, several requiring one. No training re-run;
 
 Test suite: **154 passed** (151 pre-existing + 3 new: the epsilon-probe test and the two
 import-purity tests), 0 skipped, 0 failed.
+
+## `feat/packaging` Task 1 — repairing the HF artifact before publication (2026-08-12)
+
+**Why this task exists.** Publication (Task 2+) is gated on the artifact being clean —
+three defects, all cheap to fix now and expensive after weights are public, were found
+during packaging-plan review of `artifacts/hf/`.
+
+**Fix 1 — `generation_config.json` was missing entirely.** `transformers` logs its absence
+and falls back to `config.json`'s token ids. `convert_checkpoint` now builds one via
+`transformers.GenerationConfig(bos_token_id=..., eos_token_id=..., pad_token_id=...)` and
+calls `.save_pretrained(out_dir)` — using the library's own class rather than a hand-rolled
+dict so the on-disk shape matches whatever this environment's `transformers` considers
+standard. The three ids are read from `config` (the exact dict `build_config` returned,
+already written to `config.json`), not re-derived from `_BOS_TOKEN_ID` et al. directly, so
+the two files are structurally incapable of disagreeing.
+
+**Fix 2 — `tokenizer_config.json` declared the wrong class.** `convert/tokenizer.py` exports
+via `PreTrainedTokenizerFast.save_pretrained()`, which writes `tokenizer_class:
+"PreTrainedTokenizer"` — `transformers` strips the `Fast` suffix on save, an upstream quirk,
+not a bug in this project's export code. The tokenizer actually loads as
+`PreTrainedTokenizerFast`. Corrected **on the copy in `out_dir` only**, after
+`convert_checkpoint`'s existing `shutil.copy2` — `artifacts/tokenizer/` is a separate
+artifact on its own publication schedule, and patching it there would invalidate its own
+tests. Verified the source is untouched: `artifacts/tokenizer/tokenizer_config.json` still
+reads `tokenizer_class: "PreTrainedTokenizer"` after conversion.
+
+**Fix 3 — no guard tied `max_position_embeddings` to the checkpoint's trained sequence
+length.** The real trap: `tokenizer_config.json` advertises `model_max_length:
+1000000000000000019884624838656` (transformers' "no limit" sentinel), so a serving stack
+that derives `max_model_len` from the tokenizer instead of `config.json` would silently
+accept ~4k-token contexts from a model trained to a 256-token window — degraded output, no
+error (`scripts/chat.py` already carried a comment about exactly this). `build_config`
+already derives `max_position_embeddings` from `header["seq_len"]`, so in normal operation
+the two can't disagree; the new check in `convert_checkpoint` raises `ValueError` (not a
+bare `assert` — see the project's global guard convention) if they ever do, so a future
+change to `build_config` that breaks that derivation fails loudly at conversion time rather
+than silently at serving time. `test_convert_checkpoint_raises_if_max_position_embeddings_disagrees_with_header`
+proves the check is reachable by monkeypatching `build_config` to tamper with its own
+output.
+
+**The duplicate-embedding question (plan Task 1 Step 3) — settled empirically, not
+re-litigated.** `model.safetensors` was 68.6 MB for a 44 MB model because
+`lm_head.weight` duplicated `embed_tokens.weight` under `tie_word_embeddings: true`. Measured
+directly before implementing (see `.superpowers/sdd/2026-08-12-packaging/progress.md`):
+dropping `lm_head.weight` takes the file from 57 tensors / 68,632,400 B to 56 tensors /
+44,056,336 B (36% smaller), `AutoModelForCausalLM.from_pretrained` still loads with **no**
+warnings, `torch.equal(embed_tokens.weight, lm_head.weight)` is still `True` after load
+(`transformers` reconstructs `lm_head` from the tied embedding), and logits are
+bit-identical (max diff 0.0). Implemented as unconditional-on-tying: the tied-embedding
+branch in `convert_checkpoint`'s tensor-assembly loop now writes only
+`model.embed_tokens.weight`; the untied path (`tok_emb` → `embed_tokens`, `fc` → `lm_head`,
+two genuinely distinct tensors) is unchanged. The completeness post-condition's expected-key
+count is now conditional on `weight_tying` — `9 × num_hidden_layers + 2` (embed_tokens,
+norm) when tied, `+ 3` (adding `lm_head`) when untied — rather than a single hardcoded `+ 3`
+that would have made a correct tied conversion fail its own completeness check.
+
+**Verification.** Full suite: **164 passed** (154 pre-existing + 10 new in
+`tests/test_to_hf.py`), 0 failed. `tests/test_numpy_parity.py` (the gate that actually proves
+numerical correctness, independent of everything else in this task) still passes after
+regeneration. Regenerated `artifacts/hf/` via `scripts/convert_checkpoint.py`:
+`model.safetensors` 44,056,304 bytes (56 tensors, no `lm_head.weight`), new
+`generation_config.json` (`{bos,eos,pad}_token_id` = 1/2/3), `tokenizer_config.json`'s
+`tokenizer_class` now `PreTrainedTokenizerFast`, `config.json`'s `max_position_embeddings`
+still 256. `scripts/chat.py` smoke-tested against the regenerated artifact: loads with no
+warnings, reports `context 256`, generates coherent completions.

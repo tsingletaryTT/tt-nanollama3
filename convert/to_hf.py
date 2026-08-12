@@ -155,6 +155,24 @@ def convert_checkpoint(ckpt: Path, tokenizer_dir: Path, out_dir: Path) -> Dict[s
     ckpt, tokenizer_dir, out_dir = Path(ckpt), Path(tokenizer_dir), Path(out_dir)
     header, _manifest = read_checkpoint_meta(ckpt)
     config = build_config(header, tokenizer_dir=tokenizer_dir)
+
+    # Guard against the serving trap this project actually hit in review:
+    # tokenizer_config.json advertises `model_max_length: 1000000000000000019884624838656`
+    # (transformers' sentinel for "no limit"), so a caller deriving a serving max_model_len
+    # from the tokenizer rather than from config.json would silently get a stack that
+    # accepts ~4k-token contexts from a model trained to a 256-token window -- degraded
+    # output, not an error. build_config already derives max_position_embeddings from
+    # header["seq_len"], so in normal operation these two can never disagree; this check
+    # exists so a future edit to build_config that breaks that derivation fails loudly here,
+    # before a wrong artifact is written, rather than silently downstream at serving time.
+    if config["max_position_embeddings"] != int(header["seq_len"]):
+        raise ValueError(
+            f"config.json's max_position_embeddings ({config['max_position_embeddings']}) "
+            f"disagrees with the checkpoint header's seq_len ({header['seq_len']}). This "
+            f"should be structurally impossible (build_config derives one from the other) "
+            f"-- check for a stale/tampered config before trusting anything else here."
+        )
+
     tc = header["transformer_config"]
     head_dim = config["hidden_size"] // config["num_attention_heads"]
     weight_tying = bool(header["weight_tying"])
@@ -187,10 +205,19 @@ def convert_checkpoint(ckpt: Path, tokenizer_dir: Path, out_dir: Path) -> Dict[s
                 arr, num_heads=config["num_attention_heads"], head_dim=head_dim
             )
         elif isinstance(target, tuple):
-            # Tied embedding: one tensor, both destinations.
-            arr = squeeze_leading(tensor)
-            out[target[0]] = arr
-            out[target[1]] = arr
+            # Tied embedding: map_name returns both HF destinations
+            # (model.embed_tokens.weight, lm_head.weight) because both conceptually hold
+            # this tensor's values under tie_word_embeddings=True. Only the embedding
+            # destination is actually written to disk, though: `transformers` reconstructs
+            # lm_head.weight from the tied embedding at load time, so writing both would
+            # only duplicate ~lm_head's worth of bytes in model.safetensors for zero
+            # behavioural benefit. Verified empirically before this was made unconditional:
+            # AutoModelForCausalLM.from_pretrained loads with no warnings, torch.equal(
+            # embed_tokens.weight, lm_head.weight) holds after load, and logits are
+            # bit-identical to the version that wrote both (max diff 0.0) -- see
+            # .superpowers/sdd/2026-08-12-packaging/progress.md. 68.6 MB -> 44.1 MB, a 36%
+            # reduction on every download.
+            out[target[0]] = squeeze_leading(tensor)
         else:
             out[target] = squeeze_leading(tensor)
 
@@ -218,10 +245,11 @@ def convert_checkpoint(ckpt: Path, tokenizer_dir: Path, out_dir: Path) -> Dict[s
         )
 
     # Completeness post-condition: the config implies an exact HF key set (9 tensors per
-    # transformer layer, plus the embedding, final norm, and lm_head), and nothing upstream
-    # of this point actually confirms the emitted safetensors file has all of them. A
-    # truncated manifest -- a checkpoint saved mid-write, or a future ttml change that drops
-    # a tensor -- would otherwise produce a safetensors file silently missing keys, and
+    # transformer layer, plus the embedding and final norm -- and, only when weight_tying is
+    # off, a separate lm_head), and nothing upstream of this point actually confirms the
+    # emitted safetensors file has all of them. A truncated manifest -- a checkpoint saved
+    # mid-write, or a future ttml change that drops a tensor -- would otherwise produce a
+    # safetensors file silently missing keys, and
     # `transformers.AutoModelForCausalLM.from_pretrained` fills gaps with a random
     # initialization and only a warning, not an error: exactly the "loads cleanly, silently
     # wrong" failure mode this whole conversion path exists to guard against.
@@ -236,18 +264,29 @@ def convert_checkpoint(ckpt: Path, tokenizer_dir: Path, out_dir: Path) -> Dict[s
         for i in range(config["num_hidden_layers"])
         for suffix in _PER_LAYER_SUFFIXES
     }
-    expected_keys |= {"model.embed_tokens.weight", "model.norm.weight", "lm_head.weight"}
-    # len(expected_keys) == 9 * num_hidden_layers + 3 by construction: 9 per-layer suffixes
-    # above, times num_hidden_layers layers, plus the 3 top-level keys unioned in just above.
+    expected_keys |= {"model.embed_tokens.weight", "model.norm.weight"}
+    if not weight_tying:
+        # Untied: embed_tokens and lm_head are two distinct on-disk tensors. Tied: lm_head
+        # is deliberately omitted (see the tied-embedding branch above) and reconstructed by
+        # `transformers` at load time from the tied embed_tokens.weight, so it must NOT be
+        # expected here -- expecting it would make this very check reject a correct tied
+        # conversion as "missing lm_head.weight".
+        expected_keys |= {"lm_head.weight"}
+    # len(expected_keys) == 9 * num_hidden_layers + 2 when tied (embed_tokens, norm) or
+    # 9 * num_hidden_layers + 3 when untied (embed_tokens, norm, lm_head), by construction:
+    # 9 per-layer suffixes above, times num_hidden_layers layers, plus the top-level keys
+    # unioned in just above.
 
     actual_keys = set(out)
     missing_keys = expected_keys - actual_keys
     unexpected_keys = actual_keys - expected_keys
     if missing_keys or unexpected_keys:
+        top_level_count = 2 if weight_tying else 3
         raise ValueError(
             "convert_checkpoint produced an incomplete/mismatched key set for "
-            f"num_hidden_layers={config['num_hidden_layers']} "
-            f"(expected {len(expected_keys)} = 9*layers + 3 keys, got {len(actual_keys)}). "
+            f"num_hidden_layers={config['num_hidden_layers']} weight_tying={weight_tying} "
+            f"(expected {len(expected_keys)} = 9*layers + {top_level_count} keys, "
+            f"got {len(actual_keys)}). "
             f"Missing: {sorted(missing_keys) or 'none'}. "
             f"Unexpected: {sorted(unexpected_keys) or 'none'}."
         )
@@ -255,8 +294,43 @@ def convert_checkpoint(ckpt: Path, tokenizer_dir: Path, out_dir: Path) -> Dict[s
     out_dir.mkdir(parents=True, exist_ok=True)
     save_file(out, str(out_dir / "model.safetensors"))
     (out_dir / "config.json").write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+
+    # generation_config.json: without it, `transformers` logs the file's absence and falls
+    # back to config.json's token ids for generation defaults -- a real model directory
+    # should carry this explicitly. Built via `GenerationConfig` (not a hand-rolled dict) so
+    # its on-disk shape and default sampling fields match whatever this environment's
+    # transformers version considers standard. The token ids come from `config` -- the exact
+    # dict `build_config` returned above -- rather than from `_BOS_TOKEN_ID` et al. directly,
+    # so this file and config.json are structurally incapable of disagreeing with each other.
+    from transformers import GenerationConfig
+
+    generation_config = GenerationConfig(
+        bos_token_id=config["bos_token_id"],
+        eos_token_id=config["eos_token_id"],
+        pad_token_id=config["pad_token_id"],
+    )
+    generation_config.save_pretrained(str(out_dir))
+
     for f in ("tokenizer.json", "tokenizer_config.json", "special_tokens_map.json"):
         src = tokenizer_dir / f
         if src.is_file():
             shutil.copy2(src, out_dir / f)
+
+    # tokenizer_config.json's tokenizer_class is corrected here, on the copy in out_dir,
+    # rather than upstream in convert/tokenizer.py's export: `PreTrainedTokenizerFast.
+    # save_pretrained()` writes "PreTrainedTokenizer" (transformers strips the "Fast" suffix
+    # on save -- a known upstream quirk, not something this project got wrong), but the
+    # tokenizer actually loads back as `PreTrainedTokenizerFast`. artifacts/tokenizer/ is a
+    # separate artifact published on its own schedule; patching it here (post-copy, in the HF
+    # output directory only) fixes what `transformers` reports for this specific model
+    # directory without touching that other artifact or invalidating its own tests.
+    tok_config_dst = out_dir / "tokenizer_config.json"
+    if tok_config_dst.is_file():
+        tok_config = json.loads(tok_config_dst.read_text(encoding="utf-8"))
+        if tok_config.get("tokenizer_class") == "PreTrainedTokenizer":
+            tok_config["tokenizer_class"] = "PreTrainedTokenizerFast"
+            tok_config_dst.write_text(
+                json.dumps(tok_config, indent=2) + "\n", encoding="utf-8"
+            )
+
     return config
