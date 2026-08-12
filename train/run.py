@@ -31,6 +31,7 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from train import checkpoint  # noqa: E402
 from train.config import VOCAB_SIZE, build_yaml_config, run_config_from_yaml  # noqa: E402
 
 
@@ -90,6 +91,12 @@ def main() -> int:
     p.add_argument("--tt-metal-home", default=_default_tt_metal_home())
     p.add_argument("--dry-run", action="store_true",
                    help="Print the resolved config and exit without opening a device.")
+    p.add_argument("--save-every", type=int, default=0,
+                   help="Checkpoint every N steps (0 disables checkpointing).")
+    p.add_argument("--checkpoint-dir", default=str(ROOT / "artifacts" / "checkpoints"))
+    p.add_argument("--resume", default=None,
+                   help="Checkpoint path to resume from, or 'latest' to pick the newest "
+                        "in --checkpoint-dir.")
     args = p.parse_args()
 
     tokens = Path(args.tokens_dir)
@@ -140,17 +147,16 @@ def main() -> int:
     with model_config.open("r", encoding="utf-8") as f:
         model_yaml = yaml.safe_load(f)
     model_vocab_size = model_yaml["transformer_config"]["vocab_size"]
-    assert model_vocab_size == VOCAB_SIZE, (
-        f"model config vocab_size ({model_vocab_size}) at {model_config} does not match "
-        f"train.config.VOCAB_SIZE ({VOCAB_SIZE}); the tokenizer and model disagree on "
-        "vocabulary size."
-    )
-    max_train_id = int(train_ids.max())
-    assert max_train_id < VOCAB_SIZE, (
-        f"max token id in {train_path} is {max_train_id}, which is >= VOCAB_SIZE "
-        f"({VOCAB_SIZE}); these tokens were produced by a different tokenizer than the "
-        "one the model config expects — re-tokenize with the matching tokenizer."
-    )
+    if model_vocab_size != VOCAB_SIZE:
+        raise ValueError(
+            f"model config declares vocab_size={model_vocab_size} but train.config.VOCAB_SIZE "
+            f"is {VOCAB_SIZE}; the tokenizer and the model disagree"
+        )
+    if int(train_ids.max()) >= VOCAB_SIZE:
+        raise ValueError(
+            f"token id {int(train_ids.max())} exceeds vocab_size {VOCAB_SIZE}; these tokens "
+            "were produced by a different tokenizer than the model config expects"
+        )
 
     set_seed(yaml_config["training_config"]["seed"])
     try:
@@ -180,8 +186,45 @@ def main() -> int:
             "train_loss); the real validation loss is computed after training and "
             "printed below."
         )
+        start_step = 0
+        if args.resume:
+            resume_path = (checkpoint.latest_checkpoint(Path(args.checkpoint_dir))
+                           if args.resume == "latest" else Path(args.resume))
+            if resume_path is None or not resume_path.is_file():
+                raise FileNotFoundError(f"no checkpoint to resume from: {args.resume}")
+            header = checkpoint.load(resume_path, model_params=model.parameters(),
+                                     optimizer=optimizer)
+            start_step = int(header["step"])
+            print(f"  resumed from {resume_path} at step {start_step}")
+
         # train() takes exactly (cfg, model, optim, train_ids, use_ddp, use_tp) — no val_ids.
-        train_losses, _ = train(cfg, model, optimizer, train_ids, False, False)
+        # ttml's train() has no checkpoint hook of its own, so we call it in chunks of
+        # --save-every steps and save between chunks. The optimizer object persists across
+        # calls (it is the same Python object each time), so AdamW's moments carry over —
+        # only train_losses is per-call and must be accumulated here.
+        remaining = cfg.steps
+        step = start_step
+        all_losses = []
+        chunk = args.save_every if args.save_every > 0 else remaining
+        while remaining > 0:
+            cfg.steps = min(chunk, remaining)
+            losses, _ = train(cfg, model, optimizer, train_ids, False, False)
+            all_losses.extend(losses)
+            remaining -= cfg.steps
+            step += cfg.steps
+            if args.save_every > 0:
+                path = checkpoint.checkpoint_path(Path(args.checkpoint_dir), step)
+                checkpoint.save(
+                    path,
+                    header=checkpoint.build_header(
+                        step, model_config_path=str(model_config),
+                        tokenizer_dir=str(ROOT / "artifacts" / "tokenizer"),
+                        total_tokens=int(len(train_ids) + len(val_ids)),
+                    ),
+                    model_params=model.parameters(), optimizer=optimizer,
+                )
+                print(f"  checkpoint saved: {path}")
+        train_losses = all_losses
         val_loss = evaluate(model, val_ids, cfg)
         if train_losses:
             print(f"\nfirst train loss : {train_losses[0]:.4f}")
