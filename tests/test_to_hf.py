@@ -61,6 +61,16 @@ def test_missing_header_field_raises_rather_than_defaulting():
         build_config(h)
 
 
+def test_missing_nested_transformer_config_field_raises_the_same_way():
+    """embedding_dim/num_blocks/etc. live inside transformer_config, not the top-level
+    header -- a missing one there must raise the same informative ValueError as a missing
+    top-level field, not a bare KeyError."""
+    h = _header()
+    del h["transformer_config"]["embedding_dim"]
+    with pytest.raises(ValueError, match="embedding_dim"):
+        build_config(h)
+
+
 @pytest.mark.skipif(not CKPT.is_file(), reason="no trained checkpoint on this machine")
 def test_end_to_end_against_the_real_checkpoint(tmp_path):
     from convert.to_hf import convert_checkpoint

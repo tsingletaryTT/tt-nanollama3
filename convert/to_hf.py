@@ -26,6 +26,11 @@ from convert.hf_mapping import map_name, split_kv, squeeze_leading
 _REQUIRED = ("vocab_size", "seq_len", "intermediate_dim", "weight_tying",
              "rms_norm_eps", "weights_dtype", "transformer_config")
 
+#: Nested under header["transformer_config"] -- validated separately from _REQUIRED
+#: because a missing key there is otherwise a bare KeyError instead of the same
+#: informative ValueError the top-level fields get.
+_REQUIRED_TRANSFORMER_CONFIG = ("embedding_dim", "num_blocks", "num_heads", "num_groups", "theta")
+
 
 def build_config(header: Dict[str, Any]) -> Dict[str, Any]:
     """HF ``LlamaConfig`` fields, entirely from ``header``."""
@@ -36,6 +41,13 @@ def build_config(header: Dict[str, Any]) -> Dict[str, Any]:
             f"{', '.join(missing)}. Re-run scripts/backfill_checkpoint_headers.py."
         )
     tc = header["transformer_config"]
+    missing_tc = [f for f in _REQUIRED_TRANSFORMER_CONFIG if f not in tc]
+    if missing_tc:
+        raise ValueError(
+            f"checkpoint header's transformer_config missing field(s) required for "
+            f"conversion: {', '.join(missing_tc)}. Re-run "
+            f"scripts/backfill_checkpoint_headers.py."
+        )
     return {
         "architectures": ["LlamaForCausalLM"],
         "model_type": "llama",
@@ -83,6 +95,11 @@ def convert_checkpoint(ckpt: Path, tokenizer_dir: Path, out_dir: Path) -> Dict[s
         else:
             out[target] = squeeze_leading(tensor)
 
+    # Cheap guard, not a full proof: this catches a down<->up mislabeling (down_proj is
+    # defined as the transpose-shaped one of the pair), but gate_proj and up_proj share
+    # the same shape, so a down<->gate label swap would pass this check too. It's still
+    # worth keeping -- shape mismatches are exactly the class of MLP_ROLES typo this can
+    # catch for free -- just don't read a pass here as proof the whole mapping is right.
     down = out.get("model.layers.0.mlp.down_proj.weight")
     gate = out.get("model.layers.0.mlp.gate_proj.weight")
     if down is not None and gate is not None and down.shape != gate.shape[::-1]:
