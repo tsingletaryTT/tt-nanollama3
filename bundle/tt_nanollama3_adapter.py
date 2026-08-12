@@ -188,11 +188,18 @@ from models.tt_transformers.tt.generator_vllm import (  # noqa: E402
 #: Switching to ``accuracy`` moves ``wqkv``/``wo`` to BFLOAT16 and ``w1``/``w3`` from
 #: BFLOAT4_B to BFLOAT8_B (verified in the serving log's tensor-cache dtypes).
 #:
-#: **This is a precision decision on its own merits, NOT a bug fix.** It was tried as a
-#: hypothesis for the repetition-loop defect described below and **did not fix it** --
-#: greedy output was materially unchanged under ``accuracy``. It is kept because serving a
-#: 384-dim model's MLP at 4 bits is indefensible regardless, not because it repaired
-#: anything. Do not cite it as the remedy for that defect.
+#: **This helps measurably, and does not fix the defect.** Measured with
+#: ``scripts/free_running_check.py`` over six prompts, 40 greedy tokens each, comparing
+#: device output against the CPU reference token by token:
+#:
+#:     accuracy    : median agreement 4/40  (min 1, max 7)
+#:     performance : median agreement 3/40  (min 0, max 5)
+#:
+#: So the precision profile is worth roughly one token of agreement — real, reproducible,
+#: and nowhere near sufficient. An earlier revision of this comment said greedy output was
+#: "materially unchanged"; that was based on eyeballing a single prompt and was too strong.
+#: Keep ``accuracy`` because it is both better measured and indefensible to serve a 384-dim
+#: model's MLP at 4 bits — but do not cite it as the remedy for the defect below.
 #:
 #: Overridable via ``TT_NANOLLAMA3_OPTIMIZATIONS`` for A/B testing without a rebuild.
 DEFAULT_OPTIMIZATIONS = os.environ.get("TT_NANOLLAMA3_OPTIMIZATIONS", "accuracy")
