@@ -198,6 +198,27 @@ from models.tt_transformers.tt.generator_vllm import (  # noqa: E402
 DEFAULT_OPTIMIZATIONS = os.environ.get("TT_NANOLLAMA3_OPTIMIZATIONS", "accuracy")
 
 
+def _build_capabilities():
+    """Capability flags, all off by default, opt-in via ``TT_NANOLLAMA3_CAPS``.
+
+    Built here rather than in the class body so the opt-in loop cannot leak or fail on an
+    empty environment variable.
+    """
+    caps = {
+        "supports_prefix_caching": False,
+        "supports_async_decode": False,
+        "supports_sample_on_device": False,
+    }
+    for name in os.environ.get("TT_NANOLLAMA3_CAPS", "").split(","):
+        name = name.strip()
+        if name:
+            caps[name] = True
+    return caps
+
+
+_CAPABILITIES = _build_capabilities()
+
+
 class LlamaForCausalLM(_StockLlamaForCausalLM):
     """Stock Llama, with a precision default appropriate to a 22M-parameter model.
 
@@ -209,6 +230,25 @@ class LlamaForCausalLM(_StockLlamaForCausalLM):
     tt-metal *patch* it needs but also the tt-metal *configuration* it needs, without either
     having to become an upstream default that would be wrong for larger models.
     """
+
+    #: Capability flags, narrowed from the stock class's blanket ``True``.
+    #:
+    #: tt-metal's own vLLM-integration guidance (``.agents/skills/vllm-integration/SKILL.md``
+    #: on the ``agentic-research/fast-models-fast`` branch) is explicit that these must be
+    #: *proof-backed*, not assumed:
+    #:
+    #:   "When supports_async_decode=True, sampling on device, tracing is enabled,
+    #:    reset_batch=False, vLLM may build and submit decode step N+1 before sampled token N
+    #:    has been applied to host scheduler state, so the inputs may be stale or wrong."
+    #:   "...letting it default on can silently corrupt generation."
+    #:   "Leave prefix caching False unless it is implemented and tested."
+    #:
+    #: and prescribes validating with a degenerate-output check for "doubled subwords or
+    #: repeated control tokens" -- which is precisely the failure observed on this model
+    #: (" girl named Lily. Lily. Lily. Lily."). None of these capabilities has been proven
+    #: for tt-nanollama3, so none is claimed. Re-enable individually, with evidence, via
+    #: TT_NANOLLAMA3_CAPS (comma-separated names) once each is actually tested.
+    model_capabilities = _CAPABILITIES
 
     @classmethod
     def initialize_vllm_model(
