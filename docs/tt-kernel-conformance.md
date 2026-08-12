@@ -14,7 +14,7 @@ position of a model author reading the schema and expecting the documented behav
 ## Coverage: what our manifest exercises
 
 Of the 26 fields a v4 model author can write, our shipped
-[`tt_kernel_manifest.json`](../tt_kernel_manifest.json) sets 13:
+[`manifests/tt_kernel_manifest-384.json`](../manifests/tt_kernel_manifest-384.json) sets 13:
 
 | Exercised | Not exercised (and why) |
 |---|---|
@@ -84,7 +84,36 @@ that they did. Since tt-kernel already knows `weights.repo`, it could either def
 
 **Impact:** every v4 vLLM bundle needs this, so every author hits it once.
 
-### 3. `tag_repo` destroys model-card front matter
+### 3. `mesh.devices` and `env.MESH_DEVICE` are independent, and nothing cross-checks them
+
+Authoring the 1024 manifest with `mesh.devices: 4` exposed this. The rendered
+`vllm_metadata.json` has exactly four keys — `arch`, `hf_weights`, `launch`, `main_class`.
+**The entire `mesh` block contributes nothing to it.** The mesh the plugin actually opens
+comes only from the `MESH_DEVICE` string in `env`.
+
+So these are two independent channels describing the same thing, and a manifest can claim
+one while doing the other:
+
+```json
+"mesh": { "devices": 4 },
+"env":  { "MESH_DEVICE": "P150" }
+```
+
+That validates cleanly and serves on **one** chip while advertising four. `mesh.devices`
+does reach `device_count` in the published bundle (`cli.py:332-334`), so the bundle's own
+metadata is wrong too — `search` and any consumer reasoning about topology see 4.
+
+**Suggested fix:** cross-check them at push. tt-kernel already parses both, and the plugin's
+preset table (`vllm_tt_plugin/utils/dp_discovery.py::_MESH_GRID_PRESETS`) is the mapping
+needed. Failing that, compose `MESH_DEVICE` *from* `mesh.devices` rather than requiring the
+author to state it twice.
+
+We gate this ourselves in [`tests/test_manifests.py`](../tests/test_manifests.py), along with
+`max_model_len` vs the trained context, the power-of-two warmup requirement, and the
+`HF_MODEL` rule from finding 2. Each gate was verified to fail on a deliberately-broken
+manifest before being trusted.
+
+### 4. `tag_repo` destroys model-card front matter
 
 Recorded previously and unchanged: `hub.tag_repo` (`hub.py:56-66`) replaces `card.data`
 wholesale with `ModelCardData(tags=...)`, discarding `license`, `pipeline_tag`,
@@ -96,7 +125,7 @@ independent of card front matter, the workaround is to set the license there and
 front matter after any tt-kernel operation — which is what
 [`scripts/publish_to_hub.py --restore-card`](../scripts/publish_to_hub.py) exists to do.
 
-### 4. Not a tt-kernel defect, but it bit us: the manifest cannot express a runtime patch
+### 5. Not a tt-kernel defect, but it bit us: the manifest cannot express a runtime patch
 
 Our model needs a tt-metal change to run at all on a harvested Blackhole (see
 [`bundle/tt_nanollama3_adapter.py`](../bundle/tt_nanollama3_adapter.py)). The v4 schema has

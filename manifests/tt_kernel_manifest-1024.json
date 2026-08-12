@@ -1,0 +1,43 @@
+{
+  "name": "tt-nanollama3-1024",
+  "description": "NanoLlama3-1024 — a Llama-3-style model sized for Tenstorrent: num_groups=4 so it shards across 1, 2, or 4 chips, and a derived SwiGLU width of 2816 (88 tiles = 8x11) that fits a harvested Blackhole grid at 80%. WEIGHTS NOT YET TRAINED; this manifest exists to exercise the multi-chip packaging path.",
+  "platform": {
+    "ttnn": ">=0.65,<0.80"
+  },
+  "runtime": {
+    "kind": "vllm"
+  },
+  "target": "p300x2",
+  "mesh": {
+    "devices": 4,
+    "topology": "1x4",
+    "fabric": "FABRIC_1D_RING"
+  },
+  "entrypoint": {
+    "class": "tt_nanollama3_adapter:LlamaForCausalLM",
+    "arch_name": "LlamaForCausalLM"
+  },
+  "weights": {
+    "repo": "episod/tt-nanollama3-1024"
+  },
+  "resources": {
+    "max_model_len": 256,
+    "max_num_seqs": 32,
+    "command_override": {
+      "p150": [
+        "python3",
+        "server_example_tt.py",
+        "--model",
+        "episod/tt-nanollama3-1024",
+        "--max_model_len",
+        "256",
+        "--max_num_seqs",
+        "8"
+      ]
+    }
+  },
+  "env": {
+    "MESH_DEVICE": "P150x4",
+    "HF_MODEL": "episod/tt-nanollama3-1024"
+  }
+}
