@@ -165,11 +165,17 @@ worth keeping.
 
 - First train loss `10.6875` (≈`ln(32000)`, correct init), last train loss `1.9219`, real
   validation loss (our own `evaluate()`, 10 sampled batches, not `train()`'s placeholder)
-  `1.8781`. The curve is a clean log shape — steep for the first ~300 steps, then a steadily
-  decelerating decline into a noisy 1.9–2.1 band for the back half — not a plateau, not
-  divergence, and (as expected for a raw per-batch metric) not step-to-step monotonic: roughly
-  half of all individual steps ticked up rather than down, while every windowed average kept
-  falling.
+  `1.8781`. Validation coming in *below* that last train figure is expected, not a labeling
+  bug: at 0.43 of an epoch there's no repeated exposure to the data to overfit on, dropout is
+  0.0 so there's no train-time regularization noise either, and the train figure is a single
+  noisy mini-batch while the validation figure averages ten — comparing a lone sample to a
+  ten-batch average will show sampling noise in either direction. That the two numbers differ
+  at all (rather than being identical) is itself the evidence that `evaluate()` genuinely ran,
+  instead of silently falling back to `train()`'s placeholder copy. The curve overall is a
+  clean log shape — steep for the first ~300 steps, then a steadily decelerating decline into
+  a noisy 1.9–2.1 band for the back half — not a plateau, not divergence, and (as expected for
+  a raw per-batch metric) not step-to-step monotonic: of 2999 step-to-step transitions, 1359
+  went up and 1417 went down (223 unchanged), while every windowed average kept falling.
 - Steady state `~0.134 s/step` (7.44–7.50 it/s), matching Plan 2's 0.12–0.14 s/step. Unlike
   Plan 2, this run's first step showed no visible compiler-warmup stall — most likely because
   Task 2's same-shapes hardware runs earlier today had already warmed the on-disk kernel
