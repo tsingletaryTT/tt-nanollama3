@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
+#
+# NanoLlama3-384 — the architecture this project trained, converted, and published.
+#
+# PROVENANCE. This is a verbatim copy of tt-train's own
+# `tt-train/configs/model_configs/nanollama3.yaml` as of tt-metal
+# rollback-pre-qwen36-1576-g620793d898. It is vendored here, unchanged, so that this
+# repository OWNS the architectures it ships rather than resolving them out of
+# $TT_METAL_HOME at runtime.
+#
+# WHY VENDOR IT. Until now `train/run.py` read this file from the tt-metal tree, which
+# meant (a) the architecture could change underneath us on a tt-metal upgrade with no
+# signal, and (b) there was no way to offer a second size, because there was only ever one
+# file and it wasn't ours. Both are fixed by owning the file. See `train/sizes.py` for the
+# registry that selects between architectures.
+#
+# DO NOT hand-edit the values below to make a new size. Add a new file and a new
+# `ModelSize` entry in `train/sizes.py`, so the derived hardware facts (tile count, core
+# grid, servable mesh widths) are computed for it and covered by tests.
+#
+# HARDWARE NOTES for this particular shape, measured on Blackhole p300c (compute grid
+# 11x10 = 110 cores):
+#
+#   embedding_dim 384 -> 384/32 = 12 tiles -> best grid 2x6 = 12 cores = 11% utilisation.
+#     Only 12 tiles exist, so no sharding strategy over the hidden dimension can fill the
+#     grid; parallelism for a model this narrow has to come from sequence and batch.
+#
+#   num_groups 3 -> servable only on mesh widths that divide 3, i.e. {1, 3}. A 2-chip
+#     (N300/P300) or 8-chip (T3K) mesh fails `n_kv_heads % cluster_shape[1] == 0` in
+#     tt_transformers (`model_config.py:687-691`). This model is single-chip in practice.
+#     Future sizes should pick num_groups divisible by the target mesh width.
+#
+#   384 % 128 != 0, so it cannot be tensor-parallelised across 4 chips with whole tiles
+#     per chip either.
+#
+# These are recorded as facts about this shape, not as defects — it was chosen to match
+# tt-train's shipped example, before any of the above was measured.
+transformer_config:
+  model_type: "llama"
+  num_heads: 6
+  num_groups: 3
+  embedding_dim: 384
+  dropout_prob: 0.0
+  num_blocks: 6
+  vocab_size: 32000
+  max_sequence_length: 256
+  runner_type: default
+  theta: 500000.0

@@ -50,7 +50,14 @@ generated sample, reported as a single data point rather than proof of general c
 | Corpus | TinyStories — 127,635,889 tokens (114.9M train / 12.8M validation) |
 | Hardware | Tenstorrent Blackhole — trained on **one** p300c (`mesh_shape [1, 1]`, no DDP/TP) |
 
-Architecture parameters come from tt-train's `nanollama3.yaml` and are not redefined here.
+**This repository owns its architectures.** They live in
+[`train/configs/model/`](train/configs/model/), one YAML per size, described and validated by
+the registry in [`train/sizes.py`](train/sizes.py). `train/run.py --size <name>` selects one.
+
+The 384 config is a verbatim copy of tt-train's own `nanollama3.yaml`, vendored rather than
+read out of `$TT_METAL_HOME` so the architecture cannot change under a tt-metal upgrade
+without a signal — `tests/test_sizes.py` compares the two whenever tt-metal is present, and
+holds the registry and the YAML to describing the same model.
 
 Measured on the 3000-step run: first train loss **10.6875** — consistent with a near-uniform
 initial distribution, where `ln(32000) = 10.37` — falling to **1.9219**, with a real held-out

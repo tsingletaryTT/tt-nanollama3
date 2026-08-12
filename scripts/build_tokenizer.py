@@ -52,7 +52,8 @@ def main() -> int:
     # vocab_size given to train_bpe is a ceiling, not a promise: BPE stops early if the
     # corpus runs out of pairs worth merging. Since --corpus-mb is user-tunable, a small
     # value can silently under-shoot the target and produce an artifact whose vocabulary
-    # mismatches tt-train's nanollama3.yaml — a failure that otherwise doesn't surface
+    # mismatches the model config's vocab_size (train/configs/model/, selected via
+    # train/sizes.py) — a failure that otherwise doesn't surface
     # until an embedding-shape mismatch much later. Check the achieved size here instead.
     achieved = load_exported(tok_out)
     achieved_size = len(achieved.get_vocab())

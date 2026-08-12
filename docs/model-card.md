@@ -55,9 +55,14 @@ every dead end, is documented at
 | Context length | **256** |
 | Vocabulary | 32,000 (byte-level BPE, trained for this model) |
 | Weights dtype | bfloat16 |
-| Training hardware | 4× Tenstorrent Blackhole p300c |
+| Training hardware | One Tenstorrent Blackhole chip (`mesh_shape [1, 1]`) |
 
-Architecture parameters come from tt-train's `nanollama3.yaml` and were not redefined.
+Trained on a **single** Blackhole chip. The host is a TT-QuietBox 2 — four Blackhole chips on
+two dual-chip p300 cards — but training used one of them; the other three were idle.
+
+The architecture is vendored in this project as
+[`train/configs/model/nanollama3-384.yaml`](https://github.com/tsingletaryTT/tt-nanollama3/blob/main/train/configs/model/nanollama3-384.yaml),
+a verbatim copy of tt-train's own `nanollama3.yaml`.
 
 ## Training
 

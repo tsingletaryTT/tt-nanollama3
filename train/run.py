@@ -57,6 +57,7 @@ from train.config import (  # noqa: E402
     build_yaml_config,
     run_config_from_yaml,
 )
+from train.sizes import DEFAULT_SIZE, SIZES, get_size  # noqa: E402
 
 
 def _default_tt_metal_home() -> str:
@@ -241,6 +242,11 @@ def main() -> int:
                         "not to step 100.")
     p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--eval-every", type=int, default=10)
+    p.add_argument("--size", default=DEFAULT_SIZE, choices=sorted(SIZES),
+                   help=f"Model architecture to train, from train/sizes.py "
+                        f"(default: {DEFAULT_SIZE}, the originally-trained model). "
+                        f"Each size has its own vendored ttml config under "
+                        f"train/configs/model/.")
     p.add_argument("--arch", default="blackhole", choices=["blackhole", "wormhole_b0"])
     p.add_argument("--tt-metal-home", default=_default_tt_metal_home())
     p.add_argument("--dry-run", action="store_true",
@@ -282,10 +288,22 @@ def main() -> int:
         print(f"ERROR: {val_path} not found. Run train/tokenization.py first.", file=sys.stderr)
         return 1
 
-    model_config = Path(args.tt_metal_home) / "tt-train/configs/model_configs/nanollama3.yaml"
-    if not model_config.is_file():
-        print(f"ERROR: model config not found at {model_config}", file=sys.stderr)
+    # The architecture comes from THIS repository, not from $TT_METAL_HOME. Before the
+    # size registry this read tt-train's own nanollama3.yaml, which meant the architecture
+    # could change under a tt-metal upgrade with no signal and there was no way to offer a
+    # second size. `train/sizes.py` owns the mapping now; `tests/test_sizes.py` holds the
+    # vendored copy to being a faithful copy of the upstream original.
+    try:
+        size = get_size(args.size)
+    except KeyError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
         return 1
+    model_config = size.config_path
+    if not model_config.is_file():
+        print(f"ERROR: model config for size {size.name} not found at {model_config}",
+              file=sys.stderr)
+        return 1
+    print(f"  model size: {size.name} ({model_config.name})")
 
     yaml_config = build_yaml_config(
         str(ROOT / "artifacts" / "tokenizer"), str(model_config),
