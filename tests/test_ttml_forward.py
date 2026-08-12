@@ -15,6 +15,8 @@ cited to ttml's C++ source -- never to our own converter.
 from __future__ import annotations
 
 import pickle
+import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -637,3 +639,31 @@ def _logsumexp(x: np.ndarray, axis: int, keepdims: bool) -> np.ndarray:
     m = np.max(x, axis=axis, keepdims=True)
     out = m + np.log(np.sum(np.exp(x - m), axis=axis, keepdims=True))
     return out if keepdims else np.squeeze(out, axis=axis)
+
+
+# ---------------------------------------------------------------------------
+# Purity: convert.ttml_forward must run on a machine with no ttml/ttnn, ever -- that is the
+# whole reason this module exists as a from-scratch NumPy reference (see the module
+# docstring). Same subprocess-probe pattern as test_checkpoint_reader.py,
+# test_tokenizer.py, and test_backfill_checkpoint_headers.py, applied here because Task 2/3's
+# review found the claim asserted in the module docstring but never actually checked.
+# ---------------------------------------------------------------------------
+
+
+def test_ttml_forward_module_imports_no_tenstorrent():
+    """convert.ttml_forward must run on a machine with no hardware and no tt-metal checkout.
+
+    Checked in a subprocess: this test session may already have imported plenty (including,
+    transitively, ttml_forward's own sibling modules under test elsewhere in this file), so
+    inspecting our own sys.modules would prove nothing.
+    """
+    probe = (
+        "import sys; import convert.ttml_forward; "
+        "bad=[m for m in ('ttnn','ttml') if m in sys.modules]; "
+        "print(','.join(bad))"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", probe],
+        capture_output=True, text=True, check=True, cwd=str(ROOT),
+    )
+    assert out.stdout.strip() == "", f"convert.ttml_forward pulled in: {out.stdout.strip()}"

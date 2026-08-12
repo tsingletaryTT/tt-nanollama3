@@ -19,14 +19,15 @@ actual behaviour; it is not circular, because Task 2's `ttml_forward.py` was der
 `docs/superpowers/plans/2026-08-12-numpy-parity.md`).** The plan deliberately did not fix a
 number in advance -- an unreachable gate is indistinguishable from a correct one that
 happens to fail, which is the worst property a diagnostic can have. Measured directly on
-this checkpoint (`artifacts/hf/`, six 64-128 token windows, several seeds; see
-`test_numpy_fp32_vs_hf_fp32_agreement_on_fixed_window`'s docstring for the numbers):
+this checkpoint (`artifacts/hf/`, seven 256-token windows -- the model's full
+`max_position_embeddings` -- at seeds 0-5 and this file's own committed seed 123; see
+`test_numpy_fp32_vs_hf_fp32_agreement_on_fixed_window`'s docstring for the per-seed numbers):
 
-- max absolute logit difference: ~5e-6 to ~9e-6 (float32 rounding noise, not a real defect)
+- max absolute logit difference: ~8.3e-6 to ~1.6e-5 (float32 rounding noise, not a real defect)
 - max relative difference, restricted to logits with `|value| > 0.01` (unrestricted relative
   error is dominated by meaningless blowups near zero-crossings -- see that test's docstring
-  for a worked example): ~1.5e-4 to ~4.7e-4
-- correlation: indistinguishable from 1.0 (1 - corr ~= 1e-13)
+  for a worked example): ~3.0e-4 to ~5.6e-4
+- correlation: indistinguishable from 1.0 (1 - corr ~= 1.2e-13)
 
 This is dramatically tighter than the loss gate's 0.2-nat tolerance (whose 2-sigma floor is
 ~0.22 nats) and tighter than the plan's own ballpark suggestion of ~1e-2 relative. The
@@ -35,7 +36,7 @@ tolerances below (`MAX_ABS_TOLERANCE = 1e-3`, `MAX_REL_TOLERANCE = 5e-3`,
 value -- enough margin that a different fixed window or a harmless numerical-library version
 bump will not make this gate flaky, while remaining many orders of magnitude below what an
 actual conversion bug produces (`test_parity_gate_is_not_hollow_it_fails_when_rope_permutation_is_disabled`
-measures a real bug at max_abs ~4.6, correlation ~0.97).
+measures a real bug at max_abs ~8.1, correlation ~0.93).
 
 **What this gate cannot see** (see also CLAUDE.md's "NumPy parity gate" section):
 
@@ -66,6 +67,7 @@ measures a real bug at max_abs ~4.6, correlation ~0.97).
 
 from __future__ import annotations
 
+import hashlib
 import pickle
 import tempfile
 from pathlib import Path
@@ -78,6 +80,7 @@ import pytest
 
 import convert.hf_mapping as hf_mapping
 import convert.to_hf as to_hf
+import convert.ttml_forward as ttml_forward
 from convert.checkpoint_reader import read_checkpoint_meta, read_tensors
 from convert.to_hf import convert_checkpoint
 from convert.ttml_forward import attention, forward, rms_norm, squeeze_leading, swiglu
@@ -117,14 +120,14 @@ _needs_artifacts = pytest.mark.skipif(
 # Tolerances -- see this module's docstring for the measurements that justify these numbers.
 # ---------------------------------------------------------------------------
 
-#: Absolute margin: measured worst case across six windows/seeds was ~9e-6; this sits
-#: ~100x above that, so ordinary float32 rounding noise (a different BLAS build, a different
-#: window) cannot trip it, while a real conversion bug (measured below at ~4.6) trips it by
-#: three orders of magnitude.
+#: Absolute margin: measured worst case across seven 256-token windows/seeds was ~1.6e-5;
+#: this sits ~60x above that, so ordinary float32 rounding noise (a different BLAS build, a
+#: different window) cannot trip it, while a real conversion bug (measured below at ~8.1)
+#: trips it by more than five orders of magnitude.
 MAX_ABS_TOLERANCE = 1e-3
 #: Relative margin, evaluated only on logits with |value| > _REL_FLOOR (see _compare_logits'
 #: docstring for why unrestricted relative error is meaningless near zero-crossings).
-#: Measured worst case ~4.7e-4; this sits ~10x above that. The plan itself suggested ~1e-2 as
+#: Measured worst case ~5.6e-4; this sits ~9x above that. The plan itself suggested ~1e-2 as
 #: a "something is wrong" ceiling; this gate is deliberately tighter than that ceiling by 2x,
 #: while still comfortably above measurement noise.
 MAX_REL_TOLERANCE = 5e-3
@@ -133,16 +136,22 @@ MAX_REL_TOLERANCE = 5e-3
 #: indistinguishable in every way that matters (softmax over ~13-magnitude logits does not
 #: notice a 1e-5 wobble at the bottom of the range).
 _REL_FLOOR = 0.01
-#: Measured correlation on real data is 1 minus something on the order of 1e-13; a real bug
-#: (measured below) drops it to ~0.97. 0.9999 sits far below the former and far above the
+#: Measured correlation on real data is 1 minus something on the order of 1.2e-13; a real bug
+#: (measured below) drops it to ~0.93. 0.9999 sits far below the former and far above the
 #: latter.
 MIN_CORRELATION = 0.9999
 
-#: Fixed window: a seeded 64-token slice of the validation set, distinct from Task 2's own
-#: seed-0/256-length CE windows so this file's measurements are not just a rerun of that
-#: file's under a different name.
+#: Fixed window: a seeded 256-token slice of the validation set -- the model's full
+#: `max_position_embeddings` (see `artifacts/hf/config.json`), not a truncated prefix of it.
+#: A shorter window only exercises positions 0-63; the remaining 64-255 would then be
+#: covered solely by the coarser cross-entropy check (`tests/test_ttml_forward.py`'s
+#: `test_numpy_forward_reproduces_the_training_runs_held_out_cross_entropy`), whose detection
+#: floor is ~0.22 nats (see docs/ttml-forward-reference.md's Q6) -- far too coarse to catch a
+#: defect whose signature grows with position (e.g. a RoPE angle that drifts with sequence
+#: length). Distinct from Task 2's own seed-0/256-length CE window by seed alone, so this
+#: file's measurements are not just a rerun of that file's under a different name.
 _WINDOW_SEED = 123
-_WINDOW_LEN = 64
+_WINDOW_LEN = 256
 
 
 # ---------------------------------------------------------------------------
@@ -283,18 +292,19 @@ def test_numpy_fp32_vs_bf16_activation_control_bounds_precision_noise():
     """Step 1's NumPy-vs-NumPy control: how much does activation precision alone move the
     logits, independent of any NumPy-vs-HF question?
 
-    Measured on the fixed window (this test's exact procedure, run standalone for full
-    precision): max_abs = 0.0291, max_rel (floored at 0.01) = 1.99 (a handful of near-zero
-    logits flip sign under bf16 rounding -- expected and not concerning, which is exactly why
-    the real gate's relative-difference check has a floor), correlation = 0.999997.
+    Measured on the fixed window (this test's exact procedure, at the committed
+    `_WINDOW_LEN = 256`, run standalone for full precision): max_abs = 0.0403, max_rel
+    (floored at 0.01) = 1.814 (a handful of near-zero logits flip sign under bf16 rounding --
+    expected and not concerning, which is exactly why the real gate's relative-difference
+    check has a floor), correlation = 0.9999969.
 
     This bounds what bf16-level activation rounding alone contributes: a few hundredths in
     absolute terms, with the overall logit *shape* (correlation) essentially undisturbed.
-    Compare against `test_numpy_fp32_vs_hf_fp32_agreement_on_fixed_window`'s measured ~5e-6
-    absolute agreement -- three to four orders of magnitude tighter -- which confirms the
-    fp32-vs-fp32 NumPy-vs-HF comparison is not being helped along by both sides sharing some
-    bf16 rounding; if it were, this control's ~0.03 absolute noise floor would show up there
-    too, and it does not.
+    Compare against `test_numpy_fp32_vs_hf_fp32_agreement_on_fixed_window`'s measured ~1.2e-5
+    absolute agreement (same 256-token window) -- three orders of magnitude tighter -- which
+    confirms the fp32-vs-fp32 NumPy-vs-HF comparison is not being helped along by both sides
+    sharing some bf16 rounding; if it were, this control's ~0.04 absolute noise floor would
+    show up there too, and it does not.
     """
     window = _fixed_window()
     logits_fp32 = forward(REAL_CHECKPOINT, window)
@@ -303,7 +313,7 @@ def test_numpy_fp32_vs_bf16_activation_control_bounds_precision_noise():
 
     assert np.all(np.isfinite(logits_bf16_act))
     # Sanity bounds only -- this is a diagnostic control, not the gate itself. The real
-    # figures (~0.03 abs, corr ~0.9999967, measured above) sit comfortably inside these.
+    # figures (~0.04 abs, corr ~0.9999969, measured above) sit comfortably inside these.
     assert stats["max_abs"] < 0.5, stats
     assert stats["corr"] > 0.999, stats
 
@@ -316,20 +326,29 @@ def test_numpy_fp32_vs_bf16_activation_control_bounds_precision_noise():
 @_needs_artifacts
 def test_numpy_fp32_vs_hf_fp32_agreement_on_fixed_window():
     """**The parity gate.** Compares `convert.ttml_forward.forward`'s logits against
-    `artifacts/hf/`'s logits (loaded and run in float32) on a fixed 64-token window of
-    `val_ids.npy`. See this module's docstring for the full tolerance derivation; in short:
+    `artifacts/hf/`'s logits (loaded and run in float32) on a fixed 256-token window of
+    `val_ids.npy` -- the model's full `max_position_embeddings`, not a truncated prefix (see
+    `_WINDOW_LEN`'s comment for why a shorter window would leave positions 64-255 covered by
+    nothing sharper than the 0.22-nat-floor CE check). See this module's docstring for the
+    full tolerance derivation; in short:
 
-    Measured directly (this exact procedure, six different seeds/windows, run standalone):
+    Measured directly (this exact procedure, at the committed `_WINDOW_LEN = 256`, seven
+    different seeds/windows, run standalone):
 
     | seed | max_abs   | max_rel (floor 0.01) | correlation        |
     |------|-----------|-----------------------|--------------------|
-    | 0    | 5.18e-6   | 1.57e-4               | 1.0000000000       |
-    | 1    | 5.29e-6   | 2.21e-4               | 1.0000000000       |
-    | 2    | 5.85e-6   | 2.48e-4               | 1.0000000000       |
-    | 3    | 5.95e-6   | 2.70e-4               | 1.0000000000       |
-    | 4    | 5.20e-6   | 2.07e-4               | 1.0000000000       |
-    | 5    | 5.84e-6   | 1.44e-4               | 1.0000000000       |
-    | 123 (this test's seed, 256-token window) | 8.46e-6 | 4.75e-4 | 1 - 1.18e-13 |
+    | 0    | 1.29e-5   | 4.81e-4               | 1 - 1.19e-13       |
+    | 1    | 1.60e-5   | 5.56e-4               | 1 - 1.19e-13       |
+    | 2    | 8.85e-6   | 3.54e-4               | 1 - 1.17e-13       |
+    | 3    | 1.43e-5   | 3.04e-4               | 1 - 1.21e-13       |
+    | 4    | 8.29e-6   | 4.80e-4               | 1 - 1.26e-13       |
+    | 5    | 8.91e-6   | 3.73e-4               | 1 - 1.18e-13       |
+    | 123 (**this test's actual seed**) | **1.23e-5** | **3.04e-4** | **1 - 1.28e-13** |
+
+    The seed-123 row is the number this committed test actually produces -- the one a future
+    debugger should compare against on a failure. The other six rows are the same measurement
+    at six other seeds, run standalone with the identical procedure, showing the agreement is
+    not an artifact of this particular window.
 
     This is a NumPy-vs-HF comparison, not NumPy-vs-device: both sides run entirely on the
     host in float32, from identical bfloat16-stored weights (see the plan's corrected
@@ -346,18 +365,19 @@ def test_numpy_fp32_vs_hf_fp32_agreement_on_fixed_window():
 
     assert stats["max_abs"] <= MAX_ABS_TOLERANCE, (
         f"NumPy-vs-HF max abs logit difference {stats['max_abs']:.6g} exceeds "
-        f"{MAX_ABS_TOLERANCE} -- measured baseline is ~5e-6 to ~9e-6, two to three orders of "
-        f"magnitude below this tolerance, so exceeding it indicates a real divergence between "
-        f"the two paths, not measurement noise."
+        f"{MAX_ABS_TOLERANCE} -- measured baseline (this test's exact seed/window) is "
+        f"1.23e-5, nearly two orders of magnitude below this tolerance, so exceeding it "
+        f"indicates a real divergence between the two paths, not measurement noise."
     )
     assert stats["max_rel"] <= MAX_REL_TOLERANCE, (
         f"NumPy-vs-HF max relative logit difference {stats['max_rel']:.6g} (restricted to "
-        f"|logit| > {_REL_FLOOR}) exceeds {MAX_REL_TOLERANCE} -- measured baseline is "
-        f"~1.4e-4 to ~4.7e-4."
+        f"|logit| > {_REL_FLOOR}) exceeds {MAX_REL_TOLERANCE} -- measured baseline (this "
+        f"test's exact seed/window) is 3.04e-4."
     )
     assert stats["corr"] >= MIN_CORRELATION, (
         f"NumPy-vs-HF logit correlation {stats['corr']:.10f} is below {MIN_CORRELATION} -- "
-        f"measured baseline is indistinguishable from 1.0 (1 - corr ~= 1e-13)."
+        f"measured baseline (this test's exact seed/window) is indistinguishable from 1.0 "
+        f"(1 - corr ~= 1.28e-13)."
     )
 
 
@@ -384,13 +404,13 @@ def test_parity_gate_is_not_hollow_it_fails_when_rope_permutation_is_disabled():
     `tempfile.TemporaryDirectory()`, reading the same real checkpoint and tokenizer but
     writing nowhere near the tracked artifacts.
 
-    **Measured divergence** (this exact procedure, standalone run): max_abs = 4.60,
-    max_rel (floored) = 2.00 (the metric's ceiling -- opposite-signed logits of similar
-    magnitude), correlation = 0.9724. For comparison, Plan 4's reviewer measured the same bug
-    at the *loss* level as 3.2015 nats against a 1.8781 target (a 1.32-nat gap) -- this gate
-    catches the identical defect at the logit level, and by a much wider margin relative to
-    its own tolerance (4.60 / 1e-3 ~= 4600x over budget, versus the loss gate's bug being
-    "only" ~6.6x its own 0.2-nat tolerance).
+    **Measured divergence** (this exact procedure, at the committed `_WINDOW_LEN = 256`,
+    standalone run): max_abs = 8.11, max_rel (floored) = 2.00 (the metric's ceiling --
+    opposite-signed logits of similar magnitude), correlation = 0.934. For comparison, Plan
+    4's reviewer measured the same bug at the *loss* level as 3.2015 nats against a 1.8781
+    target (a 1.32-nat gap) -- this gate catches the identical defect at the logit level, and
+    by a much wider margin relative to its own tolerance (8.11 / 1e-3 ~= 8100x over budget,
+    versus the loss gate's bug being "only" ~6.6x its own 0.2-nat tolerance).
     """
     window = _fixed_window()
     logits_numpy = forward(REAL_CHECKPOINT, window)
@@ -413,6 +433,73 @@ def test_parity_gate_is_not_hollow_it_fails_when_rope_permutation_is_disabled():
     # gate.
     assert stats["max_abs"] > 1.0, stats
     assert stats["corr"] < 0.99, stats
+
+
+# ---------------------------------------------------------------------------
+# Step 2b: not hollow to an activation-level defect either -- eps moved outside the sqrt in
+# the NumPy path, the one perturbation docs/ttml-forward-reference.md's §9 Q6 measured as
+# invisible to the held-out cross-entropy check.
+# ---------------------------------------------------------------------------
+
+
+def _rms_norm_eps_outside_sqrt(
+    x: np.ndarray, gamma: np.ndarray, eps: float = ttml_forward.RMS_NORM_EPS
+) -> np.ndarray:
+    """A `rms_norm`-compatible replacement with epsilon moved *outside* the sqrt --
+    `sqrt(mean(x^2)) + eps` instead of the correct `sqrt(mean(x^2) + eps)`.
+
+    Not a synthetic strawman: `docs/ttml-forward-reference.md`'s §9 Q6 table identifies
+    exactly this perturbation as the *one* thing its end-to-end cross-entropy check cannot
+    see (Δ = -0.0002 nats, 0.0 SE, against that check's ≈0.22-nat 2σ detection floor) --
+    every other perturbation Task 1 tried (`1+gamma` instead of `gamma`, an embedding scale)
+    was loud at the CE level. If a second, sharper instrument is going to earn its keep, this
+    is the specific case it has to catch.
+    """
+    mean_sq = np.mean(np.square(x), axis=-1, keepdims=True)
+    rms = np.sqrt(mean_sq) + eps
+    return gamma * x / rms
+
+
+@_needs_artifacts
+def test_parity_gate_is_not_hollow_it_catches_epsilon_moved_outside_the_sqrt():
+    """A fourth not-hollow proof, and the most persuasive one available: this is the *one*
+    perturbation known to be invisible to the CE check (see
+    `_rms_norm_eps_outside_sqrt`'s docstring). If the parity gate were blind to it too, this
+    gate would add nothing over the loss check for the one defect that matters most.
+
+    Unlike the RoPE not-hollow test above, this needs no reconversion at all -- the defect is
+    injected purely in the NumPy path, by monkeypatching `convert.ttml_forward.rms_norm` to
+    `_rms_norm_eps_outside_sqrt` for the duration of one `forward()` call (patching the
+    module attribute, not the name imported into this file, so every call inside `forward()`
+    picks it up -- the same technique `test_parity_gate_is_not_hollow_it_fails_when_rope_permutation_is_disabled`
+    uses for `to_hf.permute_rope_qk`). `artifacts/hf/` is read normally, unpatched, as the
+    reference; nothing under `artifacts/checkpoints/` or `artifacts/hf/` is written, and no
+    conversion runs, which is why this is faster than the other not-hollow tests.
+
+    **Measured** (this exact procedure, at the committed `_WINDOW_LEN = 256`, standalone
+    run): max_abs = 0.0370 (37x over `MAX_ABS_TOLERANCE`'s 1e-3 budget), max_rel (floored) =
+    1.58, correlation = 0.9999985. That correlation figure is the interesting part: it stays
+    *above* `MIN_CORRELATION`'s 0.9999 floor, so correlation alone would call this a pass --
+    this perturbation is loud in absolute and relative terms while leaving the overall logit
+    *shape* almost undisturbed, unlike the RoPE bug above (which drops correlation to ~0.93).
+    That is exactly why the gate checks all three metrics rather than collapsing them into a
+    single summary statistic.
+    """
+    window = _fixed_window()
+    logits_hf = _hf_logits_fp32(HF_DIR, window)
+
+    with mock.patch.object(ttml_forward, "rms_norm", _rms_norm_eps_outside_sqrt):
+        logits_numpy_bad = ttml_forward.forward(REAL_CHECKPOINT, window)
+
+    stats = _compare_logits(logits_numpy_bad, logits_hf)
+
+    # The gate's own tolerances must actually reject this -- if they didn't, the gate would
+    # be adding nothing over the CE check for the one perturbation the CE check cannot see.
+    assert stats["max_abs"] > MAX_ABS_TOLERANCE, stats
+    assert stats["max_rel"] > MAX_REL_TOLERANCE, stats
+    # Correlation is deliberately NOT asserted to drop below MIN_CORRELATION -- measured at
+    # 0.9999985, comfortably above it; see the docstring above for why that is the finding,
+    # not an oversight.
 
 
 # ---------------------------------------------------------------------------
@@ -444,37 +531,80 @@ def test_parity_gate_is_blind_to_a_norm_swap_on_the_real_checkpoint():
     comparison instrument is -- there is no signal for any instrument to detect, not a gap
     specific to this gate's tolerance.
 
-    **Measured** (this exact procedure, standalone run): swapping block 0's and block 1's
-    `input_layernorm.weight` destinations and reconverting (into a throwaway directory, never
-    touching `artifacts/hf/`) moves the NumPy-vs-HF max abs difference from ~5.86e-6 (this
-    swap) versus ~5-9e-6 (no swap, per the table in
-    `test_numpy_fp32_vs_hf_fp32_agreement_on_fixed_window`'s docstring) -- indistinguishable
-    from ordinary float32 noise, not a detected defect.
+    **Measured** (this exact procedure, at the committed `_WINDOW_LEN = 256`, standalone
+    run): swapping block 0's and block 1's `input_layernorm.weight` destinations and
+    reconverting (into a throwaway directory, never touching `artifacts/hf/`) gives a
+    NumPy-vs-HF max abs difference of 1.23e-5 -- identical to this test's seed's no-swap
+    baseline (per the table in `test_numpy_fp32_vs_hf_fp32_agreement_on_fixed_window`'s
+    docstring) to the precision measured, because the swap moves nothing (both gammas are
+    exactly 1.0): indistinguishable from ordinary float32 noise, not a detected defect.
 
     **Honest finding: yes, this gate is blind to it too**, on this checkpoint, for the same
     reason the loss gate is (`docs/superpowers/plans/2026-08-12-numpy-parity.md`'s own
     motivation: "swapping two changes loss by exactly 0.0000"). This is exactly why Step 3's
     second half (`test_convert_checkpoint_places_each_rmsnorm_gamma_at_its_correct_destination`)
     exists as a structural test with synthetic non-unit gammas, independent of both gates.
+
+    **Non-vacuity, the strong way.** A logit-comparison assertion alone cannot distinguish
+    "the monkeypatch fired and produced an indistinguishable result" from "the monkeypatch
+    silently didn't fire at all" -- both look identical to this test. So this also converts
+    the *unpatched* checkpoint into a second throwaway directory and asserts the two
+    `model.safetensors` files are **byte-identical by SHA-256**. That is strictly stronger
+    than "no instrument here happened to notice": it proves no instrument *could* notice,
+    because the two conversions produced the literal same bytes. **Measured** (this exact
+    procedure, standalone run): both conversions hash to
+    `3a85bb08e1d24f5b6ae499f55be85b594efdfd81503f21e0d35d72490462200d` -- confirming the
+    monkeypatch did fire (it changed which HF name each norm's tensor is written under) and
+    that the swap is still a genuine no-op on this checkpoint's degenerate gammas, not a
+    disguised bug in the test itself.
     """
     window = _fixed_window()
     logits_numpy = forward(REAL_CHECKPOINT, window)
 
     with tempfile.TemporaryDirectory() as tmp:
+        good_hf_dir = Path(tmp) / "hf_good"
+        to_hf.convert_checkpoint(REAL_CHECKPOINT, TOKENIZER_DIR, good_hf_dir)
+
         swapped_hf_dir = Path(tmp) / "hf_normswap"
         with mock.patch.object(to_hf, "map_name", _swap_two_norm_destinations):
             to_hf.convert_checkpoint(REAL_CHECKPOINT, TOKENIZER_DIR, swapped_hf_dir)
+
+        # Byte-identical, not just numerically-close: proves *no* instrument -- this gate,
+        # a future sharper one, a bitwise diff -- could ever distinguish the swapped
+        # conversion from the correct one on this checkpoint. Strictly stronger than the
+        # logit-comparison assertions below, which only show this one instrument didn't.
+        good_hash = hashlib.sha256((good_hf_dir / "model.safetensors").read_bytes()).hexdigest()
+        swapped_hash = hashlib.sha256((swapped_hf_dir / "model.safetensors").read_bytes()).hexdigest()
+        assert good_hash == swapped_hash, (
+            f"expected the norm swap to be a byte-identical no-op on this checkpoint's "
+            f"degenerate (all-1.0) gammas, but the unpatched conversion hashed to "
+            f"{good_hash} and the swapped one to {swapped_hash} -- the monkeypatch changed "
+            f"the output, meaning the gammas are no longer degenerate (see this test's "
+            f"docstring) or the swap has some other effect this test doesn't expect."
+        )
+
         logits_hf_swapped = _hf_logits_fp32(swapped_hf_dir, window)
 
     stats = _compare_logits(logits_numpy, logits_hf_swapped)
 
     # The whole point: this passes the SAME tolerance a correct conversion passes, on a
-    # checkpoint where the swap is a real (if currently invisible) mapping bug.
+    # checkpoint where the swap is a real (if currently invisible) mapping bug. All three
+    # metrics, not just max_abs, so "same tolerance" in the comment above is actually true.
     assert stats["max_abs"] <= MAX_ABS_TOLERANCE, (
         "expected the norm swap to be invisible on this checkpoint's degenerate (all-1.0) "
         f"gammas, but max_abs={stats['max_abs']:.6g} exceeded the gate's own tolerance -- "
         "if this fails, the checkpoint's gammas are no longer all 1.0 and this test's "
         "premise (and its docstring) needs updating, not the tolerance."
+    )
+    assert stats["max_rel"] <= MAX_REL_TOLERANCE, (
+        f"expected the norm swap to be invisible, but max_rel={stats['max_rel']:.6g} "
+        f"exceeded the gate's own tolerance -- see the max_abs assertion above for what a "
+        f"failure here would mean."
+    )
+    assert stats["corr"] >= MIN_CORRELATION, (
+        f"expected the norm swap to be invisible, but corr={stats['corr']:.10f} fell below "
+        f"the gate's own tolerance -- see the max_abs assertion above for what a failure "
+        f"here would mean."
     )
 
 

@@ -512,9 +512,10 @@ loss gate had relative to its.
 1. **The norm-mapping blind spot this plan exists to close.** On the real checkpoint (all
    gammas exactly 1.0), swapping two RMSNorm gammas' HF destinations is a no-op — verified
    directly: swapping block 0's and block 1's `input_layernorm.weight` mapping and
-   reconverting moved max_abs to ~5.9e-6, indistinguishable from the no-swap baseline
-   (~5-9e-6). **The parity gate is exactly as blind to this as the loss gate is, on this
-   checkpoint, for the same reason** (`test_parity_gate_is_blind_to_a_norm_swap_on_the_real_checkpoint`
+   reconverting gives max_abs = 1.23e-5, identical (to the precision measured) to the no-swap
+   baseline on this test's seed/window, because the swap moves nothing between two gammas
+   that are both exactly 1.0. **The parity gate is exactly as blind to this as the loss gate
+   is, on this checkpoint, for the same reason** (`test_parity_gate_is_blind_to_a_norm_swap_on_the_real_checkpoint`
    measures and confirms this rather than assuming it). Closed *structurally* instead:
    `test_convert_checkpoint_places_each_rmsnorm_gamma_at_its_correct_destination` builds a
    synthetic checkpoint with distinct non-unit gammas and asserts each lands at its correct
@@ -535,6 +536,17 @@ loss gate had relative to its.
    run's loss curve implies, nothing here catches it — that anchor is Task 2 Step 3's
    independent cross-entropy check against the training run's own held-out figure, not this
    gate.
+5. **`convert/checkpoint_reader.py` is a shared dependency of both paths.** The NumPy path
+   (`convert.ttml_forward.forward`) and the HF path (`convert.to_hf.convert_checkpoint`) both
+   call `convert.checkpoint_reader.read_tensors`, which owns the name↔tensor association and
+   the declaration-order stream walk over the checkpoint's pickle records. A misassignment or
+   a stream-order error there is **common-mode**, not independent: both paths would read the
+   same wrong tensor under the same name and agree perfectly while both being wrong. This is
+   the one piece of "independence" this plan does not actually have — the two paths are
+   independently *derived* downstream of the reader, not independently *reading the
+   checkpoint*. It is anchored only by the coarser CE test (Task 2's held-out cross-entropy
+   check, floor ≈0.22 nats) and by `test_checkpoint_reader.py`'s own ordering tests, not by
+   the parity gate, which cannot see it by construction.
 
 ### The standing skip-guard gap, partially addressed
 
@@ -548,3 +560,66 @@ on them. The gap is not closed, just narrowed by one genuinely-unconditional tes
 Test suite: **151 passed** (146 pre-existing + 5 new in `test_numpy_parity.py`), 0 skipped, 0
 failed on this machine (all `artifacts/` fixtures present); the synthetic gamma test alone
 would still pass, unconditionally, on a machine with none of them.
+
+## `feat/numpy-parity` — pre-merge whole-branch review fix wave (2026-08-12)
+
+A final review before merge (verdict: ready to merge, with fixes) found seven small items —
+none changing a measured number, several requiring one. No training re-run;
+`artifacts/checkpoints/` and `artifacts/hf/` were never touched.
+
+- **The parity window was widened from 64 to 256 tokens** — the model's full
+  `max_position_embeddings`. At 64, positions 64-255 were covered only by the CE check's
+  0.22-nat floor; a position-dependent defect (e.g. a RoPE angle that drifts with sequence
+  length) could have hidden there. Re-measured at 256 tokens across seven seeds: max_abs
+  ranges ~8.3e-6 to ~1.6e-5, max_rel ~3.0e-4 to ~5.6e-4, correlation indistinguishable from 1
+  (1 - corr ~1.2 to 1.3e-13) — still ~60-120x inside the gate's tolerances. The whole file
+  still runs in ~5.8s.
+- **Every measured figure in `test_numpy_parity.py`'s docstrings now matches what the
+  committed test configuration actually produces** — the previous headline table quoted a
+  256-token measurement (8.46e-6) that the committed 64-token test could not itself produce
+  (its own number was 5.26e-6/2.13e-4). In a branch whose thesis is "measured, not assumed,"
+  the number a future debugger compares a failure against has to be reproducible by running
+  the test, not a number from a related but different configuration.
+- **The independence claim was one dependency too strong.** Both the NumPy path and the HF
+  path call `convert.checkpoint_reader.read_tensors`, which owns the name↔tensor association
+  and the declaration-order stream walk — a bug there would be common-mode, producing two
+  identically-wrong paths that agree perfectly. `docs/ttml-forward-reference.md` was already
+  honest about this; CLAUDE.md's "What this gate still cannot see" list and the plan's
+  "different routes" framing were not, so both now name `checkpoint_reader` as a shared
+  dependency explicitly (see item 5 in the list above and the plan's independence section).
+- **The Global Constraint "`convert/` must NOT import `ttnn` or `ttml`" had no test for two
+  of its four target modules.** `convert.checkpoint_reader`, `convert.tokenizer`, and
+  `scripts/backfill_checkpoint_headers.py` all had the subprocess-probe test; `convert.ttml_forward`
+  and `convert.to_hf` did not, despite `ttml_forward.py`'s own docstring claiming (in a
+  garbled sentence that conceded as much on close reading) that something checked it.
+  Added `test_ttml_forward.py::test_ttml_forward_module_imports_no_tenstorrent` and
+  `test_to_hf.py::test_convert_to_hf_module_imports_no_tenstorrent`, same pattern, and fixed
+  the docstring.
+- **Added a fourth not-hollow proof: the epsilon-placement probe.** Task 1 found epsilon
+  moved outside the sqrt the *one* perturbation invisible to the CE check (Δ = -0.0002 nats).
+  `test_parity_gate_is_not_hollow_it_catches_epsilon_moved_outside_the_sqrt` monkeypatches
+  `rms_norm` for one `forward()` call (no reconversion needed) and measures max_abs = 0.0370
+  — 37x over the 1e-3 budget. Notably, correlation stays at 0.9999985, *above*
+  `MIN_CORRELATION`'s 0.9999 floor: this defect is loud in absolute/relative terms while
+  leaving the logit *shape* almost undisturbed, unlike the RoPE bug (corr ~0.93). Documented
+  in `convert/ttml_forward.py` that `RMS_NORM_EPS` being a plain hardcoded module constant
+  (not threaded from the header) is what makes this probe constructible — a future "read it
+  from the header" cleanup would silently remove this coverage.
+- **Strengthened the norm-swap blindness test with a byte-identical hash check.** The
+  previous version passed identically whether its monkeypatch fired or silently didn't — no
+  non-vacuity guard. Now converts both the unpatched and norm-swapped checkpoints into
+  separate throwaway directories and asserts their `model.safetensors` files are
+  SHA-256-identical (measured: both hash to `3a85bb08e1d2...490462200d`) — proof that *no*
+  instrument could see the swap, not just that this one didn't. All three logit metrics
+  (`max_abs`, `max_rel`, `corr`) are now asserted, making the "same tolerance" comment
+  literally true.
+- **Two documentation corrections:** renamed `attention()`'s local `embedding_dim` (q's
+  *out-features*, not the model's embedding dim — numerically equal only because
+  `head_dim == hidden/num_heads` on this architecture) to `q_out_features`; and
+  `docs/ttml-forward-reference.md` §10's summary row and closing line no longer read as if
+  the NumPy-vs-HF numerical tolerance were still an open problem — Task 3 resolved it at
+  ~5e-6 to ~1.6e-5, two orders of magnitude inside 1e-3. Q1's own body was already correctly
+  scoped to the NumPy-vs-*device* comparison and did not need to change.
+
+Test suite: **154 passed** (151 pre-existing + 3 new: the epsilon-probe test and the two
+import-purity tests), 0 skipped, 0 failed.

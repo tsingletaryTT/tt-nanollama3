@@ -882,7 +882,7 @@ converter is wrong" — both sides remain suspects until an op-level trace says 
 | 5 | SwiGLU | `(silu(x @ w1ᵀ) * (x @ w3ᵀ)) @ w2ᵀ`; SiLU on the **w1** branch | High | Fused + composite agree; shape asserts; HF importer mapping |
 | 6 | Embedding / output | One tied `[32000, 384]` tensor; gather in, `@ Wᵀ` out; **no scaling at either end**; no `tok_emb/weight` in the checkpoint; vocab unpadded | High | Construction + `parameters()` dedup + checkpoint manifest |
 | — | End-to-end behaviour | Reference reproduces the training loss (1.847 vs 1.8781, 0.3 SE); ablations cost 12–52 SE | Decisive for layout errors; **floor ≈0.22 nats** | §8.1 |
-| — | Numerical tolerance | **Unresolved, and now known to be a real obstacle** — RMSNorm's mean divisor is bf16 | — | Q1 |
+| — | Numerical tolerance | **Resolved for NumPy-vs-HF** — Task 3's parity gate (`tests/test_numpy_parity.py`) measures ~5e-6 to ~1.6e-5 absolute agreement on a 256-token window, ~120x inside a 1e-3 tolerance. **Still unresolved for NumPy-vs-device** — RMSNorm's mean divisor is bf16 on the actual hardware, and no float32 host comparison bounds that gap | — | Q1 |
 | — | `fmod` rounding | **Closed** — identical to 4 d.p. | — | Q2 |
 | — | Mask constant | **Closed** — `0xCE6E` = `−1e9` in bf16 | — | Q4 |
 | — | `params.theta` inert | **Believed inert, not proven** | — | Q3 |
@@ -894,4 +894,8 @@ obstacle), Q3 is a latent trap in ttml rather than a fact about this forward pas
 only for the non-production composite path, and Q6 is about the coarseness of the end-to-end
 check.
 
-**If you read only one open question, read Q1.**
+**If you read only one open question, read Q1** — though note its body scopes the remaining
+obstacle to the *NumPy-vs-device* comparison specifically. The *NumPy-vs-HF-conversion* gate
+Q1 originally worried might be unreachable was resolved by Task 3 at ~5e-6 to ~1.6e-5
+(`tests/test_numpy_parity.py`), two orders of magnitude inside the 1e-3 tolerance that
+concerned this document when it was written.

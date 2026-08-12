@@ -17,12 +17,12 @@ Plan 4's acceptance gate is HF-side validation loss within 0.2 nats of the train
 
 Plan 4 also demonstrated that agreement among checks proves little when the checks share a blind spot. The first conversion loaded, tied correctly, showed 4.75-nat entropy, and generated fluent prose — while computing the wrong function, because every one of those checks was insensitive to RoPE row layout.
 
-**The independence requirement follows directly.** This NumPy implementation must be derived from **ttml's C++ source**, not from `convert/`. If it is written by reading our own converter, it inherits the converter's misunderstandings, agrees with it, and proves nothing. The two paths must reach the same logits by different routes:
+**The independence requirement follows directly.** This NumPy implementation must be derived from **ttml's C++ source**, not from `convert/`. If it is written by reading our own converter, it inherits the converter's misunderstandings, agrees with it, and proves nothing. The two paths must reach the same logits by different *interpretations* of the raw tensors — **not by fully different routes to those tensors**. Both go through `convert/checkpoint_reader.read_tensors`, which owns the name↔tensor association and the declaration-order stream walk over the checkpoint's pickle records; a bug there (a misassigned name, a stream-order error) would be common-mode and invisible to a comparison between the two paths below, since both would read the same wrong tensor under the same name and agree perfectly while both being wrong:
 
-- **NumPy path:** raw checkpoint tensors → ttml conventions (interleaved RoPE, fused KV, ttml's norm order) → logits
-- **HF path:** raw checkpoint tensors → `convert/` (split KV, permuted RoPE rows, HF layout) → `transformers` → logits
+- **NumPy path:** raw checkpoint tensors (via `checkpoint_reader`) → ttml conventions (interleaved RoPE, fused KV, ttml's norm order) → logits
+- **HF path:** raw checkpoint tensors (via `checkpoint_reader`) → `convert/` (split KV, permuted RoPE rows, HF layout) → `transformers` → logits
 
-Agreement is then real evidence. **Anyone implementing Task 1 must not read `convert/hf_mapping.py` or `convert/to_hf.py`** beyond the tensor-name inventory, and must derive every numerical convention from `~/tt-metal/tt-train/sources/ttml/`.
+Agreement past that shared point is still real evidence about everything downstream of it — the RoPE pairing, the KV split, the norm mapping, the layout translation — which is where Plan 4's actual bug lived. It is just not evidence about `checkpoint_reader` itself; that is anchored separately, by `test_checkpoint_reader.py`'s ordering tests and by the coarser cross-entropy check, not by this parity gate. **Anyone implementing Task 1 must not read `convert/hf_mapping.py` or `convert/to_hf.py`** beyond the tensor-name inventory, and must derive every numerical convention from `~/tt-metal/tt-train/sources/ttml/`.
 
 ## What has been verified about ttml's forward pass
 

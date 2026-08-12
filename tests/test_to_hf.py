@@ -312,3 +312,28 @@ def test_build_config_matches_the_real_tokenizer():
     assert c["bos_token_id"] == 1
     assert c["eos_token_id"] == 2
     assert c["pad_token_id"] == 3
+
+
+def test_convert_to_hf_module_imports_no_tenstorrent():
+    """convert/ must run on a machine with no hardware and no tt-metal checkout, and
+    convert.to_hf is the module that actually gets run at conversion time -- a stray ttml/ttnn
+    import here would defeat the whole point of a CPU-only conversion path. torch is
+    deliberately not banned -- transformers imports it transitively and CPU torch runs
+    anywhere.
+
+    Checked in a subprocess: this test session has already imported plenty, so inspecting
+    our own sys.modules would prove nothing.
+    """
+    import subprocess
+    import sys
+
+    probe = (
+        "import sys; import convert.to_hf; "
+        "bad=[m for m in ('ttnn','ttml') if m in sys.modules]; "
+        "print(','.join(bad))"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", probe],
+        capture_output=True, text=True, check=True, cwd=str(Path(__file__).parent.parent),
+    )
+    assert out.stdout.strip() == "", f"convert.to_hf pulled in: {out.stdout.strip()}"

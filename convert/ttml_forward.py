@@ -17,11 +17,15 @@ which in turn cites the ttml file:line it was read from. Where the doc says ttml
 something -- even something that looks unnatural -- this module does that, not a "more
 sensible" alternative; deviations belong in the report as findings, not silent corrections.
 
-**Purity.** No `ttnn`/`ttml` import, ever (checked by
-`tests/test_ttml_forward.py`'s sibling purity test in `test_checkpoint_reader.py`'s style
-is not duplicated here, but the same rule applies: this module must run on a machine with
-no tt-metal checkout and no Tenstorrent hardware). Only `numpy` (plus whatever dtype the
-checkpoint's bfloat16 tensors arrive as, handled by a plain `.astype(np.float32)`).
+**Purity.** No `ttnn`/`ttml` import, ever -- checked by
+`tests/test_ttml_forward.py::test_ttml_forward_module_imports_no_tenstorrent`, a subprocess
+import-and-inspect-`sys.modules` probe in the same style as
+`test_checkpoint_reader.py::test_convert_checkpoint_reader_imports_no_tenstorrent`,
+`test_tokenizer.py::test_convert_module_imports_no_tenstorrent`, and
+`test_backfill_checkpoint_headers.py::test_backfill_script_imports_no_tenstorrent`: this
+module must run on a machine with no tt-metal checkout and no Tenstorrent hardware. Only
+`numpy` (plus whatever dtype the checkpoint's bfloat16 tensors arrive as, handled by a plain
+`.astype(np.float32)`).
 """
 
 from __future__ import annotations
@@ -39,6 +43,17 @@ from convert.checkpoint_reader import read_checkpoint_meta, read_tensors
 #: (ttml/modules/llama_block.cpp:47-48, ttml/modules/rms_norm_module.hpp:17,23) and nothing
 #: plumbs a YAML/header value through. So this is hardcoded to the C++ default rather than
 #: read from the checkpoint header, even though the two happen to agree for this checkpoint.
+#:
+#: **This hardcoding is also load-bearing for parity-gate coverage, not just fidelity to
+#: ttml.** `RMS_NORM_EPS` being a plain module constant (rather than something threaded
+#: through from the checkpoint header on every call) is what makes
+#: `tests/test_numpy_parity.py::test_parity_gate_is_not_hollow_it_catches_epsilon_moved_outside_the_sqrt`
+#: able to construct its probe at all -- that test proves the parity gate catches epsilon
+#: moved outside the sqrt, the one perturbation docs/ttml-forward-reference.md's §9 Q6 found
+#: invisible to the cross-entropy check. Someone "cleaning this up" to read `rms_norm_eps`
+#: from the header instead would be a reasonable-looking refactor that silently removes this
+#: coverage. Read that test before making this change, not just this comment.
+
 RMS_NORM_EPS = 1e-5
 
 
@@ -227,8 +242,13 @@ def attention(
     7. `out = fused @ out_w.T`.
     """
     seq_len = x.shape[0]
-    embedding_dim = q_w.shape[0]  # out_features of q_linear == embedding_dim (== H * Dh)
-    head_dim = embedding_dim // num_heads
+    # q_w's out-features, i.e. H * Dh -- numerically equal to the model's embedding_dim on
+    # this architecture (num_heads * head_dim == hidden_size), but that is a fact about this
+    # specific config, not a general one: a model where head_dim != hidden/num_heads would
+    # have q_linear's out-features differ from the embedding dim, and naming this
+    # `embedding_dim` would silently misdescribe what it actually is.
+    q_out_features = q_w.shape[0]
+    head_dim = q_out_features // num_heads
     heads_per_group = num_heads // num_groups
 
     q = x @ q_w.T  # [S, H*Dh]
