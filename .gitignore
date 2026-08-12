@@ -3,6 +3,8 @@ __pycache__/
 .venv/
 data/
 checkpoints/
+checkpoints-v2/
+checkpoints-scratch/
 *.safetensors
 .superpowers/
 generated/

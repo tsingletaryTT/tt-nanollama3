@@ -2,9 +2,19 @@
 # SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
 """Training config assembly. Pure dict/attribute work — no hardware, no ttml import."""
 
-import pytest
+from pathlib import Path
 
-from train.config import SEQ_LEN, VOCAB_SIZE, RunConfig, build_yaml_config, run_config_from_yaml
+import pytest
+import yaml
+
+from train.config import (
+    SEQ_LEN,
+    VOCAB_SIZE,
+    RunConfig,
+    apply_optimizer_override,
+    build_yaml_config,
+    run_config_from_yaml,
+)
 
 
 def _yaml(**kw):
@@ -57,3 +67,77 @@ def test_emits_optimizer_section():
     assert opt["type"] == "AdamW"
     assert opt["lr"] == 0.0003
     assert opt["weight_decay"] == 0.01
+
+
+def test_stochastic_rounding_defaults_off():
+    """The v1 behaviour (and the bug): every existing call site is unaffected unless it
+    opts in explicitly. See tests/test_training_config.py for what leaving this off cost."""
+    assert _yaml()["training_config"]["optimizer"]["stochastic_rounding"] is False
+
+
+def test_stochastic_rounding_can_be_enabled():
+    opt = _yaml(stochastic_rounding=True)["training_config"]["optimizer"]
+    assert opt["stochastic_rounding"] is True
+    # Nothing else in the optimizer block should move.
+    assert opt["type"] == "AdamW"
+    assert opt["lr"] == 0.0003
+
+
+def test_apply_optimizer_override_replaces_the_optimizer_block(tmp_path):
+    override_path = tmp_path / "override.yaml"
+    override_path.write_text(
+        yaml.dump({"training_config": {"optimizer": {"type": "AdamW", "lr": 0.001,
+                                                        "stochastic_rounding": True}}})
+    )
+    cfg = _yaml()
+    original_lr = cfg["training_config"]["optimizer"]["lr"]
+
+    result = apply_optimizer_override(cfg, override_path)
+
+    assert result is cfg  # mutates and returns the same dict for chaining
+    opt = cfg["training_config"]["optimizer"]
+    assert opt["stochastic_rounding"] is True
+    assert opt["lr"] == 0.001
+    assert opt["lr"] != original_lr
+
+
+def test_apply_optimizer_override_leaves_non_optimizer_fields_untouched(tmp_path):
+    """Only the "which optimizer recipe" question is answered by an override file —
+    steps/batch_size/checkpoint_dir keep coming from the CLI, per the function's docstring."""
+    override_path = tmp_path / "override.yaml"
+    override_path.write_text(
+        yaml.dump({"training_config": {"optimizer": {"stochastic_rounding": True}}})
+    )
+    cfg = _yaml(batch_size=8, max_steps=1234)
+
+    apply_optimizer_override(cfg, override_path)
+
+    tc = cfg["training_config"]
+    assert tc["batch_size"] == 8
+    assert tc["max_steps"] == 1234
+
+
+def test_apply_optimizer_override_rejects_a_file_without_an_optimizer_block(tmp_path):
+    override_path = tmp_path / "bad.yaml"
+    override_path.write_text(yaml.dump({"training_config": {"seed": 1}}))
+    with pytest.raises(ValueError, match="optimizer"):
+        apply_optimizer_override(_yaml(), override_path)
+
+
+def test_v2_config_file_has_stochastic_rounding_enabled():
+    """The actual shipped recipe file: train/run.py --config points here to get the fix."""
+    v2_path = (
+        Path(__file__).resolve().parent.parent / "train" / "configs" / "nanollama3_bpe_v2.yaml"
+    )
+    with v2_path.open("r", encoding="utf-8") as f:
+        v2 = yaml.safe_load(f)
+    assert v2["training_config"]["optimizer"]["stochastic_rounding"] is True
+
+
+def test_v2_config_file_is_loadable_via_apply_optimizer_override():
+    v2_path = (
+        Path(__file__).resolve().parent.parent / "train" / "configs" / "nanollama3_bpe_v2.yaml"
+    )
+    cfg = _yaml()
+    apply_optimizer_override(cfg, v2_path)
+    assert cfg["training_config"]["optimizer"]["stochastic_rounding"] is True

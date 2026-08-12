@@ -43,7 +43,12 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from train import checkpoint  # noqa: E402
-from train.config import VOCAB_SIZE, build_yaml_config, run_config_from_yaml  # noqa: E402
+from train.config import (  # noqa: E402
+    VOCAB_SIZE,
+    apply_optimizer_override,
+    build_yaml_config,
+    run_config_from_yaml,
+)
 
 
 def _default_tt_metal_home() -> str:
@@ -114,6 +119,14 @@ def main() -> int:
                         "in --checkpoint-dir. --steps then counts steps run in this "
                         "invocation (additive past the checkpoint's step), not an "
                         "absolute target step.")
+    p.add_argument("--config", default=None,
+                   help="Optional training-recipe YAML (e.g. "
+                        "train/configs/nanollama3_bpe_v2.yaml) whose "
+                        "training_config.optimizer block replaces the default optimizer "
+                        "assembled from CLI flags. This is how a fix like "
+                        "stochastic_rounding gets opted into without a dedicated flag for "
+                        "every future optimizer tweak; see "
+                        "train.config.apply_optimizer_override.")
     args = p.parse_args()
 
     tokens = Path(args.tokens_dir)
@@ -135,6 +148,10 @@ def main() -> int:
         str(ROOT / "artifacts" / "tokenizer"), str(model_config),
         batch_size=args.batch_size, max_steps=args.steps, eval_every=args.eval_every,
     )
+    if args.config:
+        apply_optimizer_override(yaml_config, args.config)
+        print(f"  optimizer overridden from {args.config}: "
+              f"{yaml_config['training_config']['optimizer']}")
     cfg = run_config_from_yaml(yaml_config)
 
     print(f"NanoLlama3 training — steps={cfg.steps} batch={cfg.batch_size} "

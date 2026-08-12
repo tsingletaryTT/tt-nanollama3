@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
+#
+# NanoLlama3 BPE training recipe, v2 — the stochastic_rounding fix.
+#
+# `train/run.py` assembles its actual training config in Python
+# (`train.config.build_yaml_config`), driven by CLI flags — there is no single on-disk file
+# it reads by default. This file is that same recipe rendered as a real, loadable document:
+# point `train/run.py --config` at it and `train.config.apply_optimizer_override` swaps its
+# `training_config.optimizer` block into the config `train/run.py` assembles from the CLI
+# (see that function's docstring for exactly what it does and does not touch).
+#
+# THE BUG THIS FIXES: the original 3000-step run (`artifacts/checkpoints/`, this project's
+# baseline) left `stochastic_rounding` unset, so ttml's AdamW defaulted it to `false`
+# (`optimizers/optimizer_registry.cpp:37`). All 13 RMSNorm gammas are bfloat16 parameters
+# sitting at 1.0, where one ulp is 0.0039 -- an order of magnitude larger than the ~3e-4 Adam
+# updates those gammas' real gradients produced (exp_avg absmax measured at ~3.6e-4 for
+# block-0 gammas, ~2.5e-3 for ln_fc). Every update rounded straight back to 1.0 and was
+# discarded, deterministically, on every one of the 3000 steps -- with a training loss curve
+# that looked perfectly healthy throughout (10.6875 -> 1.9219), because plenty of *other*
+# parameters were still learning normally. See
+# docs/superpowers/specs/2026-08-11-followups.md item 1 and tests/test_training_config.py.
+#
+# THE FIX: stochastic_rounding: true, below. Nothing else in the optimizer block changes.
+# This is preference-order option 1 from the task brief (over `AdamWFullPrecision`) because
+# it keeps parameters bfloat16 and the checkpoint format unchanged -- nothing downstream
+# (convert/checkpoint_reader.py, the HF converter, the numpy parity gate) is affected. Two
+# shipped tt-train configs already ship this exact setting:
+# ~/tt-metal/tt-train/configs/training_configs/training_shakespeare_tiny_deepseek_char.yaml
+# and .../training_shakespeare_tinyllama_muon.yaml.
+#
+# max_steps/model_save_interval/checkpoint_dir below record Task 3's real-run targets (3
+# epochs at batch_size=64/seq_len=256 is ~21,033 steps; see
+# docs/superpowers/plans/2026-08-12-real-training-run.md's epoch-arithmetic table) so the
+# whole recipe lives in one place. `train/run.py` does NOT read these three fields from this
+# file today -- `apply_optimizer_override` only takes the `optimizer` block, and
+# steps/save-every/checkpoint-dir keep coming from `--steps`/`--save-every`/`--checkpoint-dir`
+# on the CLI, same as every other run. They are recorded here as documentation of intent, not
+# as inputs this file's loader consumes.
+training_config:
+  seed: 5489
+  seq_len: 256
+  batch_size: 64
+  max_steps: 21033          # 3 epochs over the 114.9M-token training split; not read from
+                             # this file by train/run.py -- pass `--steps 21033` on the CLI.
+  eval_every: 200
+  gradient_accumulation_steps: 1
+  model_save_interval: 2000 # ~10 checkpoints across the run; pass `--save-every 2000`.
+  checkpoint_dir: artifacts/checkpoints-v2   # pass `--checkpoint-dir artifacts/checkpoints-v2`.
+  tokenizer_type: bpe
+  tokenizer_path: artifacts/tokenizer
+  model_config: nanollama3.yaml   # resolved at runtime relative to
+                                   # $TT_METAL_HOME/tt-train/configs/model_configs/
+  optimizer:
+    # Unchanged from v1 (train/config.py's build_yaml_config defaults, matching tt-train's
+    # own training_shakespeare_nanollama3.yaml) except for the one flag below.
+    type: AdamW
+    lr: 0.0003
+    beta1: 0.9
+    beta2: 0.999
+    epsilon: 1.0e-8
+    weight_decay: 0.01
+    amsgrad: false
+    stochastic_rounding: true   # <-- the fix. v1 left this unset (defaulted to false).
+device_config:
+  mesh_shape: [1, 1]
+  enable_ddp: false
+  enable_tp: false
