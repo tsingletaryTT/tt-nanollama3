@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
 """Selector logic, tested against fixture rows rather than the network."""
+from unittest.mock import patch
 import pytest
 from train.corpus import CorpusSource
-from scripts.build_gutenberg_catalogue import matches_source
+from scripts.build_gutenberg_catalogue import matches_source, iter_metadata
 
 FABRE = {"authors": "Fabre, Jean-Henri", "title": "The Life of the Spider",
          "bookshelves": "Science", "subjects": "Spiders"}
@@ -59,3 +60,16 @@ def test_missing_metadata_fields_do_not_raise():
     src = _src(authors=["Fabre"])
     assert not matches_source({}, src)
     assert not matches_source({"authors": None}, src)
+
+
+def test_iter_metadata_fails_loudly_when_no_shards_found():
+    """If dataset layout changes and no matching shards exist, fail explicitly."""
+    with patch("huggingface_hub.HfApi") as mock_api:
+        mock_instance = mock_api.return_value
+        # Return a file list with no matching parquet shards.
+        mock_instance.list_repo_files.return_value = [
+            "README.md", "data/metadata.json", "some_other_file.txt"
+        ]
+        with pytest.raises(RuntimeError, match="No parquet shards found"):
+            # Attempt to iterate — should fail immediately on shard discovery.
+            list(iter_metadata("some_revision"))

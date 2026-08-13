@@ -66,7 +66,7 @@ def iter_metadata(revision: str) -> Iterable[Dict[str, object]]:
     NOTE: We project the METADATA column directly via PyArrow, not load_dataset().
     The obvious approach of load_dataset(..., columns=["METADATA"], streaming=True)
     raises ValueError on datasets 2.14.6: a casting bug when projecting columns in
-    streaming mode. PyArrow projection works and costs ~213 MB for all 48,284 rows,
+    streaming mode. PyArrow projection works and costs ~6-8 MB for all 48,284 rows,
     vs. ~15 GB if full TEXT rows crossed the network. This approach recovers the
     stated goal: reading one column instead of the whole dataset.
     """
@@ -85,12 +85,23 @@ def iter_metadata(revision: str) -> Iterable[Dict[str, object]]:
     ]
     parquet_files.sort()
 
+    # Fail loudly if no shards were found — this is a loader problem, not an empty result.
+    if not parquet_files:
+        raise RuntimeError(
+            f"No parquet shards found in {GUTENBERG_REPO} (revision={revision}). "
+            f"Expected files matching 'data/train-*.parquet'. "
+            f"Dataset layout may have changed, or revision is invalid."
+        )
+
     # Read each parquet shard with column projection. Get HTTPS URLs for each file.
     for fname in parquet_files:
         url = hf_hub_url(repo_id=GUTENBERG_REPO, filename=fname, revision=revision,
                          repo_type="dataset")
-        # Use fsspec to open the remote parquet file, then read with PyArrow column projection.
-        with fsspec.open(url, "rb") as f:
+        # Use fsspec to open the remote parquet file with no cache (cache_type="none"),
+        # then read with PyArrow column projection. This eliminates ~194 MB of wasted
+        # TEXT column reads from fsspec's default 5 MiB read-ahead, reducing network
+        # traffic from ~213 MB to ~6-8 MB for all 48,284 rows.
+        with fsspec.open(url, "rb", cache_type="none") as f:
             pf = pq.ParquetFile(f)
             for batch in pf.iter_batches(batch_size=1024, columns=["METADATA"]):
                 for row in batch.to_pylist():
