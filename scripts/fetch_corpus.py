@@ -48,9 +48,10 @@ def write_documents(rows: Iterable[Dict[str, object]], dest: Path) -> int:
 def fetch_gutenberg_batch(sources: list[CorpusSource], limit_rows: int = 0) -> Dict[str, int]:
     """Fetch multiple Gutenberg sources in one streaming pass. Returns {source_name: count}.
 
-    limit_rows caps rows SCANNED (rows with valid metadata and text), shared across all
-    sources in the batch. This bounds network cost predictably regardless of how many
-    sources match each row.
+    Stop after reading N rows from the source (0 = no limit). This is a COST bound, not a
+    document count: rows that are filtered out — non-matching books, blank text, malformed
+    metadata — still consume the budget, so fewer than N documents may be written. The budget
+    is shared across all sources in the single pass.
     """
     from datasets import load_dataset
 
@@ -80,6 +81,10 @@ def fetch_gutenberg_batch(sources: list[CorpusSource], limit_rows: int = 0) -> D
         seen = 0
 
         for row in ds:
+            seen += 1
+            if limit_rows and seen > limit_rows:
+                break
+
             md = row.get("METADATA")
             if isinstance(md, str):
                 try:
@@ -99,10 +104,6 @@ def fetch_gutenberg_batch(sources: list[CorpusSource], limit_rows: int = 0) -> D
                     file_handles[src.name].write(json.dumps({"text": text}, ensure_ascii=False) + "\n")
                     counts[src.name] += 1
 
-            seen += 1
-            if limit_rows and seen >= limit_rows:
-                break
-
         return counts
 
     finally:
@@ -115,9 +116,9 @@ def fetch_gutenberg_batch(sources: list[CorpusSource], limit_rows: int = 0) -> D
 def iter_source_rows(source: CorpusSource, limit_rows: int = 0) -> Iterator[Dict[str, object]]:
     """Stream a source's rows, normalised to ``{"text": str}`` and filtered if Gutenberg.
 
-    limit_rows caps rows SCANNED from the dataset (not documents yielded). For consistent
-    cost prediction across single-source and batch paths, the counter increments before
-    filtering, stopping the stream after limit_rows have been examined.
+    Stop after reading N rows from the source (0 = no limit). This is a cost bound, not a
+    document count: rows that are filtered out — non-matching books, blank text, malformed
+    metadata — still consume the budget, so fewer than N documents may be yielded.
     """
     from datasets import load_dataset
 
@@ -166,9 +167,10 @@ def main() -> int:
     p.add_argument("--source", action="append", default=None,
                    help="Source name (repeatable). Default: all registered sources.")
     p.add_argument("--limit-rows", type=int, default=0,
-                   help="Limit rows scanned from dataset (0 = all). For smoke tests. "
-                        "In batch mode (multiple Gutenberg sources), shared across all sources. "
-                        "In single-source mode, per-source limit.")
+                   help="Stop after reading N rows from the source (0 = no limit). "
+                        "This is a cost bound, not a document count: rows that are filtered out "
+                        "— non-matching books, blank text, malformed metadata — still consume the "
+                        "budget, so fewer than N documents may be written. For smoke tests.")
     args = p.parse_args()
 
     names = args.source or sorted(SOURCES)
