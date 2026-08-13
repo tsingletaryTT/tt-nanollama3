@@ -236,6 +236,32 @@ The prompt set must include:
 - **A grounding probe** — something factual, to check Wikipedia did its job and the model
   knows what an ant actually is.
 
+## Identity: the name is provisional
+
+`tt-nanollama3` names an *architecture lineage* — tt-train's shipped `nanollama3` config,
+which the 384 model copies verbatim. That name is already becoming inaccurate. The 1024 size
+is ours, not tt-train's. After this corpus the tokenizer is ours, the data mix is ours, and
+the intended behaviour is deliberately unlike a generic small Llama.
+
+**Hold the question open rather than settling it now.** What this model *should be* is
+partly an empirical question — the frozen prompt set will show what the mix actually
+produces, and that may be more interesting, or differently interesting, than the brief
+anticipated. Deciding the identity before seeing the outputs would be premature.
+
+When a rename does happen it should be a **deliberate cutover, not a drift**, because it is
+not free:
+
+- Hugging Face repo ids (`episod/tt-nanollama3*`) — renaming breaks existing links; the
+  published baseline is evidence and should keep its name whatever the new work is called.
+- `weights.repo`, `env.HF_MODEL`, and `entrypoint.class` in every manifest.
+- The bundle module name `tt_nanollama3_adapter`.
+- `train/sizes.py`'s `config_filename` pattern (`nanollama3-<size>.yaml`).
+
+A reasonable trigger: when the architecture itself stops matching tt-train's `nanollama3`
+(different depth/width ratios, a changed attention or FFN shape), the lineage claim is no
+longer true and the name should follow. Until then it is accurate enough, and the cost of
+churn exceeds the benefit.
+
 ## Scope boundaries
 
 **In scope:** the corpus registry, fetch/prepare/measure/blend pipeline, retrained tokenizer,
