@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
-"""Train NanoLlama3 on Tenstorrent hardware.
+"""Train tt-tnt on Tenstorrent hardware.
 
 We own this entrypoint because tt-train's own Python trainer does not work against the
 current tree: ``examples/python/transformers/training.py`` imports a ``trainer`` module
@@ -338,7 +338,7 @@ def main() -> int:
     _warn_if_stochastic_rounding_disabled(yaml_config)
     cfg = run_config_from_yaml(yaml_config)
 
-    print(f"NanoLlama3 training — steps={cfg.steps} batch={cfg.batch_size} "
+    print(f"tt-tnt training — steps={cfg.steps} batch={cfg.batch_size} "
           f"seq_len={cfg.seq_len} arch={args.arch}")
     if args.dry_run:
         print("--dry-run set: not opening a device.")

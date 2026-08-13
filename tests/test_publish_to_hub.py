@@ -67,7 +67,7 @@ def test_dry_run_publish_never_touches_the_hub(monkeypatch, capsys):
     monkeypatch.setattr(publish_to_hub, "_push_card", _boom)
     monkeypatch.setattr(publish_to_hub, "_set_license", _boom)
 
-    rc = publish_to_hub.cmd_publish("episod/tt-nanollama3", dry_run=True, yes=False)
+    rc = publish_to_hub.cmd_publish("episod/tt-tnt", dry_run=True, yes=False)
     assert rc == 0
     out = capsys.readouterr().out
     assert "dry-run" in out
@@ -82,7 +82,7 @@ def test_dry_run_restore_card_never_touches_the_hub(monkeypatch, capsys):
     monkeypatch.setattr(publish_to_hub, "_set_license", _boom)
     monkeypatch.setattr(publish_to_hub, "_report_card_state", _boom)
 
-    rc = publish_to_hub.cmd_restore_card("episod/tt-nanollama3", dry_run=True, yes=False)
+    rc = publish_to_hub.cmd_restore_card("episod/tt-tnt", dry_run=True, yes=False)
     assert rc == 0
     assert "dry-run" in capsys.readouterr().out
 
@@ -94,7 +94,7 @@ def test_publish_without_yes_refuses_and_does_not_touch_the_hub(monkeypatch, cap
     monkeypatch.setattr(publish_to_hub, "_push_card", _boom)
     monkeypatch.setattr(publish_to_hub, "_set_license", _boom)
 
-    rc = publish_to_hub.cmd_publish("episod/tt-nanollama3", dry_run=False, yes=False)
+    rc = publish_to_hub.cmd_publish("episod/tt-tnt", dry_run=False, yes=False)
     assert rc != 0
     assert "--yes" in capsys.readouterr().err
 
@@ -106,7 +106,7 @@ def test_restore_card_without_yes_refuses_and_does_not_touch_the_hub(monkeypatch
     monkeypatch.setattr(publish_to_hub, "_push_card", _boom)
     monkeypatch.setattr(publish_to_hub, "_set_license", _boom)
 
-    rc = publish_to_hub.cmd_restore_card("episod/tt-nanollama3", dry_run=False, yes=False)
+    rc = publish_to_hub.cmd_restore_card("episod/tt-tnt", dry_run=False, yes=False)
     assert rc != 0
     assert "--yes" in capsys.readouterr().err
 

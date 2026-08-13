@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
-"""Build the corpus and tokenizer artifacts NanoLlama3 trains against.
+"""Build the corpus and tokenizer artifacts tt-tnt trains against.
 
     python scripts/build_tokenizer.py                                  # the nine-source blend
     python scripts/build_tokenizer.py --corpus artifacts/corpus/corpus.txt  # TinyStories only

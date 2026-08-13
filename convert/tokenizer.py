@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
-"""Train and export the NanoLlama3 BPE tokenizer.
+"""Train and export the tt-tnt BPE tokenizer.
 
 The export is written with ``PreTrainedTokenizerFast.save_pretrained()``, which produces
 both a standalone ``tokenizer.json`` and the sidecar config a directory load needs. That

@@ -97,16 +97,32 @@ def validate_header(header: Dict[str, Any]) -> None:
     if fmt > CHECKPOINT_FORMAT:
         raise ValueError(
             f"checkpoint header format {fmt} is newer than this code understands "
-            f"({CHECKPOINT_FORMAT}); upgrade tt-nanollama3 to read it"
+            f"({CHECKPOINT_FORMAT}); upgrade tt-tnt to read it"
         )
 
 
+#: Filename prefix for checkpoints written by *this* code. Checkpoints already on disk from
+#: before the tt-nanollama3 -> tt-tnt rename were written as ``nanollama3_step<N>.pkl`` and
+#: are never renamed (they are evidence of a real run under the old name) — see
+#: ``_LEGACY_GLOB`` below, which keeps them discoverable by ``latest_checkpoint`` alongside
+#: anything newly written under the new prefix.
+CHECKPOINT_PREFIX = "tt_tnt_step"
+
+#: Glob for checkpoints written before the rename. Kept read-only: nothing in this codebase
+#: ever writes a new file matching this pattern.
+_LEGACY_GLOB = "nanollama3_step*.pkl"
+
+
 def checkpoint_path(checkpoint_dir: Path, step: int) -> Path:
-    """``<dir>/nanollama3_step<step>.pkl``, zero-padded so paths sort by step.
+    """``<dir>/tt_tnt_step<step>.pkl``, zero-padded so paths sort by step.
 
     Without padding, ``step10`` sorts before ``step9`` and "newest checkpoint" becomes wrong.
+
+    This prefix applies to checkpoints written from here on. Checkpoints written before the
+    tt-nanollama3 -> tt-tnt rename are named ``nanollama3_step<N>.pkl`` and are untouched on
+    disk; :func:`latest_checkpoint` still finds them (see its docstring).
     """
-    return Path(checkpoint_dir) / f"nanollama3_step{int(step):08d}.pkl"
+    return Path(checkpoint_dir) / f"{CHECKPOINT_PREFIX}{int(step):08d}.pkl"
 
 
 def latest_checkpoint(checkpoint_dir: Path) -> Optional[Path]:
@@ -117,9 +133,20 @@ def latest_checkpoint(checkpoint_dir: Path) -> Optional[Path]:
     outranks this run's fresh step-100 one, even though the step-100 file has the newer
     mtime). A caller that wants to know which run's weights this actually picked should
     inspect the returned checkpoint's header for ``created_at``, printed by ``--resume``.
+
+    Looks for **both** the current ``tt_tnt_step*.pkl`` naming and the pre-rename
+    ``nanollama3_step*.pkl`` naming, so a directory holding checkpoints from before the
+    tt-nanollama3 -> tt-tnt rename keeps resolving correctly (e.g. ``--resume latest`` against
+    ``artifacts/checkpoints/``, which holds only old-prefixed files). Sorted by the numeric
+    step embedded after "step" in the filename, not by the prefix, so the two naming schemes
+    interleave correctly by step rather than the new prefix always sorting after the old one.
     """
-    paths = sorted(Path(checkpoint_dir).glob("nanollama3_step*.pkl"))
-    return paths[-1] if paths else None
+    paths = list(Path(checkpoint_dir).glob(f"{CHECKPOINT_PREFIX}*.pkl")) + list(
+        Path(checkpoint_dir).glob(_LEGACY_GLOB)
+    )
+    if not paths:
+        return None
+    return max(paths, key=lambda p: int(p.stem.rsplit("step", 1)[-1]))
 
 
 def save(path: Path, *, header: Dict[str, Any], model_params, optimizer,

@@ -1,5 +1,5 @@
 {
-  "name": "tt-nanollama3",
+  "name": "tt-tnt",
   "description": "A ~22M-parameter Llama-3-style model trained from scratch on Tenstorrent Blackhole with ttml, served through the Tenstorrent vLLM plugin. Demonstration of an end-to-end TT-native pipeline, not a capable general model.",
   "platform": {
     "ttnn": ">=0.65,<0.80"
@@ -13,11 +13,11 @@
     "topology": "1x1"
   },
   "entrypoint": {
-    "class": "tt_nanollama3_adapter:LlamaForCausalLM",
+    "class": "tt_tnt_adapter:LlamaForCausalLM",
     "arch_name": "LlamaForCausalLM"
   },
   "weights": {
-    "repo": "episod/tt-nanollama3"
+    "repo": "episod/tt-tnt"
   },
   "resources": {
     "max_model_len": 256,
@@ -25,6 +25,6 @@
   },
   "env": {
     "MESH_DEVICE": "P150",
-    "HF_MODEL": "episod/tt-nanollama3"
+    "HF_MODEL": "episod/tt-tnt"
   }
 }

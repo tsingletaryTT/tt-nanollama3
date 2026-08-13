@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
-"""Convert a NanoLlama3 checkpoint into a loadable Hugging Face model directory.
+"""Convert a tt-tnt checkpoint into a loadable Hugging Face model directory.
 
 Thin argparse CLI over ``convert.to_hf.convert_checkpoint``. Reads a ttml checkpoint
 (pickle + numpy, no ttml/ttnn import required) and the trained tokenizer, and writes
@@ -9,8 +9,9 @@ Thin argparse CLI over ``convert.to_hf.convert_checkpoint``. Reads a ttml checkp
 that ``transformers.AutoModelForCausalLM.from_pretrained`` can load directly.
 
 By default this picks the *newest* checkpoint under ``artifacts/checkpoints`` (highest
-step number, from the ``nanollama3_step<N>.pkl`` naming convention) so a bare invocation
-converts the most recently trained model:
+step number, from the ``tt_tnt_step<N>.pkl`` naming convention, or the pre-rename
+``nanollama3_step<N>.pkl`` for checkpoints written before the tt-nanollama3 -> tt-tnt
+rename) so a bare invocation converts the most recently trained model:
 
     python scripts/convert_checkpoint.py                       # newest checkpoint -> artifacts/hf/
     python scripts/convert_checkpoint.py --checkpoint path.pkl  # a specific checkpoint
@@ -39,14 +40,21 @@ from train.sizes import DEFAULT_SIZE, SIZES  # noqa: E402
 def _newest_checkpoint(checkpoint_dir: Path) -> Path:
     """Return the checkpoint with the highest ``step`` under ``checkpoint_dir``.
 
-    Sorts by the numeric step embedded in the filename (``nanollama3_step00003000.pkl``)
-    rather than by mtime or filename string order, so it's correct regardless of how the
-    files were copied or touched.
+    Sorts by the numeric step embedded in the filename (``tt_tnt_step00003000.pkl``, or the
+    pre-rename ``nanollama3_step00003000.pkl`` for checkpoints written before the
+    tt-nanollama3 -> tt-tnt rename) rather than by mtime or filename string order, so it's
+    correct regardless of how the files were copied or touched, and regardless of which
+    naming scheme wrote them.
     """
-    paths = sorted(checkpoint_dir.glob("nanollama3_step*.pkl"),
-                    key=lambda p: int(p.stem.split("step")[-1]))
+    paths = sorted(
+        list(checkpoint_dir.glob("tt_tnt_step*.pkl"))
+        + list(checkpoint_dir.glob("nanollama3_step*.pkl")),
+        key=lambda p: int(p.stem.split("step")[-1]),
+    )
     if not paths:
-        raise FileNotFoundError(f"no nanollama3_step*.pkl checkpoints found under {checkpoint_dir}")
+        raise FileNotFoundError(
+            f"no tt_tnt_step*.pkl or nanollama3_step*.pkl checkpoints found under {checkpoint_dir}"
+        )
     return paths[-1]
 
 

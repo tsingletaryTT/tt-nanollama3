@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
-"""Assemble a Hugging Face model directory from a NanoLlama3 checkpoint.
+"""Assemble a Hugging Face model directory from a tt-tnt checkpoint.
 
 Everything about the architecture comes from the **checkpoint header**. Plan 3 enriched
 that header precisely so this step never guesses: ``intermediate_dim``, ``weight_tying``,

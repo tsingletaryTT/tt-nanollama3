@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
 
-"""vLLM entrypoint for tt-nanollama3 — stock Llama, plus one runtime patch.
+"""vLLM entrypoint for tt-tnt — stock Llama, plus one runtime patch.
 
 WHAT THIS IS
 ------------
 This module is the ``main_class`` the Tenstorrent vLLM plugin imports for this model
 (``entrypoint.class`` in ``tt_kernel_manifest.json``). It adds **no model code**:
-tt-nanollama3 is a standard HF Llama and the stock
+tt-tnt is a standard HF Llama and the stock
 ``models.tt_transformers.tt.generator_vllm:LlamaForCausalLM`` computes it. This module
 carries only what tt-metal gets wrong or defaults badly for a model this small:
 
@@ -109,7 +109,7 @@ def _device_grid(model_args):
         grid = mesh.compute_with_storage_grid_size()
         return grid.y, grid.x
     except Exception as exc:  # pragma: no cover - diagnostic path
-        logger.warning("tt-nanollama3: could not read device compute grid (%r); "
+        logger.warning("tt-tnt: could not read device compute grid (%r); "
                        "deferring to stock find_grid", exc)
         return None
 
@@ -137,7 +137,7 @@ def _find_grid_from_device(self, N):
                 cols = cores // rows
                 if cols <= max_cols:
                     logger.debug(
-                        "tt-nanollama3: find_grid(%d) -> rows=%d cols=%d "
+                        "tt-tnt: find_grid(%d) -> rows=%d cols=%d "
                         "(real device grid %dx%d)", N, rows, cols, max_cols, max_rows
                     )
                     return rows, cols
@@ -145,7 +145,7 @@ def _find_grid_from_device(self, N):
     raise AssertionError(
         f"Cannot find a grid configuration for {N} tiles that evenly divides into "
         f"{max_cores} cores of max size {max_rows}x{max_cols} (real device grid). "
-        f"This is tt-nanollama3's find_grid shim, not stock tt-metal."
+        f"This is tt-tnt's find_grid shim, not stock tt-metal."
     )
 
 
@@ -157,7 +157,7 @@ def _patch_find_grid():
     _ORIGINAL_FIND_GRID = ModelArgs.find_grid
     ModelArgs.find_grid = _find_grid_from_device
     logger.info(
-        "tt-nanollama3: patched ModelArgs.find_grid to read the device's real compute "
+        "tt-tnt: patched ModelArgs.find_grid to read the device's real compute "
         "grid (works around hardcoded max_cols=12 on harvested Blackhole)."
     )
 
@@ -201,12 +201,12 @@ from models.tt_transformers.tt.generator_vllm import (  # noqa: E402
 #: Keep ``accuracy`` because it is both better measured and indefensible to serve a 384-dim
 #: model's MLP at 4 bits — but do not cite it as the remedy for the defect below.
 #:
-#: Overridable via ``TT_NANOLLAMA3_OPTIMIZATIONS`` for A/B testing without a rebuild.
-DEFAULT_OPTIMIZATIONS = os.environ.get("TT_NANOLLAMA3_OPTIMIZATIONS", "accuracy")
+#: Overridable via ``TT_TNT_OPTIMIZATIONS`` for A/B testing without a rebuild.
+DEFAULT_OPTIMIZATIONS = os.environ.get("TT_TNT_OPTIMIZATIONS", "accuracy")
 
 
 def _build_capabilities():
-    """Capability flags, all off by default, opt-in via ``TT_NANOLLAMA3_CAPS``.
+    """Capability flags, all off by default, opt-in via ``TT_TNT_CAPS``.
 
     Built here rather than in the class body so the opt-in loop cannot leak or fail on an
     empty environment variable.
@@ -216,7 +216,7 @@ def _build_capabilities():
         "supports_async_decode": False,
         "supports_sample_on_device": False,
     }
-    for name in os.environ.get("TT_NANOLLAMA3_CAPS", "").split(","):
+    for name in os.environ.get("TT_TNT_CAPS", "").split(","):
         name = name.strip()
         if name:
             caps[name] = True
@@ -253,8 +253,8 @@ class LlamaForCausalLM(_StockLlamaForCausalLM):
     #: and prescribes validating with a degenerate-output check for "doubled subwords or
     #: repeated control tokens" -- which is precisely the failure observed on this model
     #: (" girl named Lily. Lily. Lily. Lily."). None of these capabilities has been proven
-    #: for tt-nanollama3, so none is claimed. Re-enable individually, with evidence, via
-    #: TT_NANOLLAMA3_CAPS (comma-separated names) once each is actually tested.
+    #: for tt-tnt, so none is claimed. Re-enable individually, with evidence, via
+    #: TT_TNT_CAPS (comma-separated names) once each is actually tested.
     model_capabilities = _CAPABILITIES
 
     @classmethod
@@ -273,7 +273,7 @@ class LlamaForCausalLM(_StockLlamaForCausalLM):
         if optimizations is None:
             optimizations = DEFAULT_OPTIMIZATIONS
             logger.info(
-                "tt-nanollama3: using optimizations=%r (stock default is 'performance', "
+                "tt-tnt: using optimizations=%r (stock default is 'performance', "
                 "which serves MLP w1/w3 at BFLOAT4_B -- too coarse for a 384-dim model).",
                 optimizations,
             )

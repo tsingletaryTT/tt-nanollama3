@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
-"""Fetch and prepare the NanoLlama3 training corpus.
+"""Fetch and prepare the tt-tnt training corpus.
 
 The corpus is TinyStories (``roneneldan/TinyStories``) — small, clean, and known to
 produce coherent output at ~22M parameters, which is the scale this model targets.

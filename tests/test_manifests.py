@@ -207,7 +207,7 @@ def test_entrypoint_points_at_our_bundle_adapter(path):
     raw = json.loads(path.read_text())
     cls = (raw.get("entrypoint") or {}).get("class", "")
     module, _, name = cls.partition(":")
-    assert module == "tt_nanollama3_adapter", (
+    assert module == "tt_tnt_adapter", (
         f"{path.name}: entrypoint class {cls!r} does not name the bundled adapter module"
     )
     assert name, f"{path.name}: entrypoint class {cls!r} has no class name"

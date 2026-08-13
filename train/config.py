@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
-"""Assemble the tt-train config for a NanoLlama3 run.
+"""Assemble the tt-train config for a tt-tnt run.
 
 Two things this module exists to get right:
 

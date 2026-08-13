@@ -55,7 +55,7 @@ TILE = 32
 #:
 #: **This is a harvested part: 11 columns, not the architectural 12+.** That single fact
 #: is why ``ModelArgs.find_grid`` fails for a 384-wide model (it hardcodes ``max_cols=12``
-#: and never asks the device) and why ``bundle/tt_nanollama3_adapter.py`` ships a shim.
+#: and never asks the device) and why ``bundle/tt_tnt_adapter.py`` ships a shim.
 #: Treat it as the default for utilisation arithmetic, not as a universal constant —
 #: pass a different grid for a different part.
 BLACKHOLE_P300C_GRID: Tuple[int, int] = (10, 11)

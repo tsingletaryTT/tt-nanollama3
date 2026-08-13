@@ -115,7 +115,7 @@ def test_validate_rejects_future_format():
 
 def test_checkpoint_path_is_step_numbered():
     p = checkpoint_path(Path("/ckpt"), 2500)
-    assert p == Path("/ckpt/nanollama3_step00002500.pkl")
+    assert p == Path("/ckpt/tt_tnt_step00002500.pkl")
 
 
 def test_checkpoint_paths_sort_lexicographically_by_step():
@@ -139,3 +139,33 @@ def test_latest_checkpoint_picks_highest_step_not_newest_file(tmp_path):
     low_step_path.touch()  # written after, so it has the newer mtime
     assert low_step_path.stat().st_mtime_ns >= high_step_path.stat().st_mtime_ns
     assert latest_checkpoint(tmp_path) == high_step_path
+
+
+def test_latest_checkpoint_finds_pre_rename_nanollama3_files(tmp_path):
+    """Checkpoints written before the tt-nanollama3 -> tt-tnt rename are never renamed on
+    disk (they are evidence of a real run under the old name) -- a directory holding only
+    those files, e.g. the real ``artifacts/checkpoints/``, must still resolve via
+    ``--resume latest``."""
+    legacy = tmp_path / "nanollama3_step00003000.pkl"
+    legacy.touch()
+    assert latest_checkpoint(tmp_path) == legacy
+
+
+def test_latest_checkpoint_picks_the_higher_step_across_both_naming_schemes(tmp_path):
+    """A directory that mixes pre-rename and post-rename checkpoints (e.g. an old baseline
+    directory a new run resumed into) must pick the highest **step**, regardless of which
+    naming scheme it happens to be written under."""
+    old_low = tmp_path / "nanollama3_step00000500.pkl"
+    old_low.touch()
+    new_high = checkpoint_path(tmp_path, 3000)
+    new_high.touch()
+    assert latest_checkpoint(tmp_path) == new_high
+
+    # And the reverse: an old-prefixed file can still be the higher step.
+    tmp_path2 = tmp_path / "mixed2"
+    tmp_path2.mkdir()
+    old_high = tmp_path2 / "nanollama3_step00021034.pkl"
+    old_high.touch()
+    new_low = checkpoint_path(tmp_path2, 100)
+    new_low.touch()
+    assert latest_checkpoint(tmp_path2) == old_high

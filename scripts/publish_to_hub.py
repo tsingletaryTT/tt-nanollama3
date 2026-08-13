@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
-"""Publish (or re-publish) the tt-nanollama3 HF artifact to the Hugging Face Hub.
+"""Publish (or re-publish) the tt-tnt HF artifact to the Hugging Face Hub.
 
 Uploads ``artifacts/hf/`` and applies ``docs/model-card.md`` as the model card to
-``episod/tt-nanollama3``. Re-runnable by design, because it has to be run more than once:
+``episod/tt-tnt``. Re-runnable by design, because it has to be run more than once:
 
 * Once, to do the initial publish (default action, below).
 * Every time ``tt-kernel push`` runs against this repo, because tt-kernel's ``tag_repo``
@@ -52,7 +52,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-REPO_ID_DEFAULT = "episod/tt-nanollama3"
+REPO_ID_DEFAULT = "episod/tt-tnt"
 LICENSE = "apache-2.0"
 HF_DIR = ROOT / "artifacts" / "hf"
 CARD_PATH = ROOT / "docs" / "model-card.md"
@@ -181,7 +181,7 @@ def cmd_publish(repo_id: str, dry_run: bool, yes: bool) -> int:
         repo_id=repo_id,
         repo_type="model",
         folder_path=str(HF_DIR),
-        commit_message="Upload tt-nanollama3 HF artifact (config, weights, tokenizer)",
+        commit_message="Upload tt-tnt HF artifact (config, weights, tokenizer)",
     )
 
     print(f"applying model card from {CARD_PATH.relative_to(ROOT)} ...")

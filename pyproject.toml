@@ -1,7 +1,7 @@
 [project]
-name = "tt-nanollama3"
+name = "tt-tnt"
 version = "0.1.0"
-description = "NanoLlama3 — a Tenstorrent-first model, trained, packaged, and served on TT tooling"
+description = "TT-TNT — a Tenstorrent-first model, trained, packaged, and served on TT tooling"
 requires-python = ">=3.10"
 dependencies = [
     "tokenizers>=0.21",

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
-"""Interactive completion REPL for the converted NanoLlama3 model. CPU only.
+"""Interactive completion REPL for the converted tt-tnt model. CPU only.
 
 **This is a completion model, not a chat model.** It has no chat template and no
 instruction tuning — it was trained to continue TinyStories-style prose, for 0.43 of one

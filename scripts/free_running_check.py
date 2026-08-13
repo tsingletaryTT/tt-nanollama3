@@ -109,7 +109,7 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--url", default="http://localhost:8000")
-    p.add_argument("--model", default="episod/tt-nanollama3")
+    p.add_argument("--model", default="episod/tt-tnt")
     p.add_argument("--hf-dir", default=None,
                    help="CPU reference model directory (default: the 384 size's artifacts).")
     p.add_argument("--tokens", type=int, default=40)
