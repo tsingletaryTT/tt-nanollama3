@@ -92,14 +92,22 @@ SOURCES: Dict[str, CorpusSource] = {
     "tinystories": CorpusSource(
         name="tinystories",
         slice="backbone",
-        target_share=0.30,
+        target_share=0.31,
         hf_repo="roneneldan/TinyStories",
         hf_revision="f54c09fd23315a6f9c86f9dc80f725de7d8f9c64",
         license_id="CDLA-Sharing-1.0",
         license_url="https://cdla.dev/sharing-1-0/",
         attribution="TinyStories (Eldan & Li), roneneldan/TinyStories",
         share_alike=True,
-        rationale="Simple, regular grammar. The backbone that makes a small model readable.",
+        rationale="Simple, regular grammar. The backbone that makes a small model readable. "
+                  "Share raised from 30% to 31% in the Task 6 re-settle: retraining the "
+                  "tokenizer on the blend compressed every OTHER domain by 6-24% (measured "
+                  "against the new 32k vocabulary), which pushed procedural over the 4x "
+                  "working limit while barely touching tinystories (-0.5%, since the old "
+                  "vocabulary was tinystories-specialised to begin with). Tinystories has "
+                  "enormous headroom (443,704,924 measured tokens against a 124,000,000 "
+                  "requirement, needing only 0.28x) so it absorbs the point shaved from "
+                  "procedural rather than any strange slice giving up share.",
     ),
     "gutenberg_children": CorpusSource(
         name="gutenberg_children",
@@ -140,7 +148,7 @@ SOURCES: Dict[str, CorpusSource] = {
         license_url="https://huggingface.co/datasets/sedthh/gutenberg_english",
         attribution="Project Gutenberg via sedthh/gutenberg_english",
         license_note="MIT covers the aggregation; the underlying pre-1929 texts are public domain.",
-        upsample=2,
+        upsample=3,
         authors=[
             # Original four: insect field observation and deadpan anomalism.
             "Fabre, Jean-Henri",              # 10 vols; the spine's spine
@@ -168,13 +176,21 @@ SOURCES: Dict[str, CorpusSource] = {
                   "that should not happen. Broadened from five authors (53 books, 10x upsample, "
                   "over cap) to 17 (241 unique books) with catalogue-verified PD naturalists and "
                   "anomalists in the same register. Measured availability after the broadening: "
-                  "29,815,368 tokens (6.2x the old 4,803,988) -- needs 1.61x upsample at a 13.5% "
-                  "share, well under the 4x working limit, so upsample=2 covers it with margin. "
-                  "Share raised from 12% to 13.5% using the 1.5 points freed by dropping flavour "
-                  "to its arithmetic ceiling (see flavour's rationale) -- spine has the most "
-                  "headroom of any strange slice (29.82% ceiling at 4x) and keeping the freed "
-                  "share inside spine+folklore+weird+flavour holds their combined share at 26%, "
-                  "unchanged from before the settle. Browne, Thomas, Sir is deliberately NOT here "
+                  "29,815,368 tokens (6.2x the old 4,803,988) under the OLD tokenizer -- needs "
+                  "1.61x upsample at a 13.5% share, well under the 4x working limit, so "
+                  "upsample=2 covered it with margin. Share raised from 12% to 13.5% using the "
+                  "1.5 points freed by dropping flavour to its arithmetic ceiling (see flavour's "
+                  "rationale) -- spine has the most headroom of any strange slice (29.82% "
+                  "ceiling at 4x) and keeping the freed share inside spine+folklore+weird+flavour "
+                  "holds their combined share at 26%, unchanged from before the settle. "
+                  "Task 6 re-measured against the RETRAINED tokenizer: availability dropped to "
+                  "26,200,908 tokens (-12.1%, the largest drop of any slice, consistent with the "
+                  "old vocabulary being tinystories-specialised), which needs 2.06x -- upsample=2 "
+                  "no longer covers it (54,000,000 required vs 52,401,816 achievable), so "
+                  "upsample raised to 3 (achieves 78,602,724, comfortable margin, still well "
+                  "under the 4x limit at 2.06x actual need). The 13.5% share and the 26% "
+                  "combined strange-slice figure are UNCHANGED by this re-settle; only the "
+                  "upsample factor moved. Browne, Thomas, Sir is deliberately NOT here "
                   "despite being in the pre-task list — he is weird's selector, and listing him "
                   "in both would double-count him. Andrew Lang is excluded for the same reason: "
                   "he is folklore's selector. Blavatsky and Swedenborg are deliberately excluded: "
@@ -227,7 +243,7 @@ SOURCES: Dict[str, CorpusSource] = {
     "procedural": CorpusSource(
         name="procedural",
         slice="agentic",
-        target_share=0.13,
+        target_share=0.12,
         hf_repo="sedthh/gutenberg_english",
         hf_revision="28973b04f28fd7be4a6186a042bc26159d4366ca",
         license_id="MIT (packaging); public domain (texts)",
@@ -238,9 +254,20 @@ SOURCES: Dict[str, CorpusSource] = {
         upsample=4,
         rationale="Recipes and instructional texts: plan -> act -> observe -> report as a SHAPE. "
                   "Models trained on these learn the structure of procedural reasoning. Measured "
-                  "availability (13,623,510 tokens) needs 3.82x upsample at 13% share -- the "
-                  "tightest slice in the registry, right at the 4x working limit. Do not raise "
-                  "this share without re-measuring: any increase breaks the 4x rule.",
+                  "availability under the OLD tokenizer (13,623,510 tokens) needed 3.82x upsample "
+                  "at 13% share -- the tightest slice in the registry, right at the 4x working "
+                  "limit. Task 6 re-measured against the RETRAINED tokenizer: availability "
+                  "dropped to 12,273,087 tokens (-9.9%), which pushed the needed upsample to "
+                  "4.24x at the old 13% share -- over the 4x working limit, and 4x is already "
+                  "this source's upsample (raising it further would mean more repetition of the "
+                  "same ~12.3M raw tokens, which is what the cap exists to prevent, not a share "
+                  "problem to solve by repeating harder). Share dropped from 13% to 12% instead: "
+                  "the ceiling at upsample=4 is 12,273,087 x 4 / 400,000,000 = 12.27%, so 12% "
+                  "needs only 3.91x, with real margin against another small re-measurement "
+                  "swing. The freed 1 point moved to tinystories (see its rationale), not to any "
+                  "strange slice, so spine+folklore+weird+flavour is untouched by this move. Do "
+                  "not raise this share again without re-measuring: it is still the tightest "
+                  "slice in the registry.",
     ),
     "flavour": CorpusSource(
         name="flavour",
