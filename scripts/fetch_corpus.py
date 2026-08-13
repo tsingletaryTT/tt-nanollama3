@@ -18,7 +18,7 @@ from typing import Dict, Iterable, Iterator, Optional
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from scripts.build_gutenberg_catalogue import GUTENBERG_REPO, matches_source  # noqa: E402
+from scripts.build_gutenberg_catalogue import GUTENBERG_REPO, matches_source, gutenberg_sources  # noqa: E402
 from train.corpus import SOURCES, CorpusSource, get_source  # noqa: E402
 from train.paths import shared_dir  # noqa: E402
 
@@ -43,6 +43,68 @@ def write_documents(rows: Iterable[Dict[str, object]], dest: Path) -> int:
             fh.write(json.dumps({"text": text}, ensure_ascii=False) + "\n")
             written += 1
     return written
+
+
+def fetch_gutenberg_batch(sources: list[CorpusSource], limit_rows: int = 0) -> Dict[str, int]:
+    """Fetch multiple Gutenberg sources in one streaming pass. Returns {source_name: count}."""
+    from datasets import load_dataset
+
+    # Verify all sources are from the same Gutenberg repo at the same revision
+    if not sources or not all(s.hf_repo == GUTENBERG_REPO for s in sources):
+        raise ValueError("fetch_gutenberg_batch requires all sources to be from gutenberg_english")
+
+    revision = sources[0].hf_revision
+    if not all(s.hf_revision == revision for s in sources):
+        raise ValueError("All Gutenberg sources must use the same revision")
+
+    # Open destination files for each source
+    dest_files = {}
+    file_handles = {}
+    for src in sources:
+        dest = shared_dir("raw") / src.name / "text.jsonl"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest_files[src.name] = dest
+        file_handles[src.name] = dest.open("w", encoding="utf-8")
+
+    try:
+        # Stream the dataset once, routing each row to matching sources
+        kwargs = {"split": sources[0].hf_split, "revision": revision, "streaming": True}
+        ds = load_dataset(GUTENBERG_REPO, **kwargs)
+
+        counts = {src.name: 0 for src in sources}
+        seen = 0
+
+        for row in ds:
+            md = row.get("METADATA")
+            if isinstance(md, str):
+                try:
+                    md = json.loads(md)
+                except json.JSONDecodeError:
+                    continue
+            if not isinstance(md, dict):
+                continue
+
+            text = row.get("TEXT")
+            if not isinstance(text, str) or not text.strip():
+                continue
+
+            # Check which sources match this row
+            for src in sources:
+                if matches_source(md, src):
+                    file_handles[src.name].write(json.dumps({"text": text}, ensure_ascii=False) + "\n")
+                    counts[src.name] += 1
+
+            seen += 1
+            if limit_rows and seen >= limit_rows:
+                break
+
+        return counts
+
+    finally:
+        # Close all file handles
+        for fh in file_handles.values():
+            if not fh.closed:
+                fh.close()
 
 
 def iter_source_rows(source: CorpusSource, limit_rows: int = 0) -> Iterator[Dict[str, object]]:
@@ -97,7 +159,41 @@ def main() -> int:
     args = p.parse_args()
 
     names = args.source or sorted(SOURCES)
-    for name in names:
+
+    # Separate Gutenberg sources from others
+    gutenberg_sources_all = gutenberg_sources()
+    requested_gutenberg = [n for n in names if n in gutenberg_sources_all]
+    requested_other = [n for n in names if n not in gutenberg_sources_all]
+
+    # Fetch multiple Gutenberg sources in one pass if more than one is requested
+    if len(requested_gutenberg) > 1:
+        try:
+            sources_objs = [get_source(name) for name in requested_gutenberg]
+            print(f"fetching {len(sources_objs)} Gutenberg sources in one pass ...", flush=True)
+            counts = fetch_gutenberg_batch(sources_objs, limit_rows=args.limit_rows)
+            for name, count in counts.items():
+                print(f"  {name}: {count:,} documents")
+                if count == 0:
+                    print(f"  WARNING: {name} produced no documents", file=sys.stderr)
+        except KeyError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+    else:
+        # Fetch single Gutenberg or non-Gutenberg sources individually
+        for name in requested_gutenberg:
+            try:
+                src = get_source(name)
+            except KeyError as exc:
+                print(f"ERROR: {exc}", file=sys.stderr)
+                return 1
+            print(f"fetching {name} from {src.hf_repo}@{src.hf_revision} ...", flush=True)
+            n = fetch_source(src, limit_rows=args.limit_rows)
+            print(f"  {n:,} documents")
+            if n == 0:
+                print(f"  WARNING: {name} produced no documents", file=sys.stderr)
+
+    # Fetch non-Gutenberg sources individually
+    for name in requested_other:
         try:
             src = get_source(name)
         except KeyError as exc:
@@ -108,6 +204,7 @@ def main() -> int:
         print(f"  {n:,} documents")
         if n == 0:
             print(f"  WARNING: {name} produced no documents", file=sys.stderr)
+
     return 0
 
 

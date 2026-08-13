@@ -4,14 +4,7 @@
 import json
 from pathlib import Path
 
-from train.corpus import CorpusSource
 from scripts.fetch_corpus import write_documents
-
-
-def _src(**kw):
-    base = dict(name="t", slice="spine", target_share=0.1, hf_repo="r", hf_revision="rev")
-    base.update(kw)
-    return CorpusSource(**base)
 
 
 def test_write_documents_writes_one_json_object_per_line(tmp_path: Path):
