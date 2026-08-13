@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
 #
-# NanoLlama3-1024 — the multi-chip-capable size.
+# tt-tnt-1024 — the multi-chip-capable size.
 #
 # WHY THIS EXISTS. The 384 model cannot be served on more than one chip:
 # `tt_transformers` asserts `n_heads % cluster_shape[1] == 0` AND

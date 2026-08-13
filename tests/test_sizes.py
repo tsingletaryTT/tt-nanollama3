@@ -97,7 +97,7 @@ def test_vendored_384_is_faithful_to_tt_metal_original():
     ours = SIZES["384"].load_yaml_transformer_config()
 
     assert ours == upstream_cfg, (
-        "train/configs/model/nanollama3-384.yaml no longer matches tt-train's "
+        "train/configs/model/tt-tnt-384.yaml no longer matches tt-train's "
         f"nanollama3.yaml at {upstream}. If upstream changed, that is worth knowing but "
         "is not automatically a bug in this repo: decide whether to follow it, then "
         "update the vendored copy and its provenance header together."

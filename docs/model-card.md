@@ -61,7 +61,7 @@ Trained on a **single** Blackhole chip. The host is a TT-QuietBox 2 — four Bla
 two dual-chip p300 cards — but training used one of them; the other three were idle.
 
 The architecture is vendored in this project as
-[`train/configs/model/nanollama3-384.yaml`](https://github.com/tsingletaryTT/tt-tnt/blob/main/train/configs/model/nanollama3-384.yaml),
+[`train/configs/model/tt-tnt-384.yaml`](https://github.com/tsingletaryTT/tt-tnt/blob/main/train/configs/model/tt-tnt-384.yaml),
 a verbatim copy of tt-train's own `nanollama3.yaml`.
 
 ## Training

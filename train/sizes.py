@@ -91,7 +91,7 @@ class ModelSize:
     layer to get wrong.
     """
 
-    #: Registry key and filename stem, e.g. ``"384"`` -> ``nanollama3-384.yaml``. Also the
+    #: Registry key and filename stem, e.g. ``"384"`` -> ``tt-tnt-384.yaml``. Also the
     #: suffix used for per-size artifact directories and Hub repo ids.
     name: str
 
@@ -117,7 +117,7 @@ class ModelSize:
 
     @property
     def config_filename(self) -> str:
-        return f"nanollama3-{self.name}.yaml"
+        return f"tt-tnt-{self.name}.yaml"
 
     @property
     def config_path(self) -> Path:

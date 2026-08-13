@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
 #
-# NanoLlama3-384 — the architecture this project trained, converted, and published.
+# tt-tnt-384 — the architecture this project trained, converted, and published.
 #
 # PROVENANCE. This is a verbatim copy of tt-train's own
 # `tt-train/configs/model_configs/nanollama3.yaml` as of tt-metal

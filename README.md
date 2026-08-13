@@ -122,7 +122,7 @@ changed and what didn't, rather than quietly dropping the earlier name.
 architecture, trained from random initialization with tt-train's `ttml` trainer, on a single
 downloaded corpus (TinyStories). That is still true today in the parts that matter most for
 correctness — the 384 config vendored at
-[`train/configs/model/nanollama3-384.yaml`](train/configs/model/nanollama3-384.yaml) is a
+[`train/configs/model/tt-tnt-384.yaml`](train/configs/model/tt-tnt-384.yaml) is a
 verbatim copy of tt-train's own `nanollama3.yaml`, and every checkpoint this project has ever
 produced is trained against that same Llama-3 architecture (RoPE, RMSNorm, SwiGLU, grouped-query
 attention) through `ttml`. Nothing about the rename touched the model's shape or its trainer.
