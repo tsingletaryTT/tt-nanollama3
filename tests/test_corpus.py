@@ -136,3 +136,47 @@ def test_no_registered_share_renders_as_zero():
 def test_describe_shows_a_fractional_share():
     from train.corpus import SOURCES
     assert "0.5%" in SOURCES["flavour"].describe()
+
+
+# --- rationale anti-drift.
+#
+# Every share in this registry was settled against a measurement, and the rationale is
+# where that reasoning is written down. Three separate reviews on this branch found
+# rationales still quoting superseded numbers -- availability from a retired tokenizer,
+# an upsample computed at a share the source no longer holds. Prose is the only part of
+# the registry nothing else checks, so check it here.
+
+def test_a_rationale_that_cites_availability_cites_the_CURRENT_availability():
+    """Historical figures are fine and useful -- they show how a share was arrived at --
+    but the number in force has to be in there too, or the rationale describes a
+    measurement that no longer exists."""
+    import json
+    from pathlib import Path
+    from train.corpus import SOURCES
+
+    report = (Path(__file__).resolve().parents[1]
+              / "docs" / "measurements" / "corpus_availability.json")
+    available = json.loads(report.read_text())["available"]
+    for name, src in SOURCES.items():
+        text = src.rationale.lower()
+        if "availability" not in text and "measured tokens" not in text:
+            continue
+        assert f"{available[name]:,}" in src.rationale, (
+            f"{name}'s rationale cites availability but not the current "
+            f"{available[name]:,} tokens from {report.name}"
+        )
+
+
+def test_no_rationale_claims_an_upsample_the_registry_does_not_declare():
+    """`upsample=N` written into prose next to a different declared N is how a reader
+    learns to distrust the whole file."""
+    import re
+    from train.corpus import SOURCES
+    for name, src in SOURCES.items():
+        for claimed in re.findall(r"upsample\s*=\s*(\d+)", src.rationale):
+            # A rationale may recount that a LOWER factor was tried and failed, but must
+            # not present one as the factor in force.
+            assert int(claimed) <= src.upsample, (
+                f"{name}'s rationale claims upsample={claimed}, registry declares "
+                f"{src.upsample}"
+            )

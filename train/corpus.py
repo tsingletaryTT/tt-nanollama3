@@ -122,8 +122,11 @@ SOURCES: Dict[str, CorpusSource] = {
         bookshelves=["Children's Literature", "Children's Book Series"],
         upsample=2,
         rationale="PD children's literature: more narrative backbone in an older register. "
-                  "Measured availability (36,437,242 tokens) needs 1.65x upsample at 15% share -- "
-                  "upsample=2 covers it with margin, well under the 4x working limit.",
+                  "Measured availability (34,253,856 tokens against the retrained tokenizer) "
+                  "needs 1.75x upsample at a 15% share -- upsample=2 covers it with margin "
+                  "(a 17.13% ceiling), well under the 4x working limit. The pre-retrain "
+                  "measurement was 36,437,242 tokens needing 1.65x; the -6.0% shift is the "
+                  "smallest of any slice.",
     ),
     "wikipedia_simple": CorpusSource(
         name="wikipedia_simple",
@@ -176,15 +179,18 @@ SOURCES: Dict[str, CorpusSource] = {
                   "that should not happen. Broadened from five authors (53 books, 10x upsample, "
                   "over cap) to 17 (241 unique books) with catalogue-verified PD naturalists and "
                   "anomalists in the same register. Measured availability after the broadening: "
-                  "29,815,368 tokens (6.2x the old 4,803,988) under the OLD tokenizer -- needs "
-                  "1.61x upsample at a 13.5% share, well under the 4x working limit, so "
-                  "upsample=2 covered it with margin. Share raised from 12% to 13.5% using the "
+                  "29,815,368 tokens (6.2x the old 4,803,988) under the OLD tokenizer -- which "
+                  "needed 1.61x at the 12% share it then held, and 1.81x at the 13.5% share it "
+                  "moved to, both well under the 4x working limit, so upsample=2 covered it with "
+                  "margin. Share raised from 12% to 13.5% using the "
                   "1.5 points freed by dropping flavour to its arithmetic ceiling (see flavour's "
-                  "rationale) -- spine has the most headroom of any strange slice (29.82% "
-                  "ceiling at 4x) and keeping the freed share inside spine+folklore+weird+flavour "
+                  "rationale) -- spine has the most headroom of any strange slice (26.20% "
+                  "ceiling at 4x against folklore's 10.64%, weird's 5.28% and flavour's 0.575%) "
+                  "and keeping the freed share inside spine+folklore+weird+flavour "
                   "holds their combined share at 26%, unchanged from before the settle. "
                   "Task 6 re-measured against the RETRAINED tokenizer: availability dropped to "
-                  "26,200,908 tokens (-12.1%, the largest drop of any slice, consistent with the "
+                  "26,200,908 tokens (-12.1%, the largest drop of any STRANGE slice and the "
+                  "second largest overall -- wikipedia_simple fell -23.8% -- consistent with the "
                   "old vocabulary being tinystories-specialised), which needs 2.06x -- upsample=2 "
                   "no longer covers it (54,000,000 required vs 52,401,816 achievable), so "
                   "upsample raised to 3 (achieves 78,602,724, comfortable margin, still well "
@@ -210,8 +216,10 @@ SOURCES: Dict[str, CorpusSource] = {
         authors=["Frazer, James George", "Lang, Andrew"],
         upsample=2,
         rationale="Myth and folk narrative: the dreamlike register with an archaic voice. "
-                  "Measured availability (23,540,834 tokens) needs 1.36x upsample at 8% share -- "
-                  "upsample=2 covers it with margin, well under the 4x working limit.",
+                  "Measured availability (21,274,517 tokens against the retrained tokenizer, "
+                  "-9.6% on the 23,540,834 measured before it) needs 1.50x upsample at an 8% "
+                  "share -- upsample=2 covers it with margin (a 10.64% ceiling), well under "
+                  "the 4x working limit.",
     ),
     "weird": CorpusSource(
         name="weird",
@@ -226,8 +234,9 @@ SOURCES: Dict[str, CorpusSource] = {
         authors=["Blackwood, Algernon", "Dunsany", "Machen, Arthur", "Browne, Thomas, Sir"],
         upsample=3,
         rationale="Weird fiction and baroque prose. Unambiguously PD, unlike Lovecraft. Measured "
-                  "availability (7,951,195 tokens) needs 2.01x upsample at 4% share -- upsample=3 "
-                  "covers it with margin, under the 4x working limit.",
+                  "availability (7,040,931 tokens against the retrained tokenizer, -11.5% on the "
+                  "7,951,195 measured before it) needs 2.27x upsample at a 4% share -- "
+                  "upsample=3 covers it (a 5.28% ceiling), under the 4x working limit.",
     ),
     "poetry": CorpusSource(
         name="poetry",
@@ -284,10 +293,18 @@ SOURCES: Dict[str, CorpusSource] = {
         rationale="Stein (grammar intact, semantics dissolved) and the I Ching (Legge 1882: "
                   "terse oracular response). Tiny, so upsampled — capped, because repetition "
                   "at this scale risks memorisation, and Stein IS repetition-as-style. Measured "
-                  "availability is only 623,814 tokens: at the 4x cap that is a hard ceiling of "
-                  "0.62% of the 400M budget, so the previous 2.00% share was arithmetically "
-                  "impossible (needed 12.8x). Dropped to 0.5%, comfortably under the ceiling "
-                  "(needs 3.21x); the freed 1.5 points moved to spine.",
+                  "availability against the retrained tokenizer is only 575,377 tokens: at the "
+                  "4x cap that is a hard ceiling of 0.575% of the 400M budget, so the original "
+                  "2.00% share was arithmetically impossible (would need 13.9x). The 0.5% share "
+                  "needs 3.48x. It is NOT comfortable: the ceiling sits 0.075 points above the "
+                  "share, so a further 13% fall in measured availability would put 0.5% out of "
+                  "reach at 4x, and this slice has no headroom to absorb another re-measurement "
+                  "swing. It was settled at 0.5% when the pre-retrain measurement (623,814 "
+                  "tokens, 0.624% ceiling, 3.21x needed) left 0.12 points of headroom; the "
+                  "retrain took -7.8% of it and more than a third of that margin with it. The "
+                  "share stayed at 0.5% because it still fits, not because it fits well — do "
+                  "not raise it, and re-measure before trusting it after any tokenizer change. "
+                  "The 1.5 points freed when it dropped from 2.00% moved to spine.",
     ),
 }
 
