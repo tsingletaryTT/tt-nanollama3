@@ -61,7 +61,8 @@ def _emit(src_path: Path, want_tokens: int, out, tokens_per_word: float = 1.3) -
     lines cannot be trimmed at a line boundary, so overshoot would be bounded by the longest
     line rather than by a couple of percent.
 
-    This exact code was run against the tests below before it entered this brief.
+    The truncation, streaming, and word-level-boundary behaviour described above is covered
+    by ``tests/test_blend_corpus.py``.
     """
     if src_path.stat().st_size == 0:
         raise ValueError(f"{src_path} is empty; cannot emit {want_tokens:,} tokens from it")

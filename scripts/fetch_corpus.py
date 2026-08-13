@@ -64,12 +64,10 @@ def fetch_gutenberg_batch(sources: list[CorpusSource], limit_rows: int = 0) -> D
         raise ValueError("All Gutenberg sources must use the same revision")
 
     # Open destination files for each source
-    dest_files = {}
     file_handles = {}
     for src in sources:
         dest = shared_dir("raw") / src.name / "text.jsonl"
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest_files[src.name] = dest
         file_handles[src.name] = dest.open("w", encoding="utf-8")
 
     try:
@@ -180,27 +178,22 @@ def main() -> int:
     requested_gutenberg = [n for n in names if n in gutenberg_sources_all]
     requested_other = [n for n in names if n not in gutenberg_sources_all]
 
-    # Fetch multiple Gutenberg sources in one pass if more than one is requested
+    # Fetch multiple Gutenberg sources in one pass if more than one is requested. Every name
+    # in requested_gutenberg came from gutenberg_sources_all, which is itself built from
+    # SOURCES, so get_source() cannot KeyError here -- unlike the requested_other loop
+    # below, which can see a name the caller made up.
     if len(requested_gutenberg) > 1:
-        try:
-            sources_objs = [get_source(name) for name in requested_gutenberg]
-            print(f"fetching {len(sources_objs)} Gutenberg sources in one pass ...", flush=True)
-            counts = fetch_gutenberg_batch(sources_objs, limit_rows=args.limit_rows)
-            for name, count in counts.items():
-                print(f"  {name}: {count:,} documents")
-                if count == 0:
-                    print(f"  WARNING: {name} produced no documents", file=sys.stderr)
-        except KeyError as exc:
-            print(f"ERROR: {exc}", file=sys.stderr)
-            return 1
+        sources_objs = [get_source(name) for name in requested_gutenberg]
+        print(f"fetching {len(sources_objs)} Gutenberg sources in one pass ...", flush=True)
+        counts = fetch_gutenberg_batch(sources_objs, limit_rows=args.limit_rows)
+        for name, count in counts.items():
+            print(f"  {name}: {count:,} documents")
+            if count == 0:
+                print(f"  WARNING: {name} produced no documents", file=sys.stderr)
     else:
         # Fetch single Gutenberg or non-Gutenberg sources individually
         for name in requested_gutenberg:
-            try:
-                src = get_source(name)
-            except KeyError as exc:
-                print(f"ERROR: {exc}", file=sys.stderr)
-                return 1
+            src = get_source(name)
             print(f"fetching {name} from {src.hf_repo}@{src.hf_revision} ...", flush=True)
             n = fetch_source(src, limit_rows=args.limit_rows)
             print(f"  {n:,} documents")

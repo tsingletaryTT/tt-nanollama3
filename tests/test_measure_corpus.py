@@ -6,9 +6,16 @@ Pure arithmetic over measured token counts. The point is that a slice which cann
 within its upsample cap is reported BEFORE ratios are committed, rather than discovered when
 a training run produces a model dominated by whatever was actually plentiful.
 """
-import pytest
+import json
+
 from train.corpus import CorpusSource
-from scripts.measure_corpus import achievable_tokens, required_tokens, shortfall_report
+from scripts.measure_corpus import (
+    achievable_tokens,
+    required_tokens,
+    shortfall_report,
+    Shortfall,
+    _json_safe_shortfall,
+)
 
 
 def _src(name, share, upsample=1):
@@ -63,3 +70,18 @@ def test_needed_upsample_is_infinite_for_zero_availability(monkeypatch):
     monkeypatch.setattr("scripts.measure_corpus.SOURCES", sources)
     report = shortfall_report({}, total_budget=1_000_000, upsample_cap=8)
     assert report[0].needed_upsample == float("inf")
+
+
+def test_json_safe_shortfall_emits_valid_json_for_infinite_upsample():
+    """json.dumps(float('inf')) writes a bare `Infinity` token, invalid per RFC 8259."""
+    s = Shortfall(name="a", required=1_000_000, available=0,
+                  current_upsample=1, needed_upsample=float("inf"))
+    encoded = json.dumps(_json_safe_shortfall(s))
+    assert "Infinity" not in encoded
+    assert json.loads(encoded)["needed_upsample"] is None
+
+
+def test_json_safe_shortfall_preserves_finite_values():
+    s = Shortfall(name="a", required=1_000_000, available=500_000,
+                  current_upsample=1, needed_upsample=2.0)
+    assert _json_safe_shortfall(s)["needed_upsample"] == 2.0

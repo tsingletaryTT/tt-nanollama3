@@ -3,8 +3,13 @@
 """Selector logic, tested against fixture rows rather than the network."""
 from unittest.mock import patch
 import pytest
-from train.corpus import CorpusSource
-from scripts.build_gutenberg_catalogue import matches_source, iter_metadata
+from train.corpus import CorpusSource, SOURCES
+from scripts.build_gutenberg_catalogue import (
+    matches_source,
+    iter_metadata,
+    default_gutenberg_revision,
+    gutenberg_sources,
+)
 
 FABRE = {"authors": "Fabre, Jean-Henri", "title": "The Life of the Spider",
          "bookshelves": "Science", "subjects": "Spiders"}
@@ -60,6 +65,22 @@ def test_missing_metadata_fields_do_not_raise():
     src = _src(authors=["Fabre"])
     assert not matches_source({}, src)
     assert not matches_source({"authors": None}, src)
+
+
+def test_default_revision_is_pinned_not_main():
+    """The CLI default must not resolve to a moving branch (regression: it used to be 'main')."""
+    revision = default_gutenberg_revision()
+    assert revision not in ("main", "master", "HEAD", "develop")
+    expected = {s.hf_revision for s in gutenberg_sources().values()}
+    assert expected == {revision}
+
+
+def test_default_revision_matches_every_gutenberg_source_in_the_registry():
+    """Cross-check against the live registry, not just the helper's own return value."""
+    gutenberg_revisions = {
+        s.hf_revision for s in SOURCES.values() if s.hf_repo == "sedthh/gutenberg_english"
+    }
+    assert gutenberg_revisions == {default_gutenberg_revision()}
 
 
 def test_iter_metadata_fails_loudly_when_no_shards_found():

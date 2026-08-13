@@ -60,6 +60,20 @@ def gutenberg_sources() -> Dict[str, CorpusSource]:
     return {n: s for n, s in SOURCES.items() if s.hf_repo == GUTENBERG_REPO}
 
 
+def default_gutenberg_revision() -> str:
+    """The pinned revision shared by every Gutenberg-backed registry source.
+
+    Used as the CLI default so a plain ``build_gutenberg_catalogue.py`` run catalogues the
+    same revision ``fetch_corpus.py`` actually fetches, instead of drifting to whatever
+    "main" currently points at. Raises if the registry's Gutenberg sources ever disagree on
+    revision -- that would mean there is no single honest default to fall back to.
+    """
+    revisions = {s.hf_revision for s in gutenberg_sources().values()}
+    if len(revisions) != 1:
+        raise ValueError(f"Gutenberg sources disagree on pinned revision: {sorted(revisions)}")
+    return next(iter(revisions))
+
+
 def iter_metadata(revision: str) -> Iterable[Dict[str, object]]:
     """Yield one metadata dict per book, reading only the METADATA column.
 
@@ -118,7 +132,9 @@ def iter_metadata(revision: str) -> Iterable[Dict[str, object]]:
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--revision", default="main")
+    p.add_argument("--revision", default=default_gutenberg_revision(),
+                   help="Dataset revision to catalogue (default: the registry's pinned "
+                        "Gutenberg revision, not 'main').")
     p.add_argument("--out", type=Path, default=None,
                    help="Catalogue path (default: artifacts/raw/gutenberg_catalogue.jsonl)")
     p.add_argument("--limit", type=int, default=0,

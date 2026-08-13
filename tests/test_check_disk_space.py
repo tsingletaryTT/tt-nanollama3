@@ -4,8 +4,6 @@
 is short, and it must not block when space is fine."""
 from pathlib import Path
 
-import pytest
-
 from scripts.check_disk_space import check_space, free_bytes
 
 

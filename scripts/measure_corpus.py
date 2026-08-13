@@ -69,14 +69,31 @@ def shortfall_report(available: Dict[str, int], total_budget: int,
         if achievable_tokens(have, src.upsample) >= need:
             continue
         needed = math.inf if have == 0 else need / have
-        if needed <= upsample_cap and achievable_tokens(have, int(math.ceil(needed))) >= need:
-            # Reachable by raising this source's upsample within the cap: not a shortfall,
-            # but the registry's current factor is too low. Reported so it can be raised.
-            pass
+        # Every source that reaches this point is reported, including one that IS reachable
+        # by raising its own upsample within the cap (needed <= upsample_cap): the registry's
+        # currently-declared factor is simply too low for it. Reporting that case too forces
+        # the registry to state the higher factor explicitly rather than silently relying on
+        # more repetition than it currently admits to.
         out.append(Shortfall(name=name, required=need, available=have,
                              current_upsample=src.upsample, needed_upsample=needed))
     out.sort(key=lambda s: (-s.needed_upsample if s.needed_upsample != math.inf else -1e18))
     return out
+
+
+def _json_safe_shortfall(s: Shortfall) -> dict:
+    """``Shortfall`` as a dict safe for ``json.dumps``.
+
+    ``needed_upsample`` can be ``math.inf`` (zero-availability sources). RFC 8259 has no
+    Infinity token, so the default ``json.dumps`` behaviour of emitting a bare `Infinity`
+    literal produces output that Python's own ``json.loads`` and ``jq`` will happily read
+    back but that a strict parser (e.g. JavaScript's ``JSON.parse``) rejects. Serialise it as
+    ``null`` instead -- the sibling ``available: 0`` already says "no material", so nothing
+    is lost by not spelling out "infinite" in a format that can't represent it.
+    """
+    d = asdict(s)
+    if not math.isfinite(d["needed_upsample"]):
+        d["needed_upsample"] = None
+    return d
 
 
 def count_tokens(path: Path, tokenizer_dir: Path) -> tuple:
@@ -136,7 +153,7 @@ def main() -> int:
         "upsample_cap": args.upsample_cap,
         "available": available,
         "methods": methods,
-        "shortfalls": [asdict(s) for s in short],
+        "shortfalls": [_json_safe_shortfall(s) for s in short],
     }, indent=2, default=str))
     print(f"\nwrote {args.report}")
 

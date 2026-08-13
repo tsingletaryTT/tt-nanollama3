@@ -82,7 +82,10 @@ def test_leaves_text_without_markers_untouched():
 
 
 def test_normalise_collapses_carriage_returns():
-    assert "\r" not in normalise("line one\r\nline two\r\n")
+    """Not just that \\r is gone -- that the surrounding content survives the collapse."""
+    result = normalise("line one\r\nline two\r\n")
+    assert "\r" not in result
+    assert result == "line one\nline two"
 
 
 def test_normalise_collapses_runs_of_blank_lines():

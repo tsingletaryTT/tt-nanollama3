@@ -95,6 +95,15 @@ def test_spine_and_folklore_do_not_share_selectors():
 
 
 def test_spine_and_weird_do_not_share_selectors():
-    """Browne belongs to weird. Listing him in both would double-count him."""
+    """Browne belongs to weird. Listing him in both would double-count him.
+
+    KNOWN, DELIBERATE GAP: this only checks for a shared SELECTOR, not a shared BOOK. Gutenberg
+    text_id 30092, "Lords of the Housetops: Thirteen Cat Tales", is a 14-contributor anthology
+    matched independently by spine's "Hudson, W. H." and weird's "Blackwood, Algernon" -- no
+    single author name is in both lists, so this test correctly cannot see the overlap. Impact
+    is one book out of ~296 selected, and the blend built from these selectors is already
+    frozen (artifacts/corpus/blend.txt, blend_manifest.json) -- this is a documented, accepted
+    duplicate, not an oversight to fix by re-selecting or re-blending.
+    """
     overlap = set(SOURCES["spine"].authors) & set(SOURCES["weird"].authors)
     assert not overlap, f"spine and weird share author selectors: {sorted(overlap)}"
