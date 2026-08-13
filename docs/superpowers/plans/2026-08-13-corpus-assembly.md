@@ -141,10 +141,11 @@ Replace `spine`'s `authors` list and `rationale` in `train/corpus.py` with exact
         ],
         rationale="Observational-mystical: the model's voice. Fabre is field observation that "
                   "is ALREADY agentic tool-use theatre; Fort applies the same method to things "
-                  "that should not happen. Broadened from 4 authors (53 books, 10x upsample, "
-                  "over cap) to 17 (259 books, ~2x) with catalogue-verified PD naturalists and "
-                  "anomalists in the same register. Andrew Lang is deliberately NOT here -- he "
-                  "is folklore's, and listing him twice would double-count him. Blavatsky and "
+                  "that should not happen. Broadened from five authors (53 books, 10x upsample, "
+                  "over cap) to 17 (241 unique books, ~2x) with catalogue-verified PD naturalists and "
+                  "anomalists in the same register. Browne, Thomas, Sir is deliberately NOT here "
+                  "despite being in the pre-task list -- he is weird's selector. Andrew Lang is "
+                  "excluded for the same reason: he is folklore's selector. Blavatsky and "
                   "Swedenborg are deliberately excluded: they assert doctrine where this slice "
                   "documents the inexplicable.",
 ```
@@ -340,7 +341,7 @@ This task's deliverable is **evidence and a decision**, not code. The gate must 
 Run: `python scripts/check_disk_space.py` — confirm exit 0, then:
 `python scripts/fetch_corpus.py --source spine`
 
-Task 1 added 13 authors, so `spine` must be re-fetched. This streams the Gutenberg dataset once. Expect roughly 259 books.
+Task 1 broadened `spine` from five authors to 17, so it must be re-fetched. This streams the Gutenberg dataset once. Expect **241 unique books** (243 summed per-author before deduplication). Re-derived from `artifacts/raw/gutenberg_catalogue.jsonl`; an earlier draft said 259, which was wrong.
 
 - [ ] **Step 2: Re-normalise and re-measure**
 
@@ -357,7 +358,7 @@ Adjust `target_share` values in `train/corpus.py` until `python scripts/measure_
 
 - Shares must still sum to exactly 1.0.
 - No source may need more than **4×** upsample. The cap is 8, but 4 is the working limit for this pass: repetition at ~133M parameters risks memorisation, and the measured counts are optimistic (see "What the previous plan established", point 2).
-- **`flavour` may keep an upsample of 4 and a small share** — it is 7 books by design and exists to tint, not to bulk.
+- **`flavour` must drop to at most 0.6%** (use 0.5%). It is 7 books by design and exists to tint, not to bulk. Its 623,814 tokens support a ceiling of 0.62% at 4x upsample, so its current 2.00% is arithmetically impossible under the 4x rule — a forced change, not a judgement call.
 - Do not reduce the *combined* strange share (`spine` + `folklore` + `weird` + `flavour`) below **20%**. Below that the model loses the quality it is being built for. If the arithmetic cannot satisfy this, stop and report rather than quietly going under.
 - Prefer taking share from `tinystories` (445M available against a 120M requirement) over taking it from a scarce slice.
 
