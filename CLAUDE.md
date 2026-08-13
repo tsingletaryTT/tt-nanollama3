@@ -790,3 +790,124 @@ Test suite: **176 passed, 0 skipped** on this machine (`test_checkpoint_gammas_a
 stops skipping once `artifacts/checkpoints-v2/` exists locally — no test was added by this
 task, so a fresh clone without `artifacts/` will still show skips). Full detail:
 `.superpowers/sdd/2026-08-12-real-training-run/task-3-report.md`.
+
+## `feat/corpus-assembly` — nine sources, a token budget, and a manifest that has to be true (2026-08-13)
+
+The corpus stopped being "TinyStories" and became a blend: nine licence-audited sources
+mixed to a 400M-token budget, with a provenance manifest whose entire purpose is to make
+*"what was this model trained on"* exactly answerable. Eight tasks: broaden `spine`, strip
+residual Gutenberg front matter, measure and settle the shares, blend, retrain the
+tokenizer, re-measure and generate the licensing document, freeze an evaluation prompt set,
+triage the minors.
+
+**The shares were settled twice, against two different tokenizers.** `scripts/measure_corpus.py`
+is a gate, not a report: it counts what each source can actually supply and exits non-zero
+when a slice cannot reach its target share within the upsample cap. The first settle moved
+`flavour` from 2.00% to its arithmetic ceiling (0.5% — 2.00% needed 12.8x against a 4x cap,
+i.e. it was impossible, not merely tight) and gave the freed 1.5 points to `spine`. Then
+Task 5 retrained the tokenizer on the blend, which changed what a "token" *is*: measured
+availability fell 6–24% for every domain except tinystories (−0.5%, because the old
+vocabulary was tinystories-specialised to begin with). That pushed `procedural` over the 4x
+working limit, so Task 6 re-settled — 13% → 12% for `procedural`, the point to `tinystories`,
+two `upsample` factors raised. **Lesson: a token budget is denominated in a unit the
+tokenizer defines. Retraining the tokenizer silently re-denominates every measurement taken
+before it.**
+
+**The circularity is real and has to be cut.** tokenizer → availability → shares → blend →
+tokenizer. It does not converge on its own; whichever arrow you cut, the tokenizer ends up
+one revision behind the corpus it will be used on. We cut it after Task 6 and wrote the
+consequence down (`docs/corpus_blend.md`) rather than chasing it. Chasing it is an infinite
+loop that produces a new "one revision behind" statement each time round.
+
+### The two content-loss regex bugs — the reusable lesson
+
+Both were the same mistake, found in consecutive review rounds, in the same pattern
+(`_FRONT_MATTER` in `scripts/prepare_corpus.py`, which strips Project Gutenberg packaging
+from the head of each document).
+
+1. **Blanket `re.IGNORECASE` makes `[A-Z]` match lowercase.** `produced\s+by\s+[A-Z]` under
+   `IGNORECASE` matches `produced by nature`, so any word-wrapped prose line beginning
+   "produced by …" was classified as a producer credit and deleted. Not hypothetical: 12
+   real prose lines were stripped from `poetry.txt`, and in 12 cases that line WAS the whole
+   document, so the document vanished. Fixed with a scoped-flag group, `(?-i:...)`.
+2. **The scoped fix was scoped too narrowly.** `(?-i:[Pp]roduced\s+by\s+[A-Z])` turned the
+   flag off but kept `[Pp]` matching either case, so a lowercase "produced by" still matched
+   whenever the NEXT word was capitalised — which 19th-century prose does constantly
+   ("produced by Nature herself", "produced by God's providence"). Same failure mode, now
+   gated on the next word's case instead of closed. Fixed by requiring the literal capital:
+   `(?-i:Produced\s+by\s+[A-Z])`. A genuine PG credit is always line-initial and capitalised.
+
+Carry these forward:
+
+* **`re.IGNORECASE` is not scoped to the literals you were thinking about.** It applies to
+  every character class in the pattern, including the `[A-Z]` you wrote precisely *because*
+  you wanted case to matter. If one alternative in a case-insensitive pattern needs case
+  sensitivity, use `(?-i:...)` — and note that it scopes the **entire group**, not just the
+  class next to it. The round-3 comment claimed it covered "only `[A-Z]`", which is wrong
+  about the regex engine, and the wrong comment is what let round 4 exist.
+* **A deletion rule needs a measured blast radius, not an argument.** Both bugs were found
+  by counting documents before and after, not by reading the pattern. `poetry`'s kept-doc
+  count going 3,085,102 → 3,085,114 is what proved bug 1 was real, and every source's count
+  being unchanged is what proved bug 2 had not yet reached the shipped corpus.
+* **A pattern that eats real prose is far worse than one that leaves packaging behind.**
+  Front-matter stripping is asymmetric: leftover "Produced by David Price" costs a few
+  tokens; a deleted document is gone and nothing downstream can tell.
+* **Regenerate the artifact after fixing a content bug.** Both fixes rebuilt
+  `artifacts/corpus/*.txt` from the untouched `artifacts/raw/` sources. The raw copies exist
+  for exactly this.
+
+### Pre-merge whole-branch review fix wave
+
+Nine findings; the artifact did not match what the manifest claimed.
+
+* **C2 — the blend was not the blend the manifest described.** `_emit` sized its emission
+  with a flat `tokens_per_word=1.3` while `plan_blend` gated on tokenizer-MEASURED
+  availability. Real tokens/word runs 1.194 (`tinystories`) to 1.559 (`wikipedia_simple`)
+  across the nine — a 30% spread — so the emitter over-emitted for eight of them by exactly
+  `real_ratio / 1.3`. `wikipedia_simple` declared `upsample=1` and made 1.058 passes,
+  duplicating ~5.8% of Simple Wikipedia undeclared; `procedural` made 4.034 passes against
+  the 4x limit Task 6 moved a whole share point to stay under; the blend was 425,024,350 real
+  tokens against a 400M budget with shares up to ~3 points off — while the manifest reported
+  every `achieved_share` as exactly its target to 15 decimal places.
+
+  Fixed by deriving each source's ratio as `available_tokens / file_word_count`. The
+  satisfying part: with the ratio right, repetition collapses to `want / available`, which
+  the planner's gate ALREADY holds at or below the declared `upsample` — the emitter
+  structurally cannot exceed a source's declared repetition any more. **Lesson: when a gate
+  and the thing it gates measure in different units, the gate is decorative.** The 1.3 was
+  honest where it came from (`measure_corpus.py`'s no-tokenizer fallback, a deliberate
+  slight over-estimate so the gate errs toward reporting more supply); it became a bug when
+  it was copied into code that had a real measurement available.
+
+  The manifest now records the tokenizer's own count of exactly the text emitted per source,
+  chunked the way `measure_corpus.py` chunks it so the two numbers are comparable. Real
+  total: **399,594,747 tokens (−0.101% of budget)**, every slice within 0.065 points.
+* **C1 — the legacy path wrote TinyStories into `blend.txt`.** `build_tokenizer.py`
+  defaulted `--corpus` to the blend, and when that file was absent fetched TinyStories and
+  wrote it *into that path*. On a fresh clone the README sequence therefore produced a 512 MB
+  TinyStories file named `blend.txt`, and every later run found it, skipped the fetch, and
+  trained on TinyStories forever. **A corpus is just a text file; its name is the only claim
+  anyone makes about its contents, so the name has to be defended in code.** The legacy path
+  may now never create that name. `train/tokenization.py` still defaulted to
+  `corpus.txt`, so the documented quickstart crashed at step 2 — both defaults now agree and
+  a test holds them equal.
+* **I3 — `:.0%` rendered `flavour`'s 0.5% share as `0%`.** In the GENERATED licensing
+  document, whose banner promises it cannot go stale. Generation protects against drift, not
+  against a format string. `train.corpus.format_share` keeps fractions.
+* **I1/I2, I4** — five rationales still quoted the pre-retrain measurement, `spine` claimed
+  an upsample computed at a share it no longer holds and a "largest drop of any slice" that
+  belonged to `wikipedia_simple`, and `prepare_corpus.py` justified its email rule with
+  "every source here is a pre-1929 public-domain text" — false, since `tinystories` is 2023
+  GPT-generated and `wikipedia_simple` is a live encyclopedia. The rule is empirically
+  harmless and was left alone; only the reason changed, to the measurement it rests on.
+  **A false reason is worse than no reason: it tells the next maintainer the wrong thing is
+  safe.**
+* **I6 — "FROZEN" prompt set that wasn't.** Rewriting every prompt's `text` to garbage left
+  the suite green; only ids, probes and count were pinned. Now digested over sorted
+  `(id, text)`. **Pinning the labels of a fixture is not pinning the fixture**, and a prompt
+  set whose ids are stable while its text drifts is worse than an unfrozen one, because the
+  results still look comparable.
+* **I7/I8/I9** — tests for `build_tokenizer.py` (it had none and the highest blast radius on
+  the branch), the tokenizer-ordering note above, and this section.
+
+Test suite: **419 passed, 1 skipped**.
