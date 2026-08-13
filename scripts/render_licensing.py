@@ -60,6 +60,12 @@ def render_licensing() -> str:
         "dataset revisions and a deterministic blend — not the text. Reconstructing it "
         "locally is what `scripts/fetch_corpus.py` and `scripts/blend_corpus.py` are for.",
         "",
+        "**What the blend actually contains** — real per-source token counts, achieved "
+        "shares and repetition factors from the build itself — is recorded in "
+        "[`corpus_blend.md`](corpus_blend.md) and "
+        "[`measurements/blend_manifest.json`](measurements/blend_manifest.json). The table "
+        "above is the *target*; that record is the *outcome*.",
+        "",
     ]
     if share_alike:
         names = ", ".join(f"`{s.name}` ({s.license_id})" for s in share_alike)
