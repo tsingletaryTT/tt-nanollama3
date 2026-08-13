@@ -112,7 +112,10 @@ SOURCES: Dict[str, CorpusSource] = {
         attribution="Project Gutenberg via sedthh/gutenberg_english",
         license_note="MIT covers the aggregation; the underlying pre-1929 texts are public domain.",
         bookshelves=["Children's Literature", "Children's Book Series"],
-        rationale="PD children's literature: more narrative backbone in an older register.",
+        upsample=2,
+        rationale="PD children's literature: more narrative backbone in an older register. "
+                  "Measured availability (36,437,242 tokens) needs 1.65x upsample at 15% share -- "
+                  "upsample=2 covers it with margin, well under the 4x working limit.",
     ),
     "wikipedia_simple": CorpusSource(
         name="wikipedia_simple",
@@ -130,13 +133,14 @@ SOURCES: Dict[str, CorpusSource] = {
     "spine": CorpusSource(
         name="spine",
         slice="spine",
-        target_share=0.12,
+        target_share=0.135,
         hf_repo="sedthh/gutenberg_english",
         hf_revision="28973b04f28fd7be4a6186a042bc26159d4366ca",
         license_id="MIT (packaging); public domain (texts)",
         license_url="https://huggingface.co/datasets/sedthh/gutenberg_english",
         attribution="Project Gutenberg via sedthh/gutenberg_english",
         license_note="MIT covers the aggregation; the underlying pre-1929 texts are public domain.",
+        upsample=2,
         authors=[
             # Original four: insect field observation and deadpan anomalism.
             "Fabre, Jean-Henri",              # 10 vols; the spine's spine
@@ -162,10 +166,17 @@ SOURCES: Dict[str, CorpusSource] = {
         rationale="Observational-mystical: the model's voice. Fabre is field observation that "
                   "is ALREADY agentic tool-use theatre; Fort applies the same method to things "
                   "that should not happen. Broadened from five authors (53 books, 10x upsample, "
-                  "over cap) to 17 (241 unique books, ~2x) with catalogue-verified PD naturalists "
-                  "and anomalists in the same register. Browne, Thomas, Sir is deliberately NOT "
-                  "here despite being in the pre-task list — he is weird's selector, and listing "
-                  "him in both would double-count him. Andrew Lang is excluded for the same reason: "
+                  "over cap) to 17 (241 unique books) with catalogue-verified PD naturalists and "
+                  "anomalists in the same register. Measured availability after the broadening: "
+                  "29,815,368 tokens (6.2x the old 4,803,988) -- needs 1.61x upsample at a 13.5% "
+                  "share, well under the 4x working limit, so upsample=2 covers it with margin. "
+                  "Share raised from 12% to 13.5% using the 1.5 points freed by dropping flavour "
+                  "to its arithmetic ceiling (see flavour's rationale) -- spine has the most "
+                  "headroom of any strange slice (29.82% ceiling at 4x) and keeping the freed "
+                  "share inside spine+folklore+weird+flavour holds their combined share at 26%, "
+                  "unchanged from before the settle. Browne, Thomas, Sir is deliberately NOT here "
+                  "despite being in the pre-task list — he is weird's selector, and listing him "
+                  "in both would double-count him. Andrew Lang is excluded for the same reason: "
                   "he is folklore's selector. Blavatsky and Swedenborg are deliberately excluded: "
                   "they assert doctrine where this slice documents the inexplicable.",
     ),
@@ -181,7 +192,10 @@ SOURCES: Dict[str, CorpusSource] = {
         license_note="MIT covers the aggregation; the underlying pre-1929 texts are public domain.",
         bookshelves=["Mythology", "Folklore"],
         authors=["Frazer, James George", "Lang, Andrew"],
-        rationale="Myth and folk narrative: the dreamlike register with an archaic voice.",
+        upsample=2,
+        rationale="Myth and folk narrative: the dreamlike register with an archaic voice. "
+                  "Measured availability (23,540,834 tokens) needs 1.36x upsample at 8% share -- "
+                  "upsample=2 covers it with margin, well under the 4x working limit.",
     ),
     "weird": CorpusSource(
         name="weird",
@@ -194,7 +208,10 @@ SOURCES: Dict[str, CorpusSource] = {
         attribution="Project Gutenberg via sedthh/gutenberg_english",
         license_note="MIT covers the aggregation; the underlying pre-1929 texts are public domain.",
         authors=["Blackwood, Algernon", "Dunsany", "Machen, Arthur", "Browne, Thomas, Sir"],
-        rationale="Weird fiction and baroque prose. Unambiguously PD, unlike Lovecraft.",
+        upsample=3,
+        rationale="Weird fiction and baroque prose. Unambiguously PD, unlike Lovecraft. Measured "
+                  "availability (7,951,195 tokens) needs 2.01x upsample at 4% share -- upsample=3 "
+                  "covers it with margin, under the 4x working limit.",
     ),
     "poetry": CorpusSource(
         name="poetry",
@@ -218,13 +235,17 @@ SOURCES: Dict[str, CorpusSource] = {
         attribution="Project Gutenberg via sedthh/gutenberg_english",
         license_note="MIT covers the aggregation; the underlying pre-1929 texts are public domain.",
         bookshelves=["Cookbooks and Cooking", "Children's Instructional Books"],
+        upsample=4,
         rationale="Recipes and instructional texts: plan -> act -> observe -> report as a SHAPE. "
-                  "Models trained on these learn the structure of procedural reasoning.",
+                  "Models trained on these learn the structure of procedural reasoning. Measured "
+                  "availability (13,623,510 tokens) needs 3.82x upsample at 13% share -- the "
+                  "tightest slice in the registry, right at the 4x working limit. Do not raise "
+                  "this share without re-measuring: any increase breaks the 4x rule.",
     ),
     "flavour": CorpusSource(
         name="flavour",
         slice="flavour",
-        target_share=0.02,
+        target_share=0.005,
         hf_repo="sedthh/gutenberg_english",
         hf_revision="28973b04f28fd7be4a6186a042bc26159d4366ca",
         license_id="MIT (packaging); public domain (texts)",
@@ -235,7 +256,11 @@ SOURCES: Dict[str, CorpusSource] = {
         upsample=4,
         rationale="Stein (grammar intact, semantics dissolved) and the I Ching (Legge 1882: "
                   "terse oracular response). Tiny, so upsampled — capped, because repetition "
-                  "at this scale risks memorisation, and Stein IS repetition-as-style.",
+                  "at this scale risks memorisation, and Stein IS repetition-as-style. Measured "
+                  "availability is only 623,814 tokens: at the 4x cap that is a hard ceiling of "
+                  "0.62% of the 400M budget, so the previous 2.00% share was arithmetically "
+                  "impossible (needed 12.8x). Dropped to 0.5%, comfortably under the ceiling "
+                  "(needs 3.21x); the freed 1.5 points moved to spine.",
     ),
 }
 
