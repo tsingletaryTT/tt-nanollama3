@@ -313,3 +313,59 @@ def test_front_matter_regex_does_not_match_lowercase_wrapped_produced_by():
     only showing up as missing text somewhere in a 2GB corpus.
     """
     assert _FRONT_MATTER.match("produced by charity, or charity by faith") is None
+
+
+# --- Regression tests for the SECOND version of the same bug ------------------------------
+#
+# The first fix, `(?-i:[Pp]roduced\s+by\s+[A-Z])`, scoped IGNORECASE off but kept "[Pp]"
+# case-insensitive. That still matched a lowercase "produced by" whenever the *next* word
+# happened to be capitalised — exactly what 19th-century prose produces whenever "by" is
+# followed by a proper noun or personification ("produced by Nature herself...", "produced
+# by God's providence alone."). Every existing test above happens to use a lowercase word
+# after "by", which is why this slipped through the first fix's regression tests. The real
+# fix requires the literal capital "P" too: `(?-i:Produced\s+by\s+[A-Z])`.
+
+def test_wordwrapped_prose_with_capitalised_next_word_is_kept_verbatim():
+    """Prose lines that slipped past the first (incomplete) fix.
+
+    All four start with lowercase "produced by" — not a credit — but the word right after
+    "by" is capitalised (a proper noun or personification), which is exactly the shape the
+    `[Pp]`-scoped version of the fix still misclassified as packaging.
+    """
+    for prose in (
+        "produced by American manufacturers using modern machines.",
+        "produced by Nature herself, without the aid of man.",
+        "produced by England's finest craftsmen in that era.",
+        "produced by God's providence alone.",
+    ):
+        out, removed = strip_front_matter(prose)
+        assert out == prose, f"real prose was altered: {prose!r} -> {out!r}"
+        assert removed == 0, f"real prose was wrongly counted as front matter: {prose!r}"
+
+
+def test_front_matter_regex_does_not_match_lowercase_produced_by_capitalised_next_word():
+    """Regex-level pin for the capitalised-next-word case, mirroring the test above it.
+
+    This is the specific shape that made `(?-i:[Pp]roduced\\s+by\\s+[A-Z])` insufficient:
+    a lowercase "produced by" followed by a capitalised word. Asserted directly against
+    `_FRONT_MATTER` so a regression here fails immediately, at the regex level.
+    """
+    for prose in (
+        "produced by American manufacturers using modern machines.",
+        "produced by Nature herself, without the aid of man.",
+        "produced by England's finest craftsmen in that era.",
+        "produced by God's providence alone.",
+    ):
+        assert _FRONT_MATTER.match(prose) is None, f"should not match: {prose!r}"
+
+
+def test_genuine_uppercase_credit_still_stripped_after_capital_p_fix():
+    """Requiring a literal capital "P" must not regress detection of real credits."""
+    for credit in (
+        "Produced by Jeroen Hellingman and the Distributed Proofreading Team",
+        "Produced by David Price",
+        "This eBook was produced by Les Bowler.",
+        "This ebook was produced by: David Edwards, Ross Cooling",
+    ):
+        out, removed = strip_front_matter(credit)
+        assert removed == 1, f"genuine credit was not stripped: {credit!r}"

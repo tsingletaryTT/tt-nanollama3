@@ -118,23 +118,54 @@ def strip_gutenberg_boilerplate(text: str) -> BoilerplateResult:
 #:     whitespace before the alternation, and the address sits mid-line after "Price,
 #:     email ", so the alternative needs its own leading ``.*?`` to reach it.
 #:
-#: CRITICAL: ``(?-i:[Pp]roduced\s+by\s+[A-Z])`` turns IGNORECASE back OFF for just this one
-#: alternative. The rest of the pattern is intentionally case-insensitive, but a *blanket*
-#: re.IGNORECASE here made the "[A-Z]" in "produced by [A-Z]" match lowercase letters too —
-#: which meant this alternative, unscoped, matched ordinary word-wrapped prose whenever a
-#: line happened to start with "produced by " followed by any word, e.g. "produced by
-#: charity, or charity by faith, but the inducements to" or "produced by the friction of a
-#: rope round the beams of a door". That is real corpus text, not a credit, and it was
-#: silently deleted from poetry.txt by an earlier version of this pattern. The scope covers
-#: only "[A-Z]"; "[Pp]" stays case-insensitive (via the explicit alternation) so genuine
-#: credits like "Produced by Jeroen Hellingman" still match — an unscoped-literal first
-#: attempt at this fix broke on exactly that case. If this scoped flag is ever "simplified"
-#: away, this exact bug comes back — do not remove it without re-verifying against real
-#: word-wrapped prose, not just the confirmed packaging examples.
+#:     This alternative is deliberately context-free: it matches an address anywhere in the
+#:     head window without requiring a credit line before it. That is safe *for this
+#:     corpus* by construction, not by luck: every source here is a pre-1929 public-domain
+#:     text, and email addresses did not exist when they were written, so any address
+#:     appearing in a document's first 40 lines can only be modern transcription/production
+#:     packaging (e.g. "...email ccx074@pglaf.org"), never authored content. All matches of
+#:     this alternative across every raw source were checked and are the genuine credit
+#:     continuation line. Do not add scoping here (e.g. requiring a preceding "produced
+#:     by"/"transcribed from" line) — this corpus cannot produce the case that scoping
+#:     would guard against, and the added complexity would be unearned.
+#:
+#: CRITICAL: ``(?-i:Produced\s+by\s+[A-Z])`` turns IGNORECASE OFF for this entire
+#: alternative — not just for the ``[A-Z]`` character class. ``(?-i:...)`` is a scoped-flag
+#: group; every literal and class inside it becomes case-sensitive, so "Produced", "by",
+#: and "[A-Z]" are ALL matched exactly as written within this one alternative, while the
+#: rest of `_FRONT_MATTER` stays case-insensitive as before. (An earlier version of this
+#: comment claimed the scope "covers only [A-Z]" and left "by" written as literal
+#: lowercase, expecting IGNORECASE to still apply to it from outside the group — that is
+#: not how ``(?-i:...)`` works, and the comment was wrong, not the regex.)
+#:
+#: Two real bugs already lived in this one alternative, in order:
+#:   1. The original, fully case-insensitive ``produced\s+by\s+[A-Z]`` matched ANY
+#:      word-wrapped line starting with "produced by " regardless of the next word's case
+#:      (`[A-Z]` under IGNORECASE matches lowercase too). This silently deleted real prose
+#:      from poetry.txt in production — 12 documents lost outright, because for each the
+#:      stripped line was the document's entire text. Confirmed victims included "produced
+#:      by charity, or charity by faith, but the inducements to".
+#:   2. The first fix, ``(?-i:[Pp]roduced\s+by\s+[A-Z])``, scoped the flag but kept "[Pp]"
+#:      case-insensitive, so it *still* matched a lowercase "produced by" whenever the
+#:      following word happened to be capitalised — exactly what 19th-century prose
+#:      produces whenever "by" is followed by a proper noun or personification: "produced
+#:      by Nature herself, without the aid of man.", "produced by God's providence alone."
+#:      No live instance of this had reached the shipped corpus, but it was the same
+#:      failure mode gated on the next word's case rather than closed.
+#: The fix: require the literal capital "P" too. A genuine PG credit line is always
+#: line-initial and capitalised ("Produced by David Price"); a wrapped prose line
+#: beginning "produced by" never is. This loses no genuine credits: the lowercase form
+#: "this ebook was produced by: David Edwards, Ross Cooling" still strips via the separate,
+#: still-case-insensitive ``(?:this\s+)?e-?(?:book|text)\s+was\s+produced\s+by\b``
+#: alternative above — it was never covered by this one.
+#:
+#: If either the ``P`` or the scoped flag is ever "simplified" away, one of these two bugs
+#: comes back. Re-verify against real word-wrapped 19th-century prose — not just the
+#: confirmed packaging examples — before touching this alternative again.
 _FRONT_MATTER = re.compile(
     r"^\s*(?:"
     r"(?:this\s+)?e-?(?:book|text)\s+was\s+produced\s+by\b"
-    r"|(?-i:[Pp]roduced\s+by\s+[A-Z])"
+    r"|(?-i:Produced\s+by\s+[A-Z])"
     r"|there\s+are\s+several\s+editions\s+of\s+this\s+ebook\b"
     r"|various\s+characteristics\s+of\s+each\s+ebook\b"
     r"|transcriber'?s?\s+note\b"
