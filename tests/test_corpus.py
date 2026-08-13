@@ -92,3 +92,9 @@ def test_spine_and_folklore_do_not_share_selectors():
     """Andrew Lang belongs to folklore. Listing him in both would double-count him."""
     overlap = set(SOURCES["spine"].authors) & set(SOURCES["folklore"].authors)
     assert not overlap, f"spine and folklore share author selectors: {sorted(overlap)}"
+
+
+def test_spine_and_weird_do_not_share_selectors():
+    """Browne belongs to weird. Listing him in both would double-count him."""
+    overlap = set(SOURCES["spine"].authors) & set(SOURCES["weird"].authors)
+    assert not overlap, f"spine and weird share author selectors: {sorted(overlap)}"

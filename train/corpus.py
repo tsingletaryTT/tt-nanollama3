@@ -161,12 +161,13 @@ SOURCES: Dict[str, CorpusSource] = {
         ],
         rationale="Observational-mystical: the model's voice. Fabre is field observation that "
                   "is ALREADY agentic tool-use theatre; Fort applies the same method to things "
-                  "that should not happen. Broadened from 4 authors (53 books, 10x upsample, "
-                  "over cap) to 17 (259 books, ~2x) with catalogue-verified PD naturalists and "
-                  "anomalists in the same register. Andrew Lang is deliberately NOT here -- he "
-                  "is folklore's, and listing him twice would double-count him. Blavatsky and "
-                  "Swedenborg are deliberately excluded: they assert doctrine where this slice "
-                  "documents the inexplicable.",
+                  "that should not happen. Broadened from five authors (53 books, 10x upsample, "
+                  "over cap) to 17 (241 unique books, ~2x) with catalogue-verified PD naturalists "
+                  "and anomalists in the same register. Browne, Thomas, Sir is deliberately NOT "
+                  "here despite being in the pre-task list — he is weird's selector, and listing "
+                  "him in both would double-count him. Andrew Lang is excluded for the same reason: "
+                  "he is folklore's selector. Blavatsky and Swedenborg are deliberately excluded: "
+                  "they assert doctrine where this slice documents the inexplicable.",
     ),
     "folklore": CorpusSource(
         name="folklore",
