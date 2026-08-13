@@ -146,11 +146,17 @@ looks like.
 
 **The model weights and this project's code are Apache-2.0.**
 
-**The training corpus is not.** TinyStories (`roneneldan/TinyStories`) is licensed
-**CDLA-Sharing-1.0**, a share-alike *data* license. This model was trained on it. Whether model
-weights trained on CDLA-Sharing data constitute a "Data Derivative" under that license is **not
-settled**, and we do not assert that they fall outside it. Anyone building on these weights
-should reach their own conclusion rather than inheriting ours.
+**The training corpus is not.** This checkpoint was trained on TinyStories
+(`roneneldan/TinyStories`), a 512 MB subset. Licence, attribution, and the pinned dataset
+revision are recorded in
+[`docs/corpus_licensing.md`](https://github.com/tsingletaryTT/tt-nanollama3/blob/main/docs/corpus_licensing.md),
+which is *generated* from this project's source registry (`train/corpus.py`) rather than
+hand-written, specifically so this card cannot drift out of sync with it the way hand-written
+licensing prose has before. That document's "unsettled Data Derivative" language for
+share-alike sources — including TinyStories' CDLA-Sharing-1.0 — applies to this checkpoint
+exactly as written there; this card does not restate it. (That registry now spans nine
+sources for a broader corpus-assembly effort; this specific released checkpoint was trained
+only on TinyStories, as the training table above shows.)
 
 **Architectural credit.** The component choices — RoPE, RMSNorm, SwiGLU, GQA, subword BPE —
 follow [Mini-LLM by Ashx098](https://github.com/Ashx098/Mini-LLM), which the originating lesson

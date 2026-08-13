@@ -75,7 +75,7 @@ class CorpusSource:
             sel.append(f"{len(self.bookshelves)} bookshelf/-ves")
         selection = ", ".join(sel) if sel else "all rows"
         return (
-            f"{self.name}: slice={self.slice} target={self.target_share:.0%} "
+            f"{self.name}: slice={self.slice} target={format_share(self.target_share)} "
             f"upsample={self.upsample}\n"
             f"  from  : {self.hf_repo}@{self.hf_revision[:12]} ({selection})\n"
             f"  licence: {self.license_id}\n"
@@ -92,14 +92,22 @@ SOURCES: Dict[str, CorpusSource] = {
     "tinystories": CorpusSource(
         name="tinystories",
         slice="backbone",
-        target_share=0.30,
+        target_share=0.31,
         hf_repo="roneneldan/TinyStories",
         hf_revision="f54c09fd23315a6f9c86f9dc80f725de7d8f9c64",
         license_id="CDLA-Sharing-1.0",
         license_url="https://cdla.dev/sharing-1-0/",
         attribution="TinyStories (Eldan & Li), roneneldan/TinyStories",
         share_alike=True,
-        rationale="Simple, regular grammar. The backbone that makes a small model readable.",
+        rationale="Simple, regular grammar. The backbone that makes a small model readable. "
+                  "Share raised from 30% to 31% in the Task 6 re-settle: retraining the "
+                  "tokenizer on the blend compressed every OTHER domain by 6-24% (measured "
+                  "against the new 32k vocabulary), which pushed procedural over the 4x "
+                  "working limit while barely touching tinystories (-0.5%, since the old "
+                  "vocabulary was tinystories-specialised to begin with). Tinystories has "
+                  "enormous headroom (443,704,924 measured tokens against a 124,000,000 "
+                  "requirement, needing only 0.28x) so it absorbs the point shaved from "
+                  "procedural rather than any strange slice giving up share.",
     ),
     "gutenberg_children": CorpusSource(
         name="gutenberg_children",
@@ -112,7 +120,13 @@ SOURCES: Dict[str, CorpusSource] = {
         attribution="Project Gutenberg via sedthh/gutenberg_english",
         license_note="MIT covers the aggregation; the underlying pre-1929 texts are public domain.",
         bookshelves=["Children's Literature", "Children's Book Series"],
-        rationale="PD children's literature: more narrative backbone in an older register.",
+        upsample=2,
+        rationale="PD children's literature: more narrative backbone in an older register. "
+                  "Measured availability (34,253,856 tokens against the retrained tokenizer) "
+                  "needs 1.75x upsample at a 15% share -- upsample=2 covers it with margin "
+                  "(a 17.13% ceiling), well under the 4x working limit. The pre-retrain "
+                  "measurement was 36,437,242 tokens needing 1.65x; the -6.0% shift is the "
+                  "smallest of any slice.",
     ),
     "wikipedia_simple": CorpusSource(
         name="wikipedia_simple",
@@ -130,17 +144,63 @@ SOURCES: Dict[str, CorpusSource] = {
     "spine": CorpusSource(
         name="spine",
         slice="spine",
-        target_share=0.12,
+        target_share=0.135,
         hf_repo="sedthh/gutenberg_english",
         hf_revision="28973b04f28fd7be4a6186a042bc26159d4366ca",
         license_id="MIT (packaging); public domain (texts)",
         license_url="https://huggingface.co/datasets/sedthh/gutenberg_english",
         attribution="Project Gutenberg via sedthh/gutenberg_english",
         license_note="MIT covers the aggregation; the underlying pre-1929 texts are public domain.",
-        authors=["Fabre, Jean-Henri", "Maeterlinck, Maurice", "Fort, Charles",
-                 "Hodgson, William Hope", "Browne, Thomas, Sir"],
-        rationale="Observational-mystical. Fabre is field observation that is ALREADY "
-                  "agentic tool-use theatre; Fort is the same method applied to the impossible.",
+        upsample=3,
+        authors=[
+            # Original four: insect field observation and deadpan anomalism.
+            "Fabre, Jean-Henri",              # 10 vols; the spine's spine
+            "Maeterlinck, Maurice",           # mystical about insect collectives
+            "Fort, Charles",                  # anomalies compiled as data
+            "Hodgson, William Hope",          # found-manuscript cosmic dread
+            # Naturalists and field observers (verified counts in the catalogue).
+            "Darwin, Charles",                # 39
+            "Burroughs, John",                # 29
+            "Thoreau, Henry David",           # 21
+            "Seton, Ernest Thompson",         # 19
+            "Jefferies, Richard",             # 18 -- nature writing shading into mysticism
+            "Hudson, W. H.",                  # 18
+            "Wallace, Alfred Russel",         # 17
+            "Muir, John",                     # 12
+            "Gosse, Philip Henry",            # 3
+            "White, Gilbert",                 # 3  -- Natural History of Selborne
+            # Cosmic scale and the possibility of other minds.
+            "Flammarion, Camille",            # 7
+            "Proctor, Richard A.",            # 7
+            "Donnelly, Ignatius",             # 2
+        ],
+        rationale="Observational-mystical: the model's voice. Fabre is field observation that "
+                  "is ALREADY agentic tool-use theatre; Fort applies the same method to things "
+                  "that should not happen. Broadened from five authors (53 books, 10x upsample, "
+                  "over cap) to 17 (241 unique books) with catalogue-verified PD naturalists and "
+                  "anomalists in the same register. Measured availability after the broadening: "
+                  "29,815,368 tokens (6.2x the old 4,803,988) under the OLD tokenizer -- which "
+                  "needed 1.61x at the 12% share it then held, and 1.81x at the 13.5% share it "
+                  "moved to, both well under the 4x working limit, so upsample=2 covered it with "
+                  "margin. Share raised from 12% to 13.5% using the "
+                  "1.5 points freed by dropping flavour to its arithmetic ceiling (see flavour's "
+                  "rationale) -- spine has the most headroom of any strange slice (26.20% "
+                  "ceiling at 4x against folklore's 10.64%, weird's 5.28% and flavour's 0.575%) "
+                  "and keeping the freed share inside spine+folklore+weird+flavour "
+                  "holds their combined share at 26%, unchanged from before the settle. "
+                  "Task 6 re-measured against the RETRAINED tokenizer: availability dropped to "
+                  "26,200,908 tokens (-12.1%, the largest drop of any STRANGE slice and the "
+                  "second largest overall -- wikipedia_simple fell -23.8% -- consistent with the "
+                  "old vocabulary being tinystories-specialised), which needs 2.06x -- upsample=2 "
+                  "no longer covers it (54,000,000 required vs 52,401,816 achievable), so "
+                  "upsample raised to 3 (achieves 78,602,724, comfortable margin, still well "
+                  "under the 4x limit at 2.06x actual need). The 13.5% share and the 26% "
+                  "combined strange-slice figure are UNCHANGED by this re-settle; only the "
+                  "upsample factor moved. Browne, Thomas, Sir is deliberately NOT here "
+                  "despite being in the pre-task list — he is weird's selector, and listing him "
+                  "in both would double-count him. Andrew Lang is excluded for the same reason: "
+                  "he is folklore's selector. Blavatsky and Swedenborg are deliberately excluded: "
+                  "they assert doctrine where this slice documents the inexplicable.",
     ),
     "folklore": CorpusSource(
         name="folklore",
@@ -154,7 +214,12 @@ SOURCES: Dict[str, CorpusSource] = {
         license_note="MIT covers the aggregation; the underlying pre-1929 texts are public domain.",
         bookshelves=["Mythology", "Folklore"],
         authors=["Frazer, James George", "Lang, Andrew"],
-        rationale="Myth and folk narrative: the dreamlike register with an archaic voice.",
+        upsample=2,
+        rationale="Myth and folk narrative: the dreamlike register with an archaic voice. "
+                  "Measured availability (21,274,517 tokens against the retrained tokenizer, "
+                  "-9.6% on the 23,540,834 measured before it) needs 1.50x upsample at an 8% "
+                  "share -- upsample=2 covers it with margin (a 10.64% ceiling), well under "
+                  "the 4x working limit.",
     ),
     "weird": CorpusSource(
         name="weird",
@@ -167,7 +232,11 @@ SOURCES: Dict[str, CorpusSource] = {
         attribution="Project Gutenberg via sedthh/gutenberg_english",
         license_note="MIT covers the aggregation; the underlying pre-1929 texts are public domain.",
         authors=["Blackwood, Algernon", "Dunsany", "Machen, Arthur", "Browne, Thomas, Sir"],
-        rationale="Weird fiction and baroque prose. Unambiguously PD, unlike Lovecraft.",
+        upsample=3,
+        rationale="Weird fiction and baroque prose. Unambiguously PD, unlike Lovecraft. Measured "
+                  "availability (7,040,931 tokens against the retrained tokenizer, -11.5% on the "
+                  "7,951,195 measured before it) needs 2.27x upsample at a 4% share -- "
+                  "upsample=3 covers it (a 5.28% ceiling), under the 4x working limit.",
     ),
     "poetry": CorpusSource(
         name="poetry",
@@ -183,7 +252,7 @@ SOURCES: Dict[str, CorpusSource] = {
     "procedural": CorpusSource(
         name="procedural",
         slice="agentic",
-        target_share=0.13,
+        target_share=0.12,
         hf_repo="sedthh/gutenberg_english",
         hf_revision="28973b04f28fd7be4a6186a042bc26159d4366ca",
         license_id="MIT (packaging); public domain (texts)",
@@ -191,13 +260,28 @@ SOURCES: Dict[str, CorpusSource] = {
         attribution="Project Gutenberg via sedthh/gutenberg_english",
         license_note="MIT covers the aggregation; the underlying pre-1929 texts are public domain.",
         bookshelves=["Cookbooks and Cooking", "Children's Instructional Books"],
+        upsample=4,
         rationale="Recipes and instructional texts: plan -> act -> observe -> report as a SHAPE. "
-                  "Models trained on these learn the structure of procedural reasoning.",
+                  "Models trained on these learn the structure of procedural reasoning. Measured "
+                  "availability under the OLD tokenizer (13,623,510 tokens) needed 3.82x upsample "
+                  "at 13% share -- the tightest slice in the registry, right at the 4x working "
+                  "limit. Task 6 re-measured against the RETRAINED tokenizer: availability "
+                  "dropped to 12,273,087 tokens (-9.9%), which pushed the needed upsample to "
+                  "4.24x at the old 13% share -- over the 4x working limit, and 4x is already "
+                  "this source's upsample (raising it further would mean more repetition of the "
+                  "same ~12.3M raw tokens, which is what the cap exists to prevent, not a share "
+                  "problem to solve by repeating harder). Share dropped from 13% to 12% instead: "
+                  "the ceiling at upsample=4 is 12,273,087 x 4 / 400,000,000 = 12.27%, so 12% "
+                  "needs only 3.91x, with real margin against another small re-measurement "
+                  "swing. The freed 1 point moved to tinystories (see its rationale), not to any "
+                  "strange slice, so spine+folklore+weird+flavour is untouched by this move. Do "
+                  "not raise this share again without re-measuring: it is still the tightest "
+                  "slice in the registry.",
     ),
     "flavour": CorpusSource(
         name="flavour",
         slice="flavour",
-        target_share=0.02,
+        target_share=0.005,
         hf_repo="sedthh/gutenberg_english",
         hf_revision="28973b04f28fd7be4a6186a042bc26159d4366ca",
         license_id="MIT (packaging); public domain (texts)",
@@ -208,9 +292,38 @@ SOURCES: Dict[str, CorpusSource] = {
         upsample=4,
         rationale="Stein (grammar intact, semantics dissolved) and the I Ching (Legge 1882: "
                   "terse oracular response). Tiny, so upsampled — capped, because repetition "
-                  "at this scale risks memorisation, and Stein IS repetition-as-style.",
+                  "at this scale risks memorisation, and Stein IS repetition-as-style. Measured "
+                  "availability against the retrained tokenizer is only 575,377 tokens: at the "
+                  "4x cap that is a hard ceiling of 0.575% of the 400M budget, so the original "
+                  "2.00% share was arithmetically impossible (would need 13.9x). The 0.5% share "
+                  "needs 3.48x. It is NOT comfortable: the ceiling sits 0.075 points above the "
+                  "share, so a further 13% fall in measured availability would put 0.5% out of "
+                  "reach at 4x, and this slice has no headroom to absorb another re-measurement "
+                  "swing. It was settled at 0.5% when the pre-retrain measurement (623,814 "
+                  "tokens, 0.624% ceiling, 3.21x needed) left 0.12 points of headroom; the "
+                  "retrain took -7.8% of it and more than a third of that margin with it. The "
+                  "share stayed at 0.5% because it still fits, not because it fits well — do "
+                  "not raise it, and re-measure before trusting it after any tokenizer change. "
+                  "The 1.5 points freed when it dropped from 2.00% moved to spine.",
     ),
 }
+
+
+def format_share(share: float) -> str:
+    """Render a share in [0, 1] as a percentage WITHOUT dropping its fraction.
+
+    ``f"{share:.0%}"`` was used in three places (the generated licensing document, the
+    operator gate table, and the blend's shortfall message) and it rounds every fractional
+    share away: ``flavour``'s 0.5% rendered as **0%** — "contributes nothing" — and
+    ``spine``'s 13.5% as 14%, in a document whose banner promises it cannot go stale.
+
+    Fractions are kept only as far as they exist: 0.31 renders "31%", not "31.0%", so
+    whole-number shares stay readable. Three decimal places of a percent is enough for
+    every share this registry can hold and for the arithmetic ceilings derived from them
+    (``flavour``'s ceiling is 0.575%).
+    """
+    text = f"{round(share * 100, 3):.3f}".rstrip("0").rstrip(".")
+    return f"{text}%"
 
 
 def get_source(name: str) -> CorpusSource:
@@ -228,4 +341,5 @@ def total_target_share() -> float:
     return sum(s.target_share for s in SOURCES.values())
 
 
-__all__ = ["SLICES", "SOURCES", "CorpusSource", "get_source", "total_target_share"]
+__all__ = ["SLICES", "SOURCES", "CorpusSource", "format_share", "get_source",
+           "total_target_share"]

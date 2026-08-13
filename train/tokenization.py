@@ -102,8 +102,13 @@ def tokenize_corpus(
 
 def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--corpus", default="artifacts/corpus/corpus.txt",
-                    help="Path to the prepared corpus text file.")
+    p.add_argument("--corpus", default="artifacts/corpus/blend.txt",
+                    help="Path to the prepared corpus text file (default: %(default)s). "
+                         "Matches scripts/build_tokenizer.py's default on purpose: the "
+                         "documented sequence trains the tokenizer and then tokenizes "
+                         "with it, and two different defaults meant step 2 looked for a "
+                         "file step 1 never wrote. Pass artifacts/corpus/corpus.txt to "
+                         "tokenize the legacy TinyStories-only corpus instead.")
     p.add_argument("--tokenizer", default="artifacts/tokenizer",
                     help="Directory holding the trained tokenizer.")
     p.add_argument("--out", default="artifacts/tokens",

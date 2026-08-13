@@ -97,6 +97,129 @@ def strip_gutenberg_boilerplate(text: str) -> BoilerplateResult:
     return BoilerplateResult(text, status)
 
 
+#: Lines that are unambiguously Project Gutenberg packaging rather than the work itself.
+#:
+#: Deliberately narrow. These run only over the head of a document and stop at the first
+#: line that does not match, because a pattern that eats real prose is far worse than one
+#: that leaves a producer credit behind. "reproduced by" and "the printer's trademark" are
+#: real sentences in this corpus and must not match.
+#:
+#: Two alternatives were added after the initial pass, once the raw text showed a credit
+#: format the confirmed examples didn't cover:
+#:   - ``transcribed\s+from\s+the\b`` — "Transcribed from the 1905 Chapman and Hall edition
+#:     by David Price" is genuine PG packaging. Anchored on "the" immediately after
+#:     "transcribed from" so it doesn't depend on "edition by" being two words (one real
+#:     instance in this corpus reads "...editionby David" with the space dropped).
+#:   - the email alternative — that same credit wraps onto a second physical line
+#:     ("Price, email ccx074@pglaf.org"), which is not "produced by ..." or "transcribed
+#:     from ..." on its own. A head-window line carrying an email address is unambiguously
+#:     packaging. Written as ``.*?[\w.+-]+@[\w.-]+\.\w+`` rather than anchoring the address
+#:     to the start of the line: the enclosing ``^\s*(?:...)`` wrapper only skips leading
+#:     whitespace before the alternation, and the address sits mid-line after "Price,
+#:     email ", so the alternative needs its own leading ``.*?`` to reach it.
+#:
+#:     This alternative is deliberately context-free: it matches an address anywhere in the
+#:     head window without requiring a credit line before it. It is kept that way on
+#:     MEASUREMENT, not on an argument about what the corpus contains. Every match of this
+#:     alternative across every raw source was inspected and every one is the genuine credit
+#:     continuation line (e.g. "...email ccx074@pglaf.org"), and the two modern sources were
+#:     checked exhaustively rather than reasoned about: 2,119,489 tinystories documents and
+#:     241,787 wikipedia_simple documents, zero touched by this alternative.
+#:
+#:     An earlier version of this comment justified it instead by claiming "every source
+#:     here is a pre-1929 public-domain text, and email addresses did not exist when they
+#:     were written". That is false, and it is the kind of false that invites someone to
+#:     extend the rule: `tinystories` is 2023 GPT-generated text and `wikipedia_simple` is a
+#:     live modern encyclopedia (which certainly does contain email addresses in article
+#:     bodies), and both pass through `strip_front_matter`. The rule survives because it
+#:     only ever runs over a document's first 40 lines, stops at the first non-matching
+#:     line, and no document in these sources opens with an address — not because addresses
+#:     could not appear.
+#:
+#:     Do not add scoping here (e.g. requiring a preceding "produced by"/"transcribed from"
+#:     line) on the strength of the pre-1929 argument, which does not hold. Do re-run the
+#:     count above if a new source is added: the empirical claim is what this rests on, and
+#:     a source whose documents can open with an email address would break it.
+#:
+#: CRITICAL: ``(?-i:Produced\s+by\s+[A-Z])`` turns IGNORECASE OFF for this entire
+#: alternative — not just for the ``[A-Z]`` character class. ``(?-i:...)`` is a scoped-flag
+#: group; every literal and class inside it becomes case-sensitive, so "Produced", "by",
+#: and "[A-Z]" are ALL matched exactly as written within this one alternative, while the
+#: rest of `_FRONT_MATTER` stays case-insensitive as before. (An earlier version of this
+#: comment claimed the scope "covers only [A-Z]" and left "by" written as literal
+#: lowercase, expecting IGNORECASE to still apply to it from outside the group — that is
+#: not how ``(?-i:...)`` works, and the comment was wrong, not the regex.)
+#:
+#: Two real bugs already lived in this one alternative, in order:
+#:   1. The original, fully case-insensitive ``produced\s+by\s+[A-Z]`` matched ANY
+#:      word-wrapped line starting with "produced by " regardless of the next word's case
+#:      (`[A-Z]` under IGNORECASE matches lowercase too). This silently deleted real prose
+#:      from poetry.txt in production — 12 documents lost outright, because for each the
+#:      stripped line was the document's entire text. Confirmed victims included "produced
+#:      by charity, or charity by faith, but the inducements to".
+#:   2. The first fix, ``(?-i:[Pp]roduced\s+by\s+[A-Z])``, scoped the flag but kept "[Pp]"
+#:      case-insensitive, so it *still* matched a lowercase "produced by" whenever the
+#:      following word happened to be capitalised — exactly what 19th-century prose
+#:      produces whenever "by" is followed by a proper noun or personification: "produced
+#:      by Nature herself, without the aid of man.", "produced by God's providence alone."
+#:      No live instance of this had reached the shipped corpus, but it was the same
+#:      failure mode gated on the next word's case rather than closed.
+#: The fix: require the literal capital "P" too. A genuine PG credit line is always
+#: line-initial and capitalised ("Produced by David Price"); a wrapped prose line
+#: beginning "produced by" never is. This loses no genuine credits: the lowercase form
+#: "this ebook was produced by: David Edwards, Ross Cooling" still strips via the separate,
+#: still-case-insensitive ``(?:this\s+)?e-?(?:book|text)\s+was\s+produced\s+by\b``
+#: alternative above — it was never covered by this one.
+#:
+#: If either the ``P`` or the scoped flag is ever "simplified" away, one of these two bugs
+#: comes back. Re-verify against real word-wrapped 19th-century prose — not just the
+#: confirmed packaging examples — before touching this alternative again.
+_FRONT_MATTER = re.compile(
+    r"^\s*(?:"
+    r"(?:this\s+)?e-?(?:book|text)\s+was\s+produced\s+by\b"
+    r"|(?-i:Produced\s+by\s+[A-Z])"
+    r"|there\s+are\s+several\s+editions\s+of\s+this\s+ebook\b"
+    r"|various\s+characteristics\s+of\s+each\s+ebook\b"
+    r"|transcriber'?s?\s+note\b"
+    r"|updated\s+editions\s+will\s+replace\b"
+    r"|this\s+file\s+was\s+produced\s+from\b"
+    r"|transcribed\s+from\s+the\b"
+    r"|.*?[\w.+-]+@[\w.-]+\.\w+"
+    r")",
+    re.IGNORECASE,
+)
+
+#: How far into a document front matter may appear. Beyond this it is the work, not packaging.
+_FRONT_MATTER_WINDOW = 40
+
+
+def strip_front_matter(text: str) -> tuple:
+    """Remove Project Gutenberg packaging lines from a document's head.
+
+    Returns ``(cleaned_text, lines_removed)``. Scans at most the first
+    ``_FRONT_MATTER_WINDOW`` lines and stops permanently at the first line that is neither
+    blank nor packaging — once the work has started, nothing later is removed even if it
+    resembles a credit.
+    """
+    if not text.strip():
+        return text, 0
+    lines = text.split("\n")
+    keep_from = 0
+    removed = 0
+    for i, line in enumerate(lines[:_FRONT_MATTER_WINDOW]):
+        if not line.strip():
+            keep_from = i + 1
+            continue
+        if _FRONT_MATTER.match(line):
+            keep_from = i + 1
+            removed += 1
+            continue
+        break
+    if removed == 0:
+        return text, 0
+    return "\n".join(lines[keep_from:]).lstrip("\n"), removed
+
+
 def normalise(text: str) -> str:
     """CRLF -> LF, strip trailing whitespace, collapse blank-line runs to one."""
     text = text.replace("\r\n", "\n").replace("\r", "\n")
@@ -115,6 +238,7 @@ def prepare_source(name: str, src: Path, dest: Path) -> dict:
     - end_only: documents with END marker but no START
     - none: documents with no markers
     - skipped: malformed JSON or missing text field
+    - front_matter_lines: total lines of residual PG front matter stripped across all docs
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
     counts = {
@@ -124,6 +248,7 @@ def prepare_source(name: str, src: Path, dest: Path) -> dict:
         "end_only": 0,
         "none": 0,
         "skipped": 0,
+        "front_matter_lines": 0,
     }
 
     with src.open("r", encoding="utf-8") as fin, dest.open("w", encoding="utf-8") as fout:
@@ -140,7 +265,9 @@ def prepare_source(name: str, src: Path, dest: Path) -> dict:
                 continue
 
             result = strip_gutenberg_boilerplate(text)
-            text = normalise(result.text)
+            stripped_text, front_matter_removed = strip_front_matter(result.text)
+            counts["front_matter_lines"] += front_matter_removed
+            text = normalise(stripped_text)
 
             # Track marker status using constants
             if result.marker_status == MARKER_BOTH:
@@ -186,6 +313,8 @@ def main() -> int:
                        f"end-only: {counts['end_only']}, none: {counts['none']}")
         if counts['skipped'] > 0:
             marker_info += f", skipped: {counts['skipped']}"
+        if counts['front_matter_lines'] > 0:
+            marker_info += f", front-matter-lines: {counts['front_matter_lines']}"
         print(f"{name:22} {counts['kept']:>7,} docs -> {dest.name} ({size_mb:,.1f} MB) "
               f"({marker_info})")
     return 0

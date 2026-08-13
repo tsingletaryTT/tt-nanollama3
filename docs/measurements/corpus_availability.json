@@ -2,15 +2,15 @@
   "budget": 400000000,
   "upsample_cap": 8,
   "available": {
-    "flavour": 623814,
-    "folklore": 23541562,
-    "gutenberg_children": 36437848,
-    "poetry": 32514616,
-    "procedural": 13623510,
-    "spine": 4803988,
-    "tinystories": 445771903,
-    "weird": 7951195,
-    "wikipedia_simple": 89177921
+    "flavour": 575377,
+    "folklore": 21274517,
+    "gutenberg_children": 34253856,
+    "poetry": 30557187,
+    "procedural": 12273087,
+    "spine": 26200908,
+    "tinystories": 443704924,
+    "weird": 7040931,
+    "wikipedia_simple": 67985428
   },
   "methods": {
     "flavour": "tokenizer",
@@ -23,48 +23,5 @@
     "weird": "tokenizer",
     "wikipedia_simple": "tokenizer"
   },
-  "shortfalls": [
-    {
-      "name": "flavour",
-      "required": 8000000,
-      "available": 623814,
-      "current_upsample": 4,
-      "needed_upsample": 12.824335458966935
-    },
-    {
-      "name": "spine",
-      "required": 48000000,
-      "available": 4803988,
-      "current_upsample": 1,
-      "needed_upsample": 9.991698563776596
-    },
-    {
-      "name": "procedural",
-      "required": 52000000,
-      "available": 13623510,
-      "current_upsample": 1,
-      "needed_upsample": 3.8169311726566795
-    },
-    {
-      "name": "weird",
-      "required": 16000000,
-      "available": 7951195,
-      "current_upsample": 1,
-      "needed_upsample": 2.0122761421396405
-    },
-    {
-      "name": "gutenberg_children",
-      "required": 60000000,
-      "available": 36437848,
-      "current_upsample": 1,
-      "needed_upsample": 1.646639505165069
-    },
-    {
-      "name": "folklore",
-      "required": 32000000,
-      "available": 23541562,
-      "current_upsample": 1,
-      "needed_upsample": 1.3592980788615472
-    }
-  ]
+  "shortfalls": []
 }

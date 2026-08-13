@@ -27,7 +27,7 @@ from typing import Dict, List
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from train.corpus import SOURCES, CorpusSource  # noqa: E402
+from train.corpus import SOURCES, CorpusSource, format_share  # noqa: E402
 from train.paths import shared_dir  # noqa: E402
 
 #: Tokens per whitespace-delimited word, used when no tokenizer is available.
@@ -69,14 +69,49 @@ def shortfall_report(available: Dict[str, int], total_budget: int,
         if achievable_tokens(have, src.upsample) >= need:
             continue
         needed = math.inf if have == 0 else need / have
-        if needed <= upsample_cap and achievable_tokens(have, int(math.ceil(needed))) >= need:
-            # Reachable by raising this source's upsample within the cap: not a shortfall,
-            # but the registry's current factor is too low. Reported so it can be raised.
-            pass
+        # Every source that reaches this point is reported, including one that IS reachable
+        # by raising its own upsample within the cap (needed <= upsample_cap): the registry's
+        # currently-declared factor is simply too low for it. Reporting that case too forces
+        # the registry to state the higher factor explicitly rather than silently relying on
+        # more repetition than it currently admits to.
         out.append(Shortfall(name=name, required=need, available=have,
                              current_upsample=src.upsample, needed_upsample=needed))
     out.sort(key=lambda s: (-s.needed_upsample if s.needed_upsample != math.inf else -1e18))
     return out
+
+
+def _json_safe_shortfall(s: Shortfall) -> dict:
+    """``Shortfall`` as a dict safe for ``json.dumps``.
+
+    ``needed_upsample`` can be ``math.inf`` (zero-availability sources). RFC 8259 has no
+    Infinity token, so the default ``json.dumps`` behaviour of emitting a bare `Infinity`
+    literal produces output that Python's own ``json.loads`` and ``jq`` will happily read
+    back but that a strict parser (e.g. JavaScript's ``JSON.parse``) rejects. Serialise it as
+    ``null`` instead -- the sibling ``available: 0`` already says "no material", so nothing
+    is lost by not spelling out "infinite" in a format that can't represent it.
+    """
+    d = asdict(s)
+    if not math.isfinite(d["needed_upsample"]):
+        d["needed_upsample"] = None
+    return d
+
+
+#: Column headings for the operator's gate table, kept next to the row renderer so the
+#: two cannot drift apart.
+GATE_HEADER = (f"{'source':22} {'share':>7} {'required':>13} {'available':>13} "
+               f"{'x':>4}  method")
+
+
+def gate_row(source: CorpusSource, required: int, available: int, method: str) -> str:
+    """One line of the gate table an operator reads before settling the shares.
+
+    Shares go through ``format_share`` rather than ``:.0%``. That format rounded
+    ``flavour``'s 0.5% share to **0%** in this table -- "this slice contributes nothing" --
+    and ``spine``'s 13.5% to 14%, in the output whose entire job is to be the evidence the
+    shares are settled against.
+    """
+    return (f"{source.name:22} {format_share(source.target_share):>7} {required:>13,} "
+            f"{available:>13,} {source.upsample:>4} {method}")
 
 
 def count_tokens(path: Path, tokenizer_dir: Path) -> tuple:
@@ -121,13 +156,11 @@ def main() -> int:
 
     print(f"budget {args.budget:,} tokens, upsample cap {args.upsample_cap}")
     print()
-    print(f"{'source':22} {'share':>6} {'required':>13} {'available':>13} {'x':>4}  method")
-    print("-" * 74)
+    print(GATE_HEADER)
+    print("-" * 75)
     for name in sorted(SOURCES):
-        src = SOURCES[name]
-        need = required_tokens(src, args.budget)
-        print(f"{name:22} {src.target_share:>5.0%} {need:>13,} {available[name]:>13,} "
-              f"{src.upsample:>4} {methods[name]}")
+        print(gate_row(SOURCES[name], required_tokens(SOURCES[name], args.budget),
+                       available[name], methods[name]))
 
     short = shortfall_report(available, args.budget, args.upsample_cap)
     args.report.parent.mkdir(parents=True, exist_ok=True)
@@ -136,7 +169,7 @@ def main() -> int:
         "upsample_cap": args.upsample_cap,
         "available": available,
         "methods": methods,
-        "shortfalls": [asdict(s) for s in short],
+        "shortfalls": [_json_safe_shortfall(s) for s in short],
     }, indent=2, default=str))
     print(f"\nwrote {args.report}")
 

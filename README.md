@@ -152,8 +152,15 @@ Requires a tt-metal source checkout with `ttml` built, and `TT_METAL_HOME` set. 
 ```bash
 pip install -e .
 
-# Fetch the corpus and train the tokenizer (downloads ~2.2 GB, CPU only)
-python scripts/build_tokenizer.py --corpus-mb 512
+# Build the nine-source corpus blend (CPU only; downloads several GB, needs ~45 GB free —
+# scripts/check_disk_space.py refuses to start if the volume is too full)
+python scripts/fetch_corpus.py       # pinned revisions, one file per source
+python scripts/prepare_corpus.py     # normalise, strip Gutenberg packaging
+python scripts/measure_corpus.py     # availability gate; writes docs/measurements/
+python scripts/blend_corpus.py       # -> artifacts/corpus/blend.txt + its manifest
+
+# Train the tokenizer on the blend (CPU only)
+python scripts/build_tokenizer.py
 
 # Tokenize the corpus into training arrays (CPU only)
 python train/tokenization.py
@@ -164,6 +171,27 @@ python train/run.py --dry-run --steps 20
 # Train on Blackhole
 python train/run.py --steps 20 --batch-size 64
 ```
+
+`measure_corpus.py` counts tokens with the trained tokenizer when one exists and falls back
+to a word approximation when none does, so the first pass through this sequence on a fresh
+clone bootstraps from the approximation. Re-running `measure_corpus.py` and `blend_corpus.py`
+once a tokenizer exists settles the numbers against the real vocabulary — see
+[`docs/corpus_blend.md`](docs/corpus_blend.md), which records what the shipped blend actually
+contains and why that ordering is cut where it is.
+
+**TinyStories only, for a quick smoke test** — a ~512 MB single-source corpus rather than the
+blend, downloading ~2.2 GB. It is named `corpus.txt`, never `blend.txt`: `build_tokenizer.py`
+refuses to write the blend's name from this path, because a TinyStories file called
+`blend.txt` is indistinguishable from the real blend to every later step.
+
+```bash
+python scripts/build_tokenizer.py --corpus artifacts/corpus/corpus.txt --corpus-mb 512
+python train/tokenization.py --corpus artifacts/corpus/corpus.txt
+```
+
+`--corpus-mb` applies only to this path. On a corpus that already exists it is a no-op:
+the file is trained on as-is, since a head-truncating byte cap would amputate a blend
+written one source at a time rather than sample it.
 
 Run the tests with `python -m pytest`. They need no hardware.
 
