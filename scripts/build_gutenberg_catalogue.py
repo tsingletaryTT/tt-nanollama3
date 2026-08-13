@@ -61,21 +61,47 @@ def gutenberg_sources() -> Dict[str, CorpusSource]:
 
 
 def iter_metadata(revision: str) -> Iterable[Dict[str, object]]:
-    """Yield one metadata dict per book, reading only the METADATA column."""
-    from datasets import load_dataset
+    """Yield one metadata dict per book, reading only the METADATA column.
 
-    ds = load_dataset(
-        GUTENBERG_REPO, split="train", revision=revision, streaming=True,
-    )
-    for row in ds:
-        raw = row.get("METADATA")
-        if isinstance(raw, str):
-            try:
-                raw = json.loads(raw)
-            except json.JSONDecodeError:
-                continue
-        if isinstance(raw, dict):
-            yield raw
+    NOTE: We project the METADATA column directly via PyArrow, not load_dataset().
+    The obvious approach of load_dataset(..., columns=["METADATA"], streaming=True)
+    raises ValueError on datasets 2.14.6: a casting bug when projecting columns in
+    streaming mode. PyArrow projection works and costs ~213 MB for all 48,284 rows,
+    vs. ~15 GB if full TEXT rows crossed the network. This approach recovers the
+    stated goal: reading one column instead of the whole dataset.
+    """
+    import pyarrow.parquet as pq
+    import fsspec
+    from huggingface_hub import HfApi, hf_hub_url
+
+    # List all parquet shards in the dataset at this revision.
+    api = HfApi()
+    repo_files = api.list_repo_files(repo_id=GUTENBERG_REPO, revision=revision,
+                                      repo_type="dataset")
+    parquet_files = [
+        fname
+        for fname in repo_files
+        if isinstance(fname, str) and fname.startswith("data/train-") and fname.endswith(".parquet")
+    ]
+    parquet_files.sort()
+
+    # Read each parquet shard with column projection. Get HTTPS URLs for each file.
+    for fname in parquet_files:
+        url = hf_hub_url(repo_id=GUTENBERG_REPO, filename=fname, revision=revision,
+                         repo_type="dataset")
+        # Use fsspec to open the remote parquet file, then read with PyArrow column projection.
+        with fsspec.open(url, "rb") as f:
+            pf = pq.ParquetFile(f)
+            for batch in pf.iter_batches(batch_size=1024, columns=["METADATA"]):
+                for row in batch.to_pylist():
+                    raw = row.get("METADATA")
+                    if isinstance(raw, str):
+                        try:
+                            raw = json.loads(raw)
+                        except json.JSONDecodeError:
+                            continue
+                    if isinstance(raw, dict):
+                        yield raw
 
 
 def main() -> int:
