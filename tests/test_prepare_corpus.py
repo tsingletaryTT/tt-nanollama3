@@ -11,6 +11,7 @@ from scripts.prepare_corpus import (
     MARKER_NONE,
     MARKER_START_ONLY,
     MARKER_END_ONLY,
+    _FRONT_MATTER,
     normalise,
     strip_front_matter,
     strip_gutenberg_boilerplate,
@@ -266,3 +267,49 @@ def test_leaves_midsentence_produced_by_prose_alone():
     out, removed = strip_front_matter(prose)
     assert out == prose
     assert removed == 0
+
+
+# --- Regression tests for a real content-loss incident -----------------------------------
+#
+# A blanket `re.IGNORECASE` over `produced\s+by\s+[A-Z]` made "[A-Z]" match lowercase
+# letters too, so any word-wrapped line in the corpus that happened to *start* with
+# "produced by " (lowercase, mid-sentence) was misclassified as a producer credit and
+# deleted. This actually happened: 12 real prose lines were stripped out of poetry.txt in
+# production before the fix. These tests pin the fix and must fail loudly if the scoped
+# `(?-i:...)` flag is ever "simplified" away.
+
+def test_wordwrapped_prose_lines_are_kept_verbatim():
+    """Three real lines that were wrongly deleted from poetry.txt before this fix.
+
+    Each starts with lowercase "produced by" only because of where the source text
+    happened to wrap — none of them is a producer credit.
+    """
+    for prose in (
+        "produced by charity, or charity by faith, but the inducements to",
+        "produced by the friction of a rope round the beams of a door; and",
+        "produced by whipping them with nettles. The object of this ceremony",
+    ):
+        out, removed = strip_front_matter(prose)
+        assert out == prose, f"real prose was altered: {prose!r} -> {out!r}"
+        assert removed == 0, f"real prose was wrongly counted as front matter: {prose!r}"
+
+
+def test_genuine_producer_credits_are_still_stripped():
+    """The fix must not regress detection of real credits with a capitalized name."""
+    for credit in (
+        "Produced by Jeroen Hellingman and the Distributed Proofreading Team",
+        "Produced by David Price",
+    ):
+        out, removed = strip_front_matter(credit)
+        assert out == ""
+        assert removed == 1, f"genuine credit was not stripped: {credit!r}"
+
+
+def test_front_matter_regex_does_not_match_lowercase_wrapped_produced_by():
+    """Regex-level pin: a blanket IGNORECASE here silently deletes real prose.
+
+    This asserts directly against `_FRONT_MATTER`, not just `strip_front_matter`, so a
+    future edit that removes the scoped `(?-i:...)` flag fails here immediately instead of
+    only showing up as missing text somewhere in a 2GB corpus.
+    """
+    assert _FRONT_MATTER.match("produced by charity, or charity by faith") is None

@@ -117,10 +117,24 @@ def strip_gutenberg_boilerplate(text: str) -> BoilerplateResult:
 #:     to the start of the line: the enclosing ``^\s*(?:...)`` wrapper only skips leading
 #:     whitespace before the alternation, and the address sits mid-line after "Price,
 #:     email ", so the alternative needs its own leading ``.*?`` to reach it.
+#:
+#: CRITICAL: ``(?-i:[Pp]roduced\s+by\s+[A-Z])`` turns IGNORECASE back OFF for just this one
+#: alternative. The rest of the pattern is intentionally case-insensitive, but a *blanket*
+#: re.IGNORECASE here made the "[A-Z]" in "produced by [A-Z]" match lowercase letters too —
+#: which meant this alternative, unscoped, matched ordinary word-wrapped prose whenever a
+#: line happened to start with "produced by " followed by any word, e.g. "produced by
+#: charity, or charity by faith, but the inducements to" or "produced by the friction of a
+#: rope round the beams of a door". That is real corpus text, not a credit, and it was
+#: silently deleted from poetry.txt by an earlier version of this pattern. The scope covers
+#: only "[A-Z]"; "[Pp]" stays case-insensitive (via the explicit alternation) so genuine
+#: credits like "Produced by Jeroen Hellingman" still match — an unscoped-literal first
+#: attempt at this fix broke on exactly that case. If this scoped flag is ever "simplified"
+#: away, this exact bug comes back — do not remove it without re-verifying against real
+#: word-wrapped prose, not just the confirmed packaging examples.
 _FRONT_MATTER = re.compile(
     r"^\s*(?:"
     r"(?:this\s+)?e-?(?:book|text)\s+was\s+produced\s+by\b"
-    r"|produced\s+by\s+[A-Z]"
+    r"|(?-i:[Pp]roduced\s+by\s+[A-Z])"
     r"|there\s+are\s+several\s+editions\s+of\s+this\s+ebook\b"
     r"|various\s+characteristics\s+of\s+each\s+ebook\b"
     r"|transcriber'?s?\s+note\b"
