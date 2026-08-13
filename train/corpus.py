@@ -75,7 +75,7 @@ class CorpusSource:
             sel.append(f"{len(self.bookshelves)} bookshelf/-ves")
         selection = ", ".join(sel) if sel else "all rows"
         return (
-            f"{self.name}: slice={self.slice} target={self.target_share:.0%} "
+            f"{self.name}: slice={self.slice} target={format_share(self.target_share)} "
             f"upsample={self.upsample}\n"
             f"  from  : {self.hf_repo}@{self.hf_revision[:12]} ({selection})\n"
             f"  licence: {self.license_id}\n"
@@ -292,6 +292,23 @@ SOURCES: Dict[str, CorpusSource] = {
 }
 
 
+def format_share(share: float) -> str:
+    """Render a share in [0, 1] as a percentage WITHOUT dropping its fraction.
+
+    ``f"{share:.0%}"`` was used in three places (the generated licensing document, the
+    operator gate table, and the blend's shortfall message) and it rounds every fractional
+    share away: ``flavour``'s 0.5% rendered as **0%** — "contributes nothing" — and
+    ``spine``'s 13.5% as 14%, in a document whose banner promises it cannot go stale.
+
+    Fractions are kept only as far as they exist: 0.31 renders "31%", not "31.0%", so
+    whole-number shares stay readable. Three decimal places of a percent is enough for
+    every share this registry can hold and for the arithmetic ceilings derived from them
+    (``flavour``'s ceiling is 0.575%).
+    """
+    text = f"{round(share * 100, 3):.3f}".rstrip("0").rstrip(".")
+    return f"{text}%"
+
+
 def get_source(name: str) -> CorpusSource:
     """Look up a source, raising with the available names rather than a bare miss."""
     try:
@@ -307,4 +324,5 @@ def total_target_share() -> float:
     return sum(s.target_share for s in SOURCES.values())
 
 
-__all__ = ["SLICES", "SOURCES", "CorpusSource", "get_source", "total_target_share"]
+__all__ = ["SLICES", "SOURCES", "CorpusSource", "format_share", "get_source",
+           "total_target_share"]
