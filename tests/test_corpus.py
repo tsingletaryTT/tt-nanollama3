@@ -70,3 +70,25 @@ def test_corpus_module_does_no_io():
     src = inspect.getsource(m)
     for forbidden in ("open(", "requests.", "urllib", "load_dataset", "snapshot_download"):
         assert forbidden not in src, f"train/corpus.py performs I/O: {forbidden}"
+
+
+def test_spine_is_broad_enough_to_avoid_heavy_repetition():
+    """spine had 53 books against a 12% share -- 10x repetition, over the cap of 8.
+
+    Every author here was verified present in the Gutenberg catalogue before being added.
+    The count guards against the slice silently narrowing again.
+    """
+    spine = SOURCES["spine"]
+    assert len(spine.authors) >= 17, (
+        f"spine has only {len(spine.authors)} author selectors; it was broadened to avoid "
+        f"needing 10x upsample"
+    )
+    for required in ("Fabre, Jean-Henri", "Fort, Charles", "Thoreau, Henry David",
+                     "Darwin, Charles", "Jefferies, Richard", "Flammarion, Camille"):
+        assert required in spine.authors, f"spine lost its {required!r} selector"
+
+
+def test_spine_and_folklore_do_not_share_selectors():
+    """Andrew Lang belongs to folklore. Listing him in both would double-count him."""
+    overlap = set(SOURCES["spine"].authors) & set(SOURCES["folklore"].authors)
+    assert not overlap, f"spine and folklore share author selectors: {sorted(overlap)}"

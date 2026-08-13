@@ -137,10 +137,36 @@ SOURCES: Dict[str, CorpusSource] = {
         license_url="https://huggingface.co/datasets/sedthh/gutenberg_english",
         attribution="Project Gutenberg via sedthh/gutenberg_english",
         license_note="MIT covers the aggregation; the underlying pre-1929 texts are public domain.",
-        authors=["Fabre, Jean-Henri", "Maeterlinck, Maurice", "Fort, Charles",
-                 "Hodgson, William Hope", "Browne, Thomas, Sir"],
-        rationale="Observational-mystical. Fabre is field observation that is ALREADY "
-                  "agentic tool-use theatre; Fort is the same method applied to the impossible.",
+        authors=[
+            # Original four: insect field observation and deadpan anomalism.
+            "Fabre, Jean-Henri",              # 10 vols; the spine's spine
+            "Maeterlinck, Maurice",           # mystical about insect collectives
+            "Fort, Charles",                  # anomalies compiled as data
+            "Hodgson, William Hope",          # found-manuscript cosmic dread
+            # Naturalists and field observers (verified counts in the catalogue).
+            "Darwin, Charles",                # 39
+            "Burroughs, John",                # 29
+            "Thoreau, Henry David",           # 21
+            "Seton, Ernest Thompson",         # 19
+            "Jefferies, Richard",             # 18 -- nature writing shading into mysticism
+            "Hudson, W. H.",                  # 18
+            "Wallace, Alfred Russel",         # 17
+            "Muir, John",                     # 12
+            "Gosse, Philip Henry",            # 3
+            "White, Gilbert",                 # 3  -- Natural History of Selborne
+            # Cosmic scale and the possibility of other minds.
+            "Flammarion, Camille",            # 7
+            "Proctor, Richard A.",            # 7
+            "Donnelly, Ignatius",             # 2
+        ],
+        rationale="Observational-mystical: the model's voice. Fabre is field observation that "
+                  "is ALREADY agentic tool-use theatre; Fort applies the same method to things "
+                  "that should not happen. Broadened from 4 authors (53 books, 10x upsample, "
+                  "over cap) to 17 (259 books, ~2x) with catalogue-verified PD naturalists and "
+                  "anomalists in the same register. Andrew Lang is deliberately NOT here -- he "
+                  "is folklore's, and listing him twice would double-count him. Blavatsky and "
+                  "Swedenborg are deliberately excluded: they assert doctrine where this slice "
+                  "documents the inexplicable.",
     ),
     "folklore": CorpusSource(
         name="folklore",
