@@ -103,6 +103,20 @@ def strip_gutenberg_boilerplate(text: str) -> BoilerplateResult:
 #: line that does not match, because a pattern that eats real prose is far worse than one
 #: that leaves a producer credit behind. "reproduced by" and "the printer's trademark" are
 #: real sentences in this corpus and must not match.
+#:
+#: Two alternatives were added after the initial pass, once the raw text showed a credit
+#: format the confirmed examples didn't cover:
+#:   - ``transcribed\s+from\s+the\b`` — "Transcribed from the 1905 Chapman and Hall edition
+#:     by David Price" is genuine PG packaging. Anchored on "the" immediately after
+#:     "transcribed from" so it doesn't depend on "edition by" being two words (one real
+#:     instance in this corpus reads "...editionby David" with the space dropped).
+#:   - the email alternative — that same credit wraps onto a second physical line
+#:     ("Price, email ccx074@pglaf.org"), which is not "produced by ..." or "transcribed
+#:     from ..." on its own. A head-window line carrying an email address is unambiguously
+#:     packaging. Written as ``.*?[\w.+-]+@[\w.-]+\.\w+`` rather than anchoring the address
+#:     to the start of the line: the enclosing ``^\s*(?:...)`` wrapper only skips leading
+#:     whitespace before the alternation, and the address sits mid-line after "Price,
+#:     email ", so the alternative needs its own leading ``.*?`` to reach it.
 _FRONT_MATTER = re.compile(
     r"^\s*(?:"
     r"(?:this\s+)?e-?(?:book|text)\s+was\s+produced\s+by\b"
@@ -112,6 +126,8 @@ _FRONT_MATTER = re.compile(
     r"|transcriber'?s?\s+note\b"
     r"|updated\s+editions\s+will\s+replace\b"
     r"|this\s+file\s+was\s+produced\s+from\b"
+    r"|transcribed\s+from\s+the\b"
+    r"|.*?[\w.+-]+@[\w.-]+\.\w+"
     r")",
     re.IGNORECASE,
 )

@@ -219,3 +219,50 @@ def test_does_not_scan_beyond_the_document_head():
 def test_empty_and_whitespace_documents_do_not_raise():
     assert strip_front_matter("") == ("", 0)
     assert strip_front_matter("   \n\n  ")[1] == 0
+
+
+def test_strips_wrapped_transcription_credit_and_email_continuation():
+    """"Transcribed from the..." wraps onto a second line carrying the transcriber's email.
+
+    Both lines are packaging (a real PG credit format found in this corpus); neither is
+    part of the work, and both must go while the following prose is kept untouched.
+    """
+    doc = ("Transcribed from the 1905 Chapman and Hall edition by David\n"
+           "Price, email ccx074@pglaf.org\n"
+           "\n"
+           "The real story begins here.")
+    out, removed = strip_front_matter(doc)
+    assert "Transcribed from the" not in out
+    assert "ccx074@pglaf.org" not in out
+    assert "The real story begins here." in out
+    assert removed == 2
+
+
+def test_strips_transcription_credit_with_missing_space():
+    """A real variant in this corpus drops the space in "edition by": "editionby".
+
+    Matching on "transcribed from the" alone (rather than requiring "edition by" as two
+    words) means this typo doesn't need its own special case.
+    """
+    doc = "Transcribed from the 1910 Chapman and Hall editionby David\nThe real story begins here."
+    out, removed = strip_front_matter(doc)
+    assert "editionby" not in out
+    assert "The real story begins here." in out
+    assert removed == 1
+
+
+def test_email_after_real_text_has_started_is_not_removed():
+    """The stop-at-first-non-match guarantee must hold even for the email pattern."""
+    doc = ("The real story begins here.\n"
+           "Contact me at someone@example.com for details.\n")
+    out, removed = strip_front_matter(doc)
+    assert "someone@example.com" in out
+    assert removed == 0
+
+
+def test_leaves_midsentence_produced_by_prose_alone():
+    """A real line from this corpus: "produced by" appears mid-sentence, not as a credit."""
+    prose = "The sound was produced by the friction of a rope round the beams of a door."
+    out, removed = strip_front_matter(prose)
+    assert out == prose
+    assert removed == 0
