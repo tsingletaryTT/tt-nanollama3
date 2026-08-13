@@ -46,7 +46,12 @@ def write_documents(rows: Iterable[Dict[str, object]], dest: Path) -> int:
 
 
 def fetch_gutenberg_batch(sources: list[CorpusSource], limit_rows: int = 0) -> Dict[str, int]:
-    """Fetch multiple Gutenberg sources in one streaming pass. Returns {source_name: count}."""
+    """Fetch multiple Gutenberg sources in one streaming pass. Returns {source_name: count}.
+
+    limit_rows caps rows SCANNED (rows with valid metadata and text), shared across all
+    sources in the batch. This bounds network cost predictably regardless of how many
+    sources match each row.
+    """
     from datasets import load_dataset
 
     # Verify all sources are from the same Gutenberg repo at the same revision
@@ -108,7 +113,12 @@ def fetch_gutenberg_batch(sources: list[CorpusSource], limit_rows: int = 0) -> D
 
 
 def iter_source_rows(source: CorpusSource, limit_rows: int = 0) -> Iterator[Dict[str, object]]:
-    """Stream a source's rows, normalised to ``{"text": str}`` and filtered if Gutenberg."""
+    """Stream a source's rows, normalised to ``{"text": str}`` and filtered if Gutenberg.
+
+    limit_rows caps rows SCANNED from the dataset (not documents yielded). For consistent
+    cost prediction across single-source and batch paths, the counter increments before
+    filtering, stopping the stream after limit_rows have been examined.
+    """
     from datasets import load_dataset
 
     column = TEXT_COLUMN.get(source.hf_repo)
@@ -124,6 +134,10 @@ def iter_source_rows(source: CorpusSource, limit_rows: int = 0) -> Iterator[Dict
 
     seen = 0
     for row in ds:
+        seen += 1
+        if limit_rows and seen > limit_rows:
+            return
+
         if source.hf_repo == GUTENBERG_REPO:
             md = row.get("METADATA")
             if isinstance(md, str):
@@ -134,12 +148,9 @@ def iter_source_rows(source: CorpusSource, limit_rows: int = 0) -> Iterator[Dict
             if not isinstance(md, dict) or not matches_source(md, source):
                 continue
         text = row.get(column)
-        if not isinstance(text, str):
+        if not isinstance(text, str) or not text.strip():
             continue
         yield {"text": text}
-        seen += 1
-        if limit_rows and seen >= limit_rows:
-            return
 
 
 def fetch_source(source: CorpusSource, dest: Optional[Path] = None,
@@ -155,7 +166,9 @@ def main() -> int:
     p.add_argument("--source", action="append", default=None,
                    help="Source name (repeatable). Default: all registered sources.")
     p.add_argument("--limit-rows", type=int, default=0,
-                   help="Cap documents per source (0 = all). For smoke tests.")
+                   help="Limit rows scanned from dataset (0 = all). For smoke tests. "
+                        "In batch mode (multiple Gutenberg sources), shared across all sources. "
+                        "In single-source mode, per-source limit.")
     args = p.parse_args()
 
     names = args.source or sorted(SOURCES)
