@@ -1,7 +1,7 @@
 {
   "label": "accuracy",
   "tokens": 40,
-  "model": "episod/tt-nanollama3",
+  "model": "episod/tt-tnt",
   "hf_dir": "/home/ttuser/code/tt-nanollama3/artifacts/hf",
   "median_agreement": 4.0,
   "results": [

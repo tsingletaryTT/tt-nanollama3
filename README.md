@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 <!-- SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC -->
 
-# tt-nanollama3
+# tt-tnt
 
 A small Llama-3-style language model built **Tenstorrent-first** — trained from random
 initialization on Blackhole hardware with `ttml` (tt-train), packaged with
@@ -112,6 +112,34 @@ not accept, and depends on a `TrainingConfig` that never defines the `seq_len` `
 requires. Its data loader also hardcodes `shakespeare.txt`, ignoring any configured path. We
 reuse everything ttml genuinely provides — `TransformerModelFactory`, `create_optimizer`,
 `train()`, `checkpointing` — and replace only what is broken or hardcoded.
+
+## Lineage: from nanollama3 to tt-tnt
+
+This project was originally named **tt-nanollama3**, and this section says plainly what
+changed and what didn't, rather than quietly dropping the earlier name.
+
+**What it started as.** The model began as a hand-rolled nanollama3-like model: a Llama-3
+architecture, trained from random initialization with tt-train's `ttml` trainer, on a single
+downloaded corpus (TinyStories). That is still true today in the parts that matter most for
+correctness — the 384 config vendored at
+[`train/configs/model/nanollama3-384.yaml`](train/configs/model/nanollama3-384.yaml) is a
+verbatim copy of tt-train's own `nanollama3.yaml`, and every checkpoint this project has ever
+produced is trained against that same Llama-3 architecture (RoPE, RMSNorm, SwiGLU, grouped-query
+attention) through `ttml`. Nothing about the rename touched the model's shape or its trainer.
+
+**What earned the new name.** Two things this project now owns that it didn't at the start:
+a **nine-source, licence-audited corpus** blended to a 400M-token budget (see
+[`docs/corpus_blend.md`](docs/corpus_blend.md) and [`docs/corpus_licensing.md`](docs/corpus_licensing.md)),
+in place of a single downloaded TinyStories dump; and a **32,000-token BPE tokenizer trained
+on that blend**, rather than inherited from someone else's vocabulary. Those two changes are
+what stopped "nanollama3-like" from being an accurate description of this project's identity,
+even though the underlying architecture and trainer it sits on did not change.
+
+**Existing artifacts still carry the old name, on purpose.** Checkpoints from before this
+rename are named `nanollama3_step*.pkl` and are left untouched — they are evidence of runs
+made under the old name, and renaming them would misrepresent when they were produced. New
+checkpoints are written as `tt_tnt_step*.pkl`; `train/checkpoint.latest_checkpoint` reads
+both naming schemes so an existing checkpoint directory keeps resolving correctly.
 
 ## Provenance and licensing
 

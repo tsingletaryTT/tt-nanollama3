@@ -1,12 +1,17 @@
-# tt-nanollama3 — project notes for Claude
+# tt-tnt — project notes for Claude
 
 ## What this project is
 
-The reference example of a **Tenstorrent-first model**: NanoLlama3, trained from random
-init on Blackhole with `ttml` (tt-train), packaged as a **tt-kernel v4 bundle**, and served
-through the **Tenstorrent vLLM plugin**. Small model, complete story — the point is to show
-end to end what a model built for TT from line one looks like across train → package →
-publish → serve.
+The reference example of a **Tenstorrent-first model**: tt-tnt (originally built, and
+published, as **tt-nanollama3** — see README.md's "Lineage" section for what changed and
+why), trained from random init on Blackhole with `ttml` (tt-train), packaged as a
+**tt-kernel v4 bundle**, and served through the **Tenstorrent vLLM plugin**. Small model,
+complete story — the point is to show end to end what a model built for TT from line one
+looks like across train → package → publish → serve.
+
+The log below is kept in the order it happened, under the names used at the time — entries
+before the 2026-08-13 rename say "NanoLlama3"/"tt-nanollama3" because that was this project's
+name when they were written, not because they refer to something else.
 
 Design: [`docs/superpowers/specs/2026-08-11-tt-nanollama3-design.md`](docs/superpowers/specs/2026-08-11-tt-nanollama3-design.md)
 

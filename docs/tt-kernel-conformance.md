@@ -128,7 +128,7 @@ front matter after any tt-kernel operation — which is what
 ### 5. Not a tt-kernel defect, but it bit us: the manifest cannot express a runtime patch
 
 Our model needs a tt-metal change to run at all on a harvested Blackhole (see
-[`bundle/tt_nanollama3_adapter.py`](../bundle/tt_nanollama3_adapter.py)). The v4 schema has
+[`bundle/tt_tnt_adapter.py`](../bundle/tt_tnt_adapter.py)). The v4 schema has
 no field for "this model requires a patch", and it does not need one — the adapter folder
 (`runner.bundle_dir`) is the right vehicle, and it worked: the plugin imported our module,
 the patch applied at import time, and the model ran.

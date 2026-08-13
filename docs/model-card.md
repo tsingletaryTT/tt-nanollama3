@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 <!-- SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC -->
 <!--
-  SOURCE OF TRUTH for the Hugging Face model card at episod/tt-nanollama3.
+  SOURCE OF TRUTH for the Hugging Face model card at episod/tt-tnt.
 
   Kept in this repo because tt-kernel's `tag_repo` (hub.py:56-66) replaces the card's
   front matter wholesale with `ModelCardData(tags=...)` on every `tt-kernel push`,
@@ -27,7 +27,7 @@ language:
   - en
 ---
 
-# NanoLlama3 (tt-nanollama3)
+# TT-TNT (tt-tnt)
 
 A ~22M-parameter Llama-3-style language model **trained from random initialization on
 Tenstorrent Blackhole hardware** with `ttml` (tt-train), then converted to Hugging Face
@@ -41,7 +41,7 @@ before using it for anything.
 That a model can be designed, trained, packaged, and served entirely on Tenstorrent tooling —
 TT-native from the first line of code rather than ported afterwards. The full build, including
 every dead end, is documented at
-[tsingletaryTT/tt-nanollama3](https://github.com/tsingletaryTT/tt-nanollama3).
+[tsingletaryTT/tt-tnt](https://github.com/tsingletaryTT/tt-tnt).
 
 ## Model details
 
@@ -61,7 +61,7 @@ Trained on a **single** Blackhole chip. The host is a TT-QuietBox 2 — four Bla
 two dual-chip p300 cards — but training used one of them; the other three were idle.
 
 The architecture is vendored in this project as
-[`train/configs/model/nanollama3-384.yaml`](https://github.com/tsingletaryTT/tt-nanollama3/blob/main/train/configs/model/nanollama3-384.yaml),
+[`train/configs/model/nanollama3-384.yaml`](https://github.com/tsingletaryTT/tt-tnt/blob/main/train/configs/model/nanollama3-384.yaml),
 a verbatim copy of tt-train's own `nanollama3.yaml`.
 
 ## Training
@@ -112,7 +112,7 @@ This mattered: an earlier conversion loaded cleanly, tied its weights correctly,
 next-token entropy, and generated fluent prose — while computing the wrong function, because of
 a RoPE row-layout mismatch worth 1.3 nats. Only numerical comparison caught it. That story, and
 the techniques that catch this class of bug, are written up in
-[`docs/model-development-troubleshooting.md`](https://github.com/tsingletaryTT/tt-nanollama3/blob/main/docs/model-development-troubleshooting.md).
+[`docs/model-development-troubleshooting.md`](https://github.com/tsingletaryTT/tt-tnt/blob/main/docs/model-development-troubleshooting.md).
 
 ## Usage
 
@@ -120,8 +120,8 @@ the techniques that catch this class of bug, are written up in
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 
-tok = AutoTokenizer.from_pretrained("episod/tt-nanollama3")
-model = AutoModelForCausalLM.from_pretrained("episod/tt-nanollama3").eval()
+tok = AutoTokenizer.from_pretrained("episod/tt-tnt")
+model = AutoModelForCausalLM.from_pretrained("episod/tt-tnt").eval()
 
 ids = tok("Once upon a time, there was a little", return_tensors="pt").input_ids
 with torch.no_grad():
@@ -149,7 +149,7 @@ looks like.
 **The training corpus is not.** This checkpoint was trained on TinyStories
 (`roneneldan/TinyStories`), a 512 MB subset. Licence, attribution, and the pinned dataset
 revision are recorded in
-[`docs/corpus_licensing.md`](https://github.com/tsingletaryTT/tt-nanollama3/blob/main/docs/corpus_licensing.md),
+[`docs/corpus_licensing.md`](https://github.com/tsingletaryTT/tt-tnt/blob/main/docs/corpus_licensing.md),
 which is *generated* from this project's source registry (`train/corpus.py`) rather than
 hand-written, specifically so this card cannot drift out of sync with it the way hand-written
 licensing prose has before. That document's "unsettled Data Derivative" language for
@@ -163,6 +163,20 @@ follow [Mini-LLM by Ashx098](https://github.com/Ashx098/Mini-LLM), which the ori
 arc credits. That repository declares no license, so it grants no rights; this is a credit, not
 a license inheritance. The components come from published papers, and this implementation
 derives from tt-train's `nanollama3` config and the `ttml` library, not from Mini-LLM's source.
+
+## Lineage
+
+This model was originally published under the name **tt-nanollama3**, and it is worth being
+plain about what changed. It started as a hand-rolled nanollama3-like model — a Llama-3
+architecture trained from random initialization with tt-train's `ttml` trainer, on TinyStories.
+The architecture and trainer have not changed: the config above is a verbatim copy of
+tt-train's own `nanollama3.yaml`, and every checkpoint (including the one this card describes)
+is trained through `ttml` against it. What changed is the corpus and tokenizer this project
+now owns — a nine-source, licence-audited blend and a BPE tokenizer trained on that blend,
+rather than a single downloaded corpus and an inherited vocabulary — and that is what earned
+the new name, `tt-tnt`. (This specific released checkpoint predates that corpus work and was
+trained only on TinyStories, as the training table above shows; the new corpus applies to
+models trained after this one.)
 
 ## Origin
 

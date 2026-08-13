@@ -6,7 +6,7 @@
 
 # Model development troubleshooting
 
-Field notes from building, training, and converting NanoLlama3 on Tenstorrent hardware. Every
+Field notes from building, training, and converting tt-tnt on Tenstorrent hardware. Every
 entry here is something that actually happened, with the numbers it produced. Nothing is
 hypothetical.
 
@@ -407,7 +407,7 @@ compared-but-teacher-forced, or free-running-but-unvalidated. Never both.
 
 **What it costs.** Serving is free-running by definition. A model can be certified at
 PCC 0.999 and diverge from the reference within three tokens of real generation. Measured
-on tt-nanollama3:
+on tt-tnt:
 
 | Path | Result |
 |---|---|

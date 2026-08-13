@@ -461,7 +461,7 @@ logits = model(tt_x, tt_mask)                                   # trainer.py:102
 ```
 
 with `build_causal_mask` = `np.tril(np.ones((1, 1, T, T), dtype=np.float32))`, **1 = attend**
-(`ttml/ttml/common/utils.py:160-169`). nanollama3's own validation loop does the same
+(`ttml/ttml/common/utils.py:160-169`). tt-tnt's own validation loop does the same
 (`train/run.py:79-87`). Because a mask tensor is present, `scaled_dot_product_attention` sets
 `mask_type = AttentionMaskType::Arbitrary` (`scaled_dot_product_attention.cpp:252-255`), so the
 kernel's `USE_ATTN_MASK` branch runs and its built-in `CAUSAL_MASK` branch does **not**.
