@@ -6,6 +6,10 @@
 Boilerplate stripping is a LICENSING step, not a cosmetic one: Project Gutenberg applies a
 trademark licence to its headers and footers, while the underlying pre-1929 texts are public
 domain. Removing them is what makes "public domain texts" an accurate claim.
+
+NOTE: Pre-1997 SMALL PRINT-era boilerplate is NOT stripped. Its legal block is front matter
+(marking where the book begins), not a footer, so it requires different handling than the
+START/END marker model. No such document has been observed in currently pinned sources.
 """
 from __future__ import annotations
 
@@ -22,6 +26,12 @@ sys.path.insert(0, str(ROOT))
 from train.corpus import SOURCES, get_source  # noqa: E402
 from train.paths import shared_dir  # noqa: E402
 
+# Marker status constants to prevent typos and ensure consistency
+MARKER_BOTH = "both"
+MARKER_START_ONLY = "start-only"
+MARKER_END_ONLY = "end-only"
+MARKER_NONE = "none"
+
 _START_EBOOK = re.compile(r"^\*\*\*\s*START OF TH(?:E|IS) PROJECT GUTENBERG EBOOK.*$",
                           re.IGNORECASE | re.MULTILINE)
 _END_EBOOK = re.compile(r"^\*\*\*\s*END OF TH(?:E|IS) PROJECT GUTENBERG EBOOK.*$",
@@ -30,10 +40,6 @@ _START_ETEXT = re.compile(r"^\*\*\*\s*START OF TH(?:E|IS) PROJECT GUTENBERG ETEX
                           re.IGNORECASE | re.MULTILINE)
 _END_ETEXT = re.compile(r"^\*\*\*\s*END OF TH(?:E|IS) PROJECT GUTENBERG ETEXT.*$",
                         re.IGNORECASE | re.MULTILINE)
-_START_SMALL_PRINT = re.compile(r"^\*+\s*START OF THE SMALL PRINT.*$",
-                                re.IGNORECASE | re.MULTILINE)
-_END_SMALL_PRINT = re.compile(r"^\*+.*END\*.*THE SMALL PRINT.*$",
-                              re.IGNORECASE | re.MULTILINE)
 _BLANKS = re.compile(r"\n{3,}")
 _TRAILING = re.compile(r"[ \t]+$", re.MULTILINE)
 
@@ -41,15 +47,14 @@ _TRAILING = re.compile(r"[ \t]+$", re.MULTILINE)
 class BoilerplateResult(NamedTuple):
     """Result of boilerplate stripping with status information."""
     text: str
-    marker_status: str  # "both", "start-only", "end-only", "none"
+    marker_status: str  # One of MARKER_* constants
 
 
 def strip_gutenberg_boilerplate(text: str) -> BoilerplateResult:
     """Keep only what lies between the PG start and end markers, when present.
 
     Returns a BoilerplateResult with the stripped text and marker status.
-    Marker status is "both", "start-only", "end-only", or "none" to make
-    asymmetric cases visible.
+    Marker status is one of the MARKER_* constants to make asymmetric cases visible.
     """
     found_start = False
     found_end = False
@@ -77,23 +82,17 @@ def strip_gutenberg_boilerplate(text: str) -> BoilerplateResult:
         if end:
             text = text[: end.start()]
             found_end = True
-        else:
-            # Try SMALL PRINT block
-            end = _END_SMALL_PRINT.search(text)
-            if end:
-                text = text[: end.start()]
-                found_end = True
 
     text = text.strip("\n")
 
     if found_start and found_end:
-        status = "both"
+        status = MARKER_BOTH
     elif found_start and not found_end:
-        status = "start-only"
+        status = MARKER_START_ONLY
     elif not found_start and found_end:
-        status = "end-only"
+        status = MARKER_END_ONLY
     else:
-        status = "none"
+        status = MARKER_NONE
 
     return BoilerplateResult(text, status)
 
@@ -143,14 +142,14 @@ def prepare_source(name: str, src: Path, dest: Path) -> dict:
             result = strip_gutenberg_boilerplate(text)
             text = normalise(result.text)
 
-            # Track marker status
-            if result.marker_status == "both":
+            # Track marker status using constants
+            if result.marker_status == MARKER_BOTH:
                 counts["both"] += 1
-            elif result.marker_status == "start_only":
+            elif result.marker_status == MARKER_START_ONLY:
                 counts["start_only"] += 1
-            elif result.marker_status == "end_only":
+            elif result.marker_status == MARKER_END_ONLY:
                 counts["end_only"] += 1
-            else:  # "none"
+            elif result.marker_status == MARKER_NONE:
                 counts["none"] += 1
 
             if not text:

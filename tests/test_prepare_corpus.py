@@ -6,7 +6,14 @@ The Gutenberg boilerplate test matters for licensing, not tidiness: PG applies a
 licence to its headers and footers while the underlying pre-1929 text is public domain.
 Stripping them is what keeps the "public domain texts" claim accurate.
 """
-from scripts.prepare_corpus import normalise, strip_gutenberg_boilerplate
+from scripts.prepare_corpus import (
+    MARKER_BOTH,
+    MARKER_NONE,
+    MARKER_START_ONLY,
+    MARKER_END_ONLY,
+    normalise,
+    strip_gutenberg_boilerplate,
+)
 
 HEADED = """*** START OF THE PROJECT GUTENBERG EBOOK THE LIFE OF THE SPIDER ***
 
@@ -40,7 +47,7 @@ def test_strips_gutenberg_start_and_end_markers():
     assert "The real text begins here." in result.text
     assert "PROJECT GUTENBERG EBOOK" not in result.text
     assert "Produced by Some Volunteer." not in result.text
-    assert result.marker_status == "both"
+    assert result.marker_status == MARKER_BOTH
 
 
 def test_strips_etext_markers():
@@ -48,28 +55,28 @@ def test_strips_etext_markers():
     assert "The real epic text." in result.text
     assert "PROJECT GUTENBERG ETEXT" not in result.text
     assert "Produced by John Volunteer." not in result.text
-    assert result.marker_status == "both"
+    assert result.marker_status == MARKER_BOTH
 
 
 def test_detects_start_only_marker():
     result = strip_gutenberg_boilerplate(START_ONLY)
     assert "Just the beginning." in result.text
     assert "START OF THE PROJECT GUTENBERG EBOOK" not in result.text
-    assert result.marker_status == "start-only"
+    assert result.marker_status == MARKER_START_ONLY
 
 
 def test_detects_end_only_marker():
     result = strip_gutenberg_boilerplate(END_ONLY)
     assert "Some preliminary text." in result.text
     assert "END OF THE PROJECT GUTENBERG EBOOK" not in result.text
-    assert result.marker_status == "end-only"
+    assert result.marker_status == MARKER_END_ONLY
 
 
 def test_leaves_text_without_markers_untouched():
     plain = "No markers here.\nJust prose."
     result = strip_gutenberg_boilerplate(plain)
     assert result.text == plain
-    assert result.marker_status == "none"
+    assert result.marker_status == MARKER_NONE
 
 
 def test_normalise_collapses_carriage_returns():
@@ -125,3 +132,41 @@ def test_prepare_source_handles_non_string_text_field():
         counts = prepare_source("test", src_path, dest_path)
         assert counts["skipped"] == 1
         assert counts["kept"] == 0
+
+
+def test_prepare_source_counts_marker_status_correctly():
+    """Test that marker status counts are correct through the full pipeline.
+
+    This test verifies the critical fix for CRITICAL A: marker statuses are
+    counted correctly when documents flow through prepare_source.
+    """
+    import tempfile
+    from pathlib import Path
+    from scripts.prepare_corpus import prepare_source
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        src_path = Path(tmpdir) / "input.jsonl"
+        dest_path = Path(tmpdir) / "output.txt"
+
+        # Create one document of each marker type
+        lines = [
+            # MARKER_BOTH: has both START and END markers
+            '{"text": "*** START OF THE PROJECT GUTENBERG EBOOK TEST ***\\n\\nReal text.\\n\\n*** END OF THE PROJECT GUTENBERG EBOOK TEST ***"}\n',
+            # MARKER_START_ONLY: has START but no END
+            '{"text": "*** START OF THE PROJECT GUTENBERG EBOOK TEST ***\\n\\nText with no end marker"}\n',
+            # MARKER_END_ONLY: has END but no START
+            '{"text": "Some preamble text\\n\\n*** END OF THE PROJECT GUTENBERG EBOOK TEST ***"}\n',
+            # MARKER_NONE: no markers at all
+            '{"text": "Just plain text with no markers at all"}\n',
+        ]
+        src_path.write_text("".join(lines))
+
+        counts = prepare_source("test", src_path, dest_path)
+
+        # Verify each marker type was counted correctly
+        assert counts["both"] == 1, f"Expected both=1, got {counts['both']}"
+        assert counts["start_only"] == 1, f"Expected start_only=1, got {counts['start_only']}"
+        assert counts["end_only"] == 1, f"Expected end_only=1, got {counts['end_only']}"
+        assert counts["none"] == 1, f"Expected none=1, got {counts['none']}"
+        assert counts["kept"] == 4, f"Expected kept=4, got {counts['kept']}"
+        assert counts["skipped"] == 0, f"Expected skipped=0, got {counts['skipped']}"
