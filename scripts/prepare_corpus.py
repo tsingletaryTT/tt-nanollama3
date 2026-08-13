@@ -119,15 +119,27 @@ def strip_gutenberg_boilerplate(text: str) -> BoilerplateResult:
 #:     email ", so the alternative needs its own leading ``.*?`` to reach it.
 #:
 #:     This alternative is deliberately context-free: it matches an address anywhere in the
-#:     head window without requiring a credit line before it. That is safe *for this
-#:     corpus* by construction, not by luck: every source here is a pre-1929 public-domain
-#:     text, and email addresses did not exist when they were written, so any address
-#:     appearing in a document's first 40 lines can only be modern transcription/production
-#:     packaging (e.g. "...email ccx074@pglaf.org"), never authored content. All matches of
-#:     this alternative across every raw source were checked and are the genuine credit
-#:     continuation line. Do not add scoping here (e.g. requiring a preceding "produced
-#:     by"/"transcribed from" line) — this corpus cannot produce the case that scoping
-#:     would guard against, and the added complexity would be unearned.
+#:     head window without requiring a credit line before it. It is kept that way on
+#:     MEASUREMENT, not on an argument about what the corpus contains. Every match of this
+#:     alternative across every raw source was inspected and every one is the genuine credit
+#:     continuation line (e.g. "...email ccx074@pglaf.org"), and the two modern sources were
+#:     checked exhaustively rather than reasoned about: 2,119,489 tinystories documents and
+#:     241,787 wikipedia_simple documents, zero touched by this alternative.
+#:
+#:     An earlier version of this comment justified it instead by claiming "every source
+#:     here is a pre-1929 public-domain text, and email addresses did not exist when they
+#:     were written". That is false, and it is the kind of false that invites someone to
+#:     extend the rule: `tinystories` is 2023 GPT-generated text and `wikipedia_simple` is a
+#:     live modern encyclopedia (which certainly does contain email addresses in article
+#:     bodies), and both pass through `strip_front_matter`. The rule survives because it
+#:     only ever runs over a document's first 40 lines, stops at the first non-matching
+#:     line, and no document in these sources opens with an address — not because addresses
+#:     could not appear.
+#:
+#:     Do not add scoping here (e.g. requiring a preceding "produced by"/"transcribed from"
+#:     line) on the strength of the pre-1929 argument, which does not hold. Do re-run the
+#:     count above if a new source is added: the empirical claim is what this rests on, and
+#:     a source whose documents can open with an email address would break it.
 #:
 #: CRITICAL: ``(?-i:Produced\s+by\s+[A-Z])`` turns IGNORECASE OFF for this entire
 #: alternative — not just for the ``[A-Z]`` character class. ``(?-i:...)`` is a scoped-flag
