@@ -29,6 +29,15 @@ def test_every_source_has_a_resolvable_fetch_spec(name):
     src = SOURCES[name]
     assert src.hf_repo, f"{name}: no hf_repo"
     assert src.hf_revision, f"{name}: no pinned revision — fetches must be reproducible"
+    # Reject branch refs like "main", "master", "HEAD" — must be a pinned commit sha
+    branch_like = {"main", "master", "head", "develop", "development"}
+    assert src.hf_revision.lower() not in branch_like, (
+        f"{name}: hf_revision '{src.hf_revision}' is a branch ref, not a pinned commit"
+    )
+    # Assert it looks like a 40-character hex sha
+    assert len(src.hf_revision) == 40 and all(
+        c in "0123456789abcdef" for c in src.hf_revision.lower()
+    ), f"{name}: hf_revision '{src.hf_revision}' is not a 40-char commit sha"
 
 
 @pytest.mark.parametrize("name", ALL)
