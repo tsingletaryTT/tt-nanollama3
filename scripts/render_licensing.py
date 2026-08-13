@@ -14,7 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from train.corpus import SOURCES  # noqa: E402
+from train.corpus import SOURCES, format_share  # noqa: E402
 
 OUT = ROOT / "docs" / "corpus_licensing.md"
 
@@ -34,8 +34,11 @@ def render_licensing() -> str:
     ]
     for name in sorted(SOURCES):
         s = SOURCES[name]
+        # format_share, not ":.0%": that rounded flavour's 0.5% to **0%** -- "contributes
+        # nothing" -- and spine's 13.5% to 14%, in the one document whose banner promises
+        # it cannot go stale.
         lines.append(
-            f"| `{name}` | {s.slice} | {s.target_share:.0%} | {s.license_id} | "
+            f"| `{name}` | {s.slice} | {format_share(s.target_share)} | {s.license_id} | "
             f"`{s.hf_revision[:12]}` |"
         )
 

@@ -7,12 +7,12 @@
 
 | Source | Slice | Share | Licence | Pinned revision |
 |---|---|---|---|---|
-| `flavour` | flavour | 0% | MIT (packaging); public domain (texts) | `28973b04f28f` |
+| `flavour` | flavour | 0.5% | MIT (packaging); public domain (texts) | `28973b04f28f` |
 | `folklore` | folklore | 8% | MIT (packaging); public domain (texts) | `28973b04f28f` |
 | `gutenberg_children` | backbone | 15% | MIT (packaging); public domain (texts) | `28973b04f28f` |
 | `poetry` | weird | 1% | CC0-1.0 | `fcd42e249fed` |
 | `procedural` | agentic | 12% | MIT (packaging); public domain (texts) | `28973b04f28f` |
-| `spine` | spine | 14% | MIT (packaging); public domain (texts) | `28973b04f28f` |
+| `spine` | spine | 13.5% | MIT (packaging); public domain (texts) | `28973b04f28f` |
 | `tinystories` | backbone | 31% | CDLA-Sharing-1.0 | `f54c09fd2331` |
 | `weird` | weird | 4% | MIT (packaging); public domain (texts) | `28973b04f28f` |
 | `wikipedia_simple` | grounding | 15% | CC-BY-SA-3.0 | `b04c8d1ceb2f` |

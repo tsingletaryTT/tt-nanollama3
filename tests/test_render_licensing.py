@@ -37,3 +37,18 @@ def test_no_source_is_silently_omitted():
     """A source added to the registry without a licence must break this, not slip through."""
     out = render_licensing()
     assert out.count("| ") >= len(SOURCES)
+
+
+def test_a_fractional_share_renders_with_its_fraction_intact():
+    """``:.0%`` rendered flavour's 0.5% as **0%** and spine's 13.5% as 14%. "0%" reads as
+    "contributes nothing", in the one document whose banner promises it cannot go stale."""
+    out = render_licensing()
+    assert "| 0.5% |" in out, "flavour's 0.5% share must not round to 0%"
+    assert "| 13.5% |" in out, "spine's 13.5% share must not round to 14%"
+    assert "| 0% |" not in out, "no source contributes nothing"
+
+
+def test_whole_percentages_are_not_padded_with_a_pointless_decimal():
+    """Keeping fractions must not make the common case noisier."""
+    out = render_licensing()
+    assert "| 31% |" in out and "| 31.0% |" not in out

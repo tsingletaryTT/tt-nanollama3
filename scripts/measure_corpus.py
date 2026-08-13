@@ -27,7 +27,7 @@ from typing import Dict, List
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from train.corpus import SOURCES, CorpusSource  # noqa: E402
+from train.corpus import SOURCES, CorpusSource, format_share  # noqa: E402
 from train.paths import shared_dir  # noqa: E402
 
 #: Tokens per whitespace-delimited word, used when no tokenizer is available.
@@ -96,6 +96,24 @@ def _json_safe_shortfall(s: Shortfall) -> dict:
     return d
 
 
+#: Column headings for the operator's gate table, kept next to the row renderer so the
+#: two cannot drift apart.
+GATE_HEADER = (f"{'source':22} {'share':>7} {'required':>13} {'available':>13} "
+               f"{'x':>4}  method")
+
+
+def gate_row(source: CorpusSource, required: int, available: int, method: str) -> str:
+    """One line of the gate table an operator reads before settling the shares.
+
+    Shares go through ``format_share`` rather than ``:.0%``. That format rounded
+    ``flavour``'s 0.5% share to **0%** in this table -- "this slice contributes nothing" --
+    and ``spine``'s 13.5% to 14%, in the output whose entire job is to be the evidence the
+    shares are settled against.
+    """
+    return (f"{source.name:22} {format_share(source.target_share):>7} {required:>13,} "
+            f"{available:>13,} {source.upsample:>4} {method}")
+
+
 def count_tokens(path: Path, tokenizer_dir: Path) -> tuple:
     """(tokens, method) for one prepared source file."""
     text = path.read_text(encoding="utf-8", errors="replace")
@@ -138,13 +156,11 @@ def main() -> int:
 
     print(f"budget {args.budget:,} tokens, upsample cap {args.upsample_cap}")
     print()
-    print(f"{'source':22} {'share':>6} {'required':>13} {'available':>13} {'x':>4}  method")
-    print("-" * 74)
+    print(GATE_HEADER)
+    print("-" * 75)
     for name in sorted(SOURCES):
-        src = SOURCES[name]
-        need = required_tokens(src, args.budget)
-        print(f"{name:22} {src.target_share:>5.0%} {need:>13,} {available[name]:>13,} "
-              f"{src.upsample:>4} {methods[name]}")
+        print(gate_row(SOURCES[name], required_tokens(SOURCES[name], args.budget),
+                       available[name], methods[name]))
 
     short = shortfall_report(available, args.budget, args.upsample_cap)
     args.report.parent.mkdir(parents=True, exist_ok=True)

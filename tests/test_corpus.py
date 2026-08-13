@@ -107,3 +107,32 @@ def test_spine_and_weird_do_not_share_selectors():
     """
     overlap = set(SOURCES["spine"].authors) & set(SOURCES["weird"].authors)
     assert not overlap, f"spine and weird share author selectors: {sorted(overlap)}"
+
+
+# --- share formatting: ":.0%" rendered the smallest slice as "0%".
+
+
+def test_format_share_keeps_a_fraction_of_a_percent():
+    from train.corpus import format_share
+    assert format_share(0.005) == "0.5%"
+    assert format_share(0.135) == "13.5%"
+    assert format_share(0.00575) == "0.575%"   # flavour's arithmetic ceiling at 4x
+
+
+def test_format_share_leaves_whole_percentages_whole():
+    from train.corpus import format_share
+    assert format_share(0.31) == "31%"
+    assert format_share(0.04) == "4%"
+    assert format_share(1.0) == "100%"
+
+
+def test_no_registered_share_renders_as_zero():
+    """A slice that reads as 0% reads as "contributes nothing"."""
+    from train.corpus import SOURCES, format_share
+    for name, src in SOURCES.items():
+        assert format_share(src.target_share) != "0%", name
+
+
+def test_describe_shows_a_fractional_share():
+    from train.corpus import SOURCES
+    assert "0.5%" in SOURCES["flavour"].describe()
