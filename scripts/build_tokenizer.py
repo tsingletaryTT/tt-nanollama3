@@ -3,18 +3,27 @@
 # SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
 """Build the corpus and tokenizer artifacts NanoLlama3 trains against.
 
-    python scripts/build_tokenizer.py
-    python scripts/build_tokenizer.py --corpus artifacts/corpus/blend.txt
+    python scripts/build_tokenizer.py                                  # the nine-source blend
+    python scripts/build_tokenizer.py --corpus artifacts/corpus/corpus.txt  # TinyStories only
 
-By default this trains directly on the pre-built, licence-audited corpus blend at
-``artifacts/corpus/blend.txt`` (Task 3/4). When ``--corpus`` points at a file that
-already exists, the legacy TinyStories-only fetch/prepare pipeline is skipped entirely
-and the tokenizer is trained on that file as-is -- no download, no rewrite of
-``artifacts/corpus/corpus.txt``, and no truncation via ``--corpus-mb`` (a head-truncating
-byte cap would amputate the blend, since it is written one source at a time in sorted
-order -- see Task 5 notes). ``--corpus-mb`` only still applies to the legacy path, taken
-when the given ``--corpus`` file does not exist: TinyStories is fetched and prepared
-into that path, capped as before.
+Two paths, and this script will not silently swap one for the other.
+
+**The blend** (default). ``artifacts/corpus/blend.txt`` is the licence-audited nine-source
+blend built by ``scripts/blend_corpus.py``. When ``--corpus`` names a file that already
+exists, it is trained on as-is: no download, no rewrite, and no truncation via
+``--corpus-mb`` (a head-truncating byte cap would amputate a blend written one source at a
+time in sorted order, not sample it).
+
+**The legacy TinyStories-only path**, taken when ``--corpus`` names a file that does NOT
+exist: TinyStories is fetched and prepared into that path, capped by ``--corpus-mb``.
+
+It refuses to take the legacy path when the target is named ``blend.txt``. That
+combination -- default ``--corpus``, no blend built yet -- used to fetch TinyStories and
+write it INTO ``artifacts/corpus/blend.txt``. Every later run then found the file, printed
+"Using existing corpus ... skipping fetch/prepare", and trained on TinyStories forever
+while the operator believed it was training on the nine-source blend. Nothing downstream
+could tell the difference: a corpus is just a text file, and the name was the only claim
+being made about its contents. So the name is now defended.
 """
 
 from __future__ import annotations
@@ -31,15 +40,27 @@ from train.data import fetch_corpus, prepare_corpus  # noqa: E402
 ROOT = Path(__file__).resolve().parent.parent
 ARTIFACTS = ROOT / "artifacts"
 
+#: The blend's filename, reserved for output of ``scripts/blend_corpus.py``. Compared by
+#: name rather than by full path so that a copy of the pipeline pointed at another
+#: directory keeps the same guarantee.
+BLEND_NAME = "blend.txt"
+
+#: Where the legacy TinyStories-only path is meant to write. Named here so the error
+#: message can offer it rather than leaving the operator to guess.
+LEGACY_CORPUS = ARTIFACTS / "corpus" / "corpus.txt"
+
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--corpus", type=Path, default=ARTIFACTS / "corpus" / "blend.txt",
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--corpus", type=Path,
+                        default=ARTIFACTS / "corpus" / BLEND_NAME,
                         help="Corpus file to train on (default: %(default)s). If this "
                              "file already exists it is used as-is -- no fetch, no "
                              "prepare, no --corpus-mb cap. If it does not exist, the "
-                             "legacy path fetches TinyStories and prepares it into this "
-                             "path, capped by --corpus-mb.")
+                             "legacy TinyStories-only path fetches and prepares into this "
+                             f"path, capped by --corpus-mb -- unless it is named "
+                             f"{BLEND_NAME}, which only scripts/blend_corpus.py may write.")
     parser.add_argument("--corpus-mb", type=int, default=512,
                         help="Megabytes of corpus to keep when the legacy fetch-and-"
                              "prepare path runs, i.e. only when --corpus does not "
@@ -60,6 +81,26 @@ def main() -> int:
         # amputate a sorted, per-source-concatenated blend rather than sample it.
         print(f">> Using existing corpus at {corpus_out} ({corpus_out.stat().st_size:,} "
               f"bytes) -- skipping fetch/prepare and ignoring --corpus-mb")
+    elif corpus_out.name == BLEND_NAME:
+        # The legacy path may never write this name. See the module docstring: a
+        # TinyStories-only file called blend.txt is indistinguishable from the real blend
+        # to every later run, including this script's own "already exists" branch.
+        print(
+            f"\nERROR: {corpus_out} does not exist, and the legacy TinyStories-only path "
+            f"is not allowed to create a file named {BLEND_NAME} -- it would be a "
+            f"TinyStories corpus wearing the blend's name, and every later run would "
+            f"train on it believing it was the nine-source blend.\n\n"
+            f"Build the blend first:\n"
+            f"    python scripts/fetch_corpus.py\n"
+            f"    python scripts/prepare_corpus.py\n"
+            f"    python scripts/measure_corpus.py\n"
+            f"    python scripts/blend_corpus.py\n\n"
+            f"Or train on TinyStories alone, named honestly:\n"
+            f"    python scripts/build_tokenizer.py --corpus {LEGACY_CORPUS} "
+            f"--corpus-mb {args.corpus_mb}\n",
+            file=sys.stderr,
+        )
+        return 1
     else:
         print(f">> Fetching TinyStories into {raw_dir}")
         raw = fetch_corpus(raw_dir, split="train")
