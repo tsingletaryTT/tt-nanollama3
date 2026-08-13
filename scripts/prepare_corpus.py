@@ -97,6 +97,56 @@ def strip_gutenberg_boilerplate(text: str) -> BoilerplateResult:
     return BoilerplateResult(text, status)
 
 
+#: Lines that are unambiguously Project Gutenberg packaging rather than the work itself.
+#:
+#: Deliberately narrow. These run only over the head of a document and stop at the first
+#: line that does not match, because a pattern that eats real prose is far worse than one
+#: that leaves a producer credit behind. "reproduced by" and "the printer's trademark" are
+#: real sentences in this corpus and must not match.
+_FRONT_MATTER = re.compile(
+    r"^\s*(?:"
+    r"(?:this\s+)?e-?(?:book|text)\s+was\s+produced\s+by\b"
+    r"|produced\s+by\s+[A-Z]"
+    r"|there\s+are\s+several\s+editions\s+of\s+this\s+ebook\b"
+    r"|various\s+characteristics\s+of\s+each\s+ebook\b"
+    r"|transcriber'?s?\s+note\b"
+    r"|updated\s+editions\s+will\s+replace\b"
+    r"|this\s+file\s+was\s+produced\s+from\b"
+    r")",
+    re.IGNORECASE,
+)
+
+#: How far into a document front matter may appear. Beyond this it is the work, not packaging.
+_FRONT_MATTER_WINDOW = 40
+
+
+def strip_front_matter(text: str) -> tuple:
+    """Remove Project Gutenberg packaging lines from a document's head.
+
+    Returns ``(cleaned_text, lines_removed)``. Scans at most the first
+    ``_FRONT_MATTER_WINDOW`` lines and stops permanently at the first line that is neither
+    blank nor packaging — once the work has started, nothing later is removed even if it
+    resembles a credit.
+    """
+    if not text.strip():
+        return text, 0
+    lines = text.split("\n")
+    keep_from = 0
+    removed = 0
+    for i, line in enumerate(lines[:_FRONT_MATTER_WINDOW]):
+        if not line.strip():
+            keep_from = i + 1
+            continue
+        if _FRONT_MATTER.match(line):
+            keep_from = i + 1
+            removed += 1
+            continue
+        break
+    if removed == 0:
+        return text, 0
+    return "\n".join(lines[keep_from:]).lstrip("\n"), removed
+
+
 def normalise(text: str) -> str:
     """CRLF -> LF, strip trailing whitespace, collapse blank-line runs to one."""
     text = text.replace("\r\n", "\n").replace("\r", "\n")
@@ -115,6 +165,7 @@ def prepare_source(name: str, src: Path, dest: Path) -> dict:
     - end_only: documents with END marker but no START
     - none: documents with no markers
     - skipped: malformed JSON or missing text field
+    - front_matter_lines: total lines of residual PG front matter stripped across all docs
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
     counts = {
@@ -124,6 +175,7 @@ def prepare_source(name: str, src: Path, dest: Path) -> dict:
         "end_only": 0,
         "none": 0,
         "skipped": 0,
+        "front_matter_lines": 0,
     }
 
     with src.open("r", encoding="utf-8") as fin, dest.open("w", encoding="utf-8") as fout:
@@ -140,7 +192,9 @@ def prepare_source(name: str, src: Path, dest: Path) -> dict:
                 continue
 
             result = strip_gutenberg_boilerplate(text)
-            text = normalise(result.text)
+            stripped_text, front_matter_removed = strip_front_matter(result.text)
+            counts["front_matter_lines"] += front_matter_removed
+            text = normalise(stripped_text)
 
             # Track marker status using constants
             if result.marker_status == MARKER_BOTH:
@@ -186,6 +240,8 @@ def main() -> int:
                        f"end-only: {counts['end_only']}, none: {counts['none']}")
         if counts['skipped'] > 0:
             marker_info += f", skipped: {counts['skipped']}"
+        if counts['front_matter_lines'] > 0:
+            marker_info += f", front-matter-lines: {counts['front_matter_lines']}"
         print(f"{name:22} {counts['kept']:>7,} docs -> {dest.name} ({size_mb:,.1f} MB) "
               f"({marker_info})")
     return 0

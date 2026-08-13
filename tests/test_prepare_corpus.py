@@ -12,6 +12,7 @@ from scripts.prepare_corpus import (
     MARKER_START_ONLY,
     MARKER_END_ONLY,
     normalise,
+    strip_front_matter,
     strip_gutenberg_boilerplate,
 )
 
@@ -170,3 +171,51 @@ def test_prepare_source_counts_marker_status_correctly():
         assert counts["none"] == 1, f"Expected none=1, got {counts['none']}"
         assert counts["kept"] == 4, f"Expected kept=4, got {counts['kept']}"
         assert counts["skipped"] == 0, f"Expected skipped=0, got {counts['skipped']}"
+
+
+REAL_RESIDUE = """This eBook was produced by Les Bowler.
+
+There are several editions of this ebook in the Project Gutenberg collection.
+Various characteristics of each ebook are listed to aid in selection.
+
+Even the sandy kitten was neglected, and the story truly begins here."""
+
+
+def test_strips_producer_credit_and_edition_note():
+    out, removed = strip_front_matter(REAL_RESIDUE)
+    assert "Les Bowler" not in out
+    assert "Project Gutenberg collection" not in out
+    assert "Even the sandy kitten was neglected" in out
+    assert removed >= 2
+
+
+def test_leaves_ordinary_prose_completely_alone():
+    prose = ("The printer's trademark appeared on the flyleaf.\n"
+             "These drawings would have been reproduced by modern processes.\n"
+             "The story begins.")
+    out, removed = strip_front_matter(prose)
+    assert out == prose
+    assert removed == 0
+
+
+def test_stops_at_the_first_non_matching_line():
+    """Once real text starts, nothing after it is ever removed."""
+    doc = ("Produced by A. Volunteer\n"
+           "The real story begins here.\n"
+           "This eBook was produced by someone else.\n")
+    out, _ = strip_front_matter(doc)
+    assert "The real story begins here." in out
+    assert "someone else" in out, "stripping must not resume after real text starts"
+
+
+def test_does_not_scan_beyond_the_document_head():
+    body = "\n".join(f"line {i}" for i in range(60))
+    doc = body + "\nThis eBook was produced by Someone.\n"
+    out, removed = strip_front_matter(doc)
+    assert "This eBook was produced by Someone." in out
+    assert removed == 0
+
+
+def test_empty_and_whitespace_documents_do_not_raise():
+    assert strip_front_matter("") == ("", 0)
+    assert strip_front_matter("   \n\n  ")[1] == 0
