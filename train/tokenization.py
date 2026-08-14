@@ -16,6 +16,7 @@ No ttnn/ttml imports: this runs on any machine.
 from __future__ import annotations
 
 import argparse
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
@@ -24,6 +25,22 @@ import numpy as np
 
 #: What ``ttml.common.trainer.get_batch_ttml`` expects to receive.
 TOKEN_DTYPE = np.uint32
+
+
+class TokenArtifactExistsError(FileExistsError):
+    """Raised when ``tokenize_corpus`` would silently overwrite existing token arrays.
+
+    ``train_ids.npy``/``val_ids.npy`` are not disposable intermediates: a parity gate that
+    trusts them (``tests/test_hf_parity.py``, ``tests/test_ttml_forward.py``) only means
+    anything if the tokens it scores against are the exact ones a model was trained and
+    held out on. A different corpus or a retrained tokenizer produces numerically different
+    ids from the same filenames, with nothing on disk to tell the two apart -- that silent
+    swap is exactly what invalidated the v2 model's parity gate (see CLAUDE.md's
+    ``parity-gate-restore`` entry). Refusing by default forces whoever is about to
+    regenerate these files to notice that something depends on the current ones and make
+    an explicit choice: copy them aside first, write to a different ``--out``, or pass
+    ``--force``/``overwrite=True`` because they've confirmed nothing does.
+    """
 
 
 @dataclass
@@ -42,12 +59,18 @@ def tokenize_corpus(
     out_dir: Path,
     val_fraction: float = 0.1,
     chunk_lines: int = 50_000,
+    overwrite: bool = False,
 ) -> TokenStats:
     """Encode ``corpus`` with the tokenizer in ``tokenizer_dir``; write train/val ``.npy``.
 
     The split is taken at the end of the token stream (the last ``val_fraction`` of tokens
     become validation), matching tt-train's 90/10 tail split so our numbers stay comparable
     to its runs.
+
+    Refuses to overwrite an existing ``train_ids.npy``/``val_ids.npy`` in ``out_dir`` unless
+    ``overwrite=True`` (CLI: ``--force``) -- see :class:`TokenArtifactExistsError`. This is
+    checked before any tokenization work happens, so a run that will be refused fails fast
+    rather than after minutes of encoding a 500MB+ corpus.
     """
     from transformers import AutoTokenizer
 
@@ -59,6 +82,21 @@ def tokenize_corpus(
     corpus, tokenizer_dir, out_dir = Path(corpus), Path(tokenizer_dir), Path(out_dir)
     if not corpus.is_file():
         raise FileNotFoundError(f"corpus not found: {corpus}")
+
+    train_path, val_path = out_dir / "train_ids.npy", out_dir / "val_ids.npy"
+    if not overwrite:
+        existing = [p for p in (train_path, val_path) if p.exists()]
+        if existing:
+            named = ", ".join(str(p) for p in existing)
+            raise TokenArtifactExistsError(
+                f"refusing to overwrite existing token artifact(s): {named}. These may be "
+                f"the only tokens a trained model's parity gate was ever validated "
+                f"against, and a different corpus or tokenizer produces different ids "
+                f"under the same filenames with no way to tell after the fact. Pass "
+                f"overwrite=True (CLI: --force) if you have confirmed nothing depends on "
+                f"the current contents, or write to a different --out directory instead."
+            )
+
     out_dir.mkdir(parents=True, exist_ok=True)
 
     tok = AutoTokenizer.from_pretrained(str(tokenizer_dir), local_files_only=True)
@@ -89,8 +127,8 @@ def tokenize_corpus(
     split = len(ids) - n_val
     train_ids, val_ids = ids[:split], ids[split:]
 
-    np.save(out_dir / "train_ids.npy", train_ids)
-    np.save(out_dir / "val_ids.npy", val_ids)
+    np.save(train_path, train_ids)
+    np.save(val_path, val_ids)
 
     return TokenStats(
         total_tokens=int(len(ids)),
@@ -117,18 +155,28 @@ def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
                     help="Fraction of the token stream (tail) held out for validation.")
     p.add_argument("--chunk-lines", type=int, default=50_000,
                     help="Corpus lines encoded per tokenizer call (a memory knob only).")
+    p.add_argument("--force", "--overwrite", dest="force", action="store_true",
+                    help="Overwrite an existing train_ids.npy/val_ids.npy in --out. Without "
+                         "this flag, tokenize_corpus refuses to run if either file already "
+                         "exists, since a model's parity gate may still be validated "
+                         "against the current contents (see TokenArtifactExistsError).")
     return p.parse_args(argv)
 
 
 def main() -> int:
     args = _parse_args()
-    stats = tokenize_corpus(
-        Path(args.corpus),
-        Path(args.tokenizer),
-        Path(args.out),
-        val_fraction=args.val_fraction,
-        chunk_lines=args.chunk_lines,
-    )
+    try:
+        stats = tokenize_corpus(
+            Path(args.corpus),
+            Path(args.tokenizer),
+            Path(args.out),
+            val_fraction=args.val_fraction,
+            chunk_lines=args.chunk_lines,
+            overwrite=args.force,
+        )
+    except TokenArtifactExistsError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
     print(stats)
     return 0
 

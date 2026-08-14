@@ -32,9 +32,45 @@ regenerated without retraining.
 SHARED VS PER-SIZE
 ------------------
 Not everything is per-size. The tokenizer, the tokenised corpus, and the raw download are
-**shared**: every size in this repo uses the same 32,000-token vocabulary, which is much of
-the reason they live in one repository at all. Only trained outputs — checkpoints and the
-converted HF directory — are per-size.
+**shared**: every size in this repo trains against whatever the current 32,000-token
+vocabulary is, which is much of the reason they live in one repository at all. Only trained
+outputs — checkpoints and the converted HF directory — are per-size.
+
+**"Shared" is not the same claim as "disposable."** ``tokenizer`` and ``tokens`` being
+:data:`SHARED_KINDS` means every *size* reads the one current copy — it does not mean that
+copy is safe to regenerate on top of itself. A model's numerics-correctness gates
+(``tests/test_hf_parity.py``, ``tests/test_ttml_forward.py``) only mean anything scored
+against the exact tokens that model was trained and held out on; retraining the tokenizer
+or re-tokenizing a different corpus produces numerically different ids under the same
+filenames, with nothing on disk to tell the two generations apart. That happened once for
+real: the tokenizer was retrained on a new corpus blend and ``artifacts/tokens``
+re-tokenized with it while ``artifacts/hf``/``artifacts/checkpoints`` still held an older
+model, and the gates silently scored the old model against the new tokens (see CLAUDE.md's
+``parity-gate-restore`` entry).
+
+Two things guard against a repeat, deliberately not a third:
+
+1. :func:`train.tokenization.tokenize_corpus` refuses to overwrite an existing
+   ``train_ids.npy``/``val_ids.npy`` unless told ``overwrite=True`` (CLI ``--force``),
+   forcing whoever is about to regenerate them to notice something may depend on the
+   current contents.
+2. A model's own tests pin the exact (model, tokenizer, tokens) triple they were validated
+   against as explicit paths, rather than reading whatever currently sits in the shared
+   ``artifacts/tokenizer``/``artifacts/tokens`` directories — see ``tests/test_hf_parity.py``
+   and ``tests/test_ttml_forward.py``.
+
+What this module deliberately does *not* do is add a size-shaped registry for tokenizer/
+corpus *generations* the way :data:`PER_SIZE_KINDS` does for trained outputs — there is no
+enumerable, ahead-of-time set of "corpus generations" the way there is a registry of model
+sizes, so a parallel per-generation directory scheme would be speculative structure for a
+problem the two guards above already close. The existing convention of copying a generation
+aside by hand before regenerating (``artifacts/tokenizer-tinystories-v2``,
+``artifacts/tokens-tinystories-v2``, alongside ``artifacts/hf-v2-scratch`` and
+``artifacts/checkpoints-v2`` for the same reason) remains how a generation worth keeping is
+preserved. ``tokenizer`` and ``tokens`` also do not join :data:`PROTECTED_RELATIVE`: unlike
+``checkpoints``/``hf``, which can never be regenerated at all, retraining the tokenizer for
+a new corpus is normal, intended operation — the fix is making that action deliberate and
+loud, not making the target unreachable.
 """
 
 from __future__ import annotations

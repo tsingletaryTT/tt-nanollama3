@@ -8,7 +8,13 @@ import numpy as np
 import pytest
 
 from convert.tokenizer import train_bpe
-from train.tokenization import TOKEN_DTYPE, TokenStats, tokenize_corpus
+from train.tokenization import (
+    TOKEN_DTYPE,
+    TokenArtifactExistsError,
+    TokenStats,
+    _parse_args,
+    tokenize_corpus,
+)
 
 
 @pytest.fixture(scope="module")
@@ -97,3 +103,66 @@ def test_rejects_val_fraction_above_one(tiny_corpus, tiny_tokenizer, tmp_path):
 def test_rejects_non_positive_chunk_lines(tiny_corpus, tiny_tokenizer, tmp_path):
     with pytest.raises(ValueError, match="chunk_lines"):
         tokenize_corpus(tiny_corpus, tiny_tokenizer, tmp_path / "tokens", chunk_lines=0)
+
+
+# ---------------------------------------------------------------------------
+# Regression coverage for the overwrite guard: a model's parity gate is only meaningful
+# against the exact tokens it was trained and validated on, so silently regenerating
+# train_ids.npy/val_ids.npy in place (e.g. from a retrained tokenizer or a different
+# corpus) must never happen without the caller explicitly saying so. This is exactly the
+# bug that broke tests/test_hf_parity.py and tests/test_ttml_forward.py: the tokenizer was
+# retrained and artifacts/tokens re-tokenized with it, silently invalidating the v2 model's
+# parity gate. See CLAUDE.md's "parity-gate-restore" entry.
+# ---------------------------------------------------------------------------
+
+
+def test_refuses_to_overwrite_existing_train_and_val_ids(tiny_corpus, tiny_tokenizer, tmp_path):
+    out = tmp_path / "tokens"
+    tokenize_corpus(tiny_corpus, tiny_tokenizer, out)
+    train_before = np.load(out / "train_ids.npy").copy()
+    val_before = np.load(out / "val_ids.npy").copy()
+
+    with pytest.raises(TokenArtifactExistsError, match="train_ids.npy") as excinfo:
+        tokenize_corpus(tiny_corpus, tiny_tokenizer, out)
+    # Both existing artifacts are named, not just the first one found.
+    assert "val_ids.npy" in str(excinfo.value)
+
+    # The refused call must not have touched what was already there.
+    assert np.array_equal(train_before, np.load(out / "train_ids.npy"))
+    assert np.array_equal(val_before, np.load(out / "val_ids.npy"))
+
+
+def test_refuses_to_overwrite_when_only_one_file_exists(tiny_corpus, tiny_tokenizer, tmp_path):
+    """Partial state (e.g. an interrupted prior run) is refused too, not just a full pair."""
+    out = tmp_path / "tokens"
+    out.mkdir()
+    sentinel = np.zeros(3, dtype=TOKEN_DTYPE)
+    np.save(out / "val_ids.npy", sentinel)
+
+    with pytest.raises(TokenArtifactExistsError, match="val_ids.npy"):
+        tokenize_corpus(tiny_corpus, tiny_tokenizer, out)
+    assert np.array_equal(sentinel, np.load(out / "val_ids.npy"))
+
+
+def test_overwrite_true_permits_regeneration(tiny_corpus, tiny_tokenizer, tmp_path):
+    out = tmp_path / "tokens"
+    tokenize_corpus(tiny_corpus, tiny_tokenizer, out)
+    # overwrite=True is an explicit, informed choice — it must succeed and produce a normal
+    # TokenStats, not merely swallow the guard.
+    stats = tokenize_corpus(tiny_corpus, tiny_tokenizer, out, overwrite=True)
+    assert isinstance(stats, TokenStats)
+    assert (out / "train_ids.npy").is_file()
+    assert (out / "val_ids.npy").is_file()
+
+
+def test_cli_force_flag_defaults_to_false():
+    assert _parse_args([]).force is False
+
+
+def test_cli_force_flag_can_be_set():
+    assert _parse_args(["--force"]).force is True
+
+
+def test_cli_overwrite_alias_sets_the_same_flag():
+    """--overwrite is documented as an alias for --force; it must map to the same dest."""
+    assert _parse_args(["--overwrite"]).force is True
