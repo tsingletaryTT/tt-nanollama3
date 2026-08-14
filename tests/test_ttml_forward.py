@@ -14,10 +14,12 @@ cited to ttml's C++ source -- never to our own converter.
 
 from __future__ import annotations
 
+import hashlib
 import pickle
 import subprocess
 import sys
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 import pytest
@@ -34,7 +36,49 @@ from convert.ttml_forward import (
 
 ROOT = Path(__file__).resolve().parent.parent
 REAL_CHECKPOINT_DIR = ROOT / "artifacts" / "checkpoints"
-VAL_IDS_PATH = ROOT / "artifacts" / "tokens" / "val_ids.npy"
+
+#: The exact (checkpoint, tokenizer, tokens) triple the held-out cross-entropy test below is
+#: meaningful against. ``REAL_CHECKPOINT_DIR`` is per-model *protected* evidence
+#: (train/paths.py's PROTECTED_RELATIVE) -- it never moves. The tokenizer and the validation
+#: tokens are the current, shared, freely-regenerated locations (train/paths.py's
+#: SHARED_KINDS) instead, which is exactly what let them drift out from under this
+#: checkpoint: the tokenizer was retrained on a new corpus blend and `artifacts/tokens`
+#: re-tokenized with it, while this checkpoint was trained on the older TinyStories-only
+#: corpus and its original tokenizer. Pointing this gate at the mutable shared paths made it
+#: silently re-target itself at ids from a different vocabulary. Pin the v2 triple explicitly
+#: instead (see CLAUDE.md's ``parity-gate-restore`` entry for how these were restored).
+TOKENIZER_DIR = ROOT / "artifacts" / "tokenizer-tinystories-v2"
+VAL_IDS_PATH = ROOT / "artifacts" / "tokens-tinystories-v2" / "val_ids.npy"
+
+#: sha256 of the preserved v2 tokenizer's tokenizer.json, pinned so a future accidental
+#: overwrite of TOKENIZER_DIR is caught here rather than silently invalidating VAL_IDS_PATH's
+#: lineage claim a second time.
+_TOKENIZER_SHA256 = "09a98a92834eaeac502e77e8717f3f28aec7c523719752479230ee0ca85078b5"
+
+
+def _v2_triple_skip_reason() -> Optional[str]:
+    """Why the v2 cross-entropy gate can't run, or None if the pinned triple checks out."""
+    if not VAL_IDS_PATH.is_file():
+        return (
+            f"no v2 validation tokens at {VAL_IDS_PATH}; regenerate with: python -m "
+            f"train.tokenization --corpus artifacts/corpus/corpus.txt "
+            f"--tokenizer {TOKENIZER_DIR} --out {VAL_IDS_PATH.parent}"
+        )
+    tok_file = TOKENIZER_DIR / "tokenizer.json"
+    if not tok_file.is_file():
+        return (
+            f"the v2 tokenizer is missing at {tok_file}; {VAL_IDS_PATH} cannot be trusted "
+            f"to match a tokenizer that isn't there to check against"
+        )
+    digest = hashlib.sha256(tok_file.read_bytes()).hexdigest()
+    if digest != _TOKENIZER_SHA256:
+        return (
+            f"{tok_file} does not match the known-good v2 tokenizer digest "
+            f"({_TOKENIZER_SHA256[:12]}..., got {digest[:12]}...) -- the preserved v2 "
+            f"tokenizer appears to have changed, so {VAL_IDS_PATH}'s lineage can no longer "
+            f"be trusted"
+        )
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -591,9 +635,15 @@ REAL_CHECKPOINT = sorted(REAL_CHECKPOINT_DIR.glob("nanollama3_step*.pkl"))[-1] i
     REAL_CHECKPOINT_DIR.exists() and list(REAL_CHECKPOINT_DIR.glob("nanollama3_step*.pkl"))
 ) else None
 
+_v2_skip_reason = None if REAL_CHECKPOINT is not None else (
+    f"no real checkpoint present under {REAL_CHECKPOINT_DIR}"
+)
+if _v2_skip_reason is None:
+    _v2_skip_reason = _v2_triple_skip_reason()
+
 pytestmark_ce = pytest.mark.skipif(
-    REAL_CHECKPOINT is None or not VAL_IDS_PATH.is_file(),
-    reason="no real checkpoint or validation tokens present under artifacts/",
+    _v2_skip_reason is not None,
+    reason=_v2_skip_reason or "",
 )
 
 

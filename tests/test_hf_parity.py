@@ -2,23 +2,73 @@
 # SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
 """Numerical verification of the converted model. CPU only."""
 
+import hashlib
 from pathlib import Path
+from typing import Optional
 
 import pytest
 
 HF = Path("artifacts/hf")
-VAL_IDS = Path("artifacts/tokens/val_ids.npy")
+
+#: The exact (model, tokenizer, tokens) triple the loss-comparison test below is meaningful
+#: against. ``artifacts/hf`` is per-model *protected* evidence (train/paths.py's
+#: PROTECTED_RELATIVE) -- it never changes out from under this test. The tokenizer and the
+#: validation tokens are a different story: ``artifacts/tokenizer`` and ``artifacts/tokens``
+#: are the *current*, shared, freely-regenerated locations (train/paths.py's SHARED_KINDS) --
+#: whatever the newest corpus/tokenizer run happens to have left there, not necessarily what
+#: this specific HF model was trained and held out on. Pointing this gate at those mutable
+#: paths is exactly what silently broke it: the tokenizer was retrained (new nine-source
+#: blend) and `artifacts/tokens` re-tokenized with it, while `artifacts/hf` kept the older
+#: model those new tokens were never validated against -- and the gate could not tell,
+#: because "whatever is currently there" isn't a claim about lineage. So this test pins the
+#: triple explicitly instead, to the preserved v2 tokenizer and its own regenerated tokens
+#: (see CLAUDE.md's ``parity-gate-restore`` entry for how these were restored).
+TOKENIZER = Path("artifacts/tokenizer-tinystories-v2")
+VAL_IDS = Path("artifacts/tokens-tinystories-v2/val_ids.npy")
+
+#: sha256 of the preserved v2 tokenizer's tokenizer.json, pinned so a future accidental
+#: overwrite of TOKENIZER (not just of the shared `artifacts/tokenizer`) is caught here
+#: rather than silently invalidating VAL_IDS's lineage claim a second time.
+_TOKENIZER_SHA256 = "09a98a92834eaeac502e77e8717f3f28aec7c523719752479230ee0ca85078b5"
 
 pytestmark = pytest.mark.skipif(
     not (HF / "config.json").is_file(),
     reason="no converted model; run scripts/convert_checkpoint.py first",
 )
-#: The loss-comparison test additionally needs tokenized validation data; skip just that
-#: test (not the whole module) when it's absent so a machine with a converted model but no
-#: token cache still runs the structural/entropy tests above.
+
+
+def _v2_triple_skip_reason() -> Optional[str]:
+    """Why the v2 parity gate can't run, or None if the pinned triple is present and intact."""
+    if not VAL_IDS.is_file():
+        return (
+            f"no v2 validation tokens at {VAL_IDS}; regenerate with: python -m "
+            f"train.tokenization --corpus artifacts/corpus/corpus.txt "
+            f"--tokenizer {TOKENIZER} --out {VAL_IDS.parent}"
+        )
+    tok_file = TOKENIZER / "tokenizer.json"
+    if not tok_file.is_file():
+        return (
+            f"the v2 tokenizer is missing at {tok_file}; {VAL_IDS} cannot be trusted to "
+            f"match a tokenizer that isn't there to check against"
+        )
+    digest = hashlib.sha256(tok_file.read_bytes()).hexdigest()
+    if digest != _TOKENIZER_SHA256:
+        return (
+            f"{tok_file} does not match the known-good v2 tokenizer digest "
+            f"({_TOKENIZER_SHA256[:12]}..., got {digest[:12]}...) -- the preserved v2 "
+            f"tokenizer appears to have changed, so {VAL_IDS}'s lineage can no longer be "
+            f"trusted"
+        )
+    return None
+
+
+#: The loss-comparison test additionally needs the pinned v2 (tokenizer, tokens) pair; skip
+#: just that test (not the whole module) when it's absent or doesn't check out, so a machine
+#: with a converted model but no v2 token cache still runs the structural/entropy tests above.
+_v2_skip_reason = _v2_triple_skip_reason()
 _no_val_ids = pytest.mark.skipif(
-    not VAL_IDS.is_file(),
-    reason="no validation tokens; run train/tokenization.py first",
+    _v2_skip_reason is not None,
+    reason=_v2_skip_reason or "",
 )
 
 #: The training run's real held-out validation loss (ttml's own evaluate(), 10 batches of
