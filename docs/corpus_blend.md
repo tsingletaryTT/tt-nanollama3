@@ -43,6 +43,57 @@ nine times over. It is not a share problem: every slice is within 0.065 points o
 `blend.txt` SHA-256 `da3d1bea402aaf5b0182fbb235cd368f6dafde70894213c38be332cc02a1fcc7`
 (reproduced byte-identical on a second run).
 
+## A second count: tokenizing the finished file
+
+The headline number above (399,594,747) is **not** the only token count this project has for
+this corpus, and the other one was missing from this page until now — which is exactly how a
+reviewer came to flag it as unverifiable. Recorded here so it stops being a number that only
+exists in a training run's own header.
+
+`train/tokenization.py` runs the retrained tokenizer once over the finished, concatenated
+`artifacts/corpus/blend.txt` and splits the result into train/val arrays. That pass produced:
+
+| | Tokens |
+|---|---:|
+| Total | **392,773,300** |
+| Train split | **353,495,970** |
+| Val split | **39,277,330** |
+| Vocabulary | 32,000 |
+
+This is directly checkable on disk: `artifacts/tokens/train_ids.npy` and
+`artifacts/tokens/val_ids.npy` are `uint32` arrays of shape `(353495970,)` and `(39277330,)`
+respectively, summing to 392,773,300. The same total also appears as `corpus_tokens` in the
+header of every `tt-tnt-v1` checkpoint (e.g. `artifacts/checkpoints-tt-tnt-v1/tt_tnt_step00010787.pkl`),
+since `train/run.py` records whatever `train/tokenization.py` measured at tokenization time.
+
+**Why this differs from the manifest's 399,594,747.** They are two different measurements of
+two different things, not two attempts at the same number:
+
+- The manifest's figure is a **sum of nine separate tokenizer calls**, one per source, each
+  over that source's own emitted text, chunked into paragraphs exactly the way
+  `scripts/measure_corpus.py` chunks a source file for its availability check (see "The
+  headline number" above).
+- This page's new figure is **one tokenizer call over the single concatenated file** that
+  `blend_corpus.py` writes all nine sources into.
+
+BPE merges do not cross an `encode()` call, so tokenizing nine chunks separately and
+tokenizing their concatenation as one string can legitimately merge (or fail to merge) a
+different set of byte pairs at every join — the boundary between `flavour`'s last paragraph
+and `folklore`'s first, for instance, is a real encode-time seam in one measurement and
+invisible in the other. A 0.46% difference between 399,594,747 and 392,773,300 is consistent
+with that many source-to-source boundaries, not a sign either count is wrong. **Treat
+399,594,747 as the per-source provenance figure (how the blend was assembled) and
+392,773,300/353,495,970/39,277,330 as the tokenized-training-data figure (what
+`train/run.py` actually reads token-by-token)** — use whichever one answers the question being
+asked, and do not average them or treat the smaller one as a correction to the larger one.
+
+**This is also where the step budget for one epoch comes from.** At `batch_size=64`,
+`seq_len=512`, one step consumes 64 × 512 = 32,768 tokens. The **train split**, not the
+manifest total, is what a training run actually iterates over:
+353,495,970 / 32,768 ≈ 10,787.98, i.e. **10,787 steps** covers one epoch (with the last
+32,768-token step short by construction, since 10,787 × 32,768 = 353,468,416 is 27,554 tokens
+less than the full split — the standard "drop the final partial batch" behavior, not a bug).
+
 ### Real repetition is not the declared `upsample`
 
 `upsample` in `train/corpus.py` is a **ceiling** — the most repetition a source is allowed to

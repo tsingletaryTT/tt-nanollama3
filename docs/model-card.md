@@ -23,6 +23,9 @@ tags:
   - trained-from-scratch
 datasets:
   - roneneldan/TinyStories
+  - sedthh/gutenberg_english
+  - biglam/gutenberg-poetry-corpus
+  - wikimedia/wikipedia
 language:
   - en
 ---
@@ -52,7 +55,7 @@ every dead end, is documented at
 | Hidden size | 384 |
 | Layers | 6 |
 | Attention heads / KV groups | 6 / 3 |
-| Context length | **256** |
+| Context length | **512** |
 | Vocabulary | 32,000 (byte-level BPE, trained for this model) |
 | Weights dtype | bfloat16 |
 | Training hardware | One Tenstorrent Blackhole chip (`mesh_shape [1, 1]`) |
@@ -68,38 +71,56 @@ a verbatim copy of tt-train's own `nanollama3.yaml`.
 
 | | |
 |---|---|
-| Corpus | TinyStories (`roneneldan/TinyStories`), 512 MB subset |
-| Tokens seen | **49,152,000** — about **0.43 of one epoch** over the 114.9M-token training split |
-| Steps | 3000 at batch 64, sequence length 256 |
-| Wall clock | 6 min 47 s (~0.134 s/step steady state) |
-| First train loss | 10.6875 — consistent with a near-uniform initial distribution (`ln(32000) = 10.37`) |
-| Final train loss | 1.9219 |
-| **Held-out validation loss** | **1.8781** |
-| Optimizer | AdamW, lr 3e-4, weight decay 0.01 |
+| Corpus | Nine-source, licence-audited blend — TinyStories, Simple English Wikipedia, and seven curated Project Gutenberg slices (see [`docs/corpus_blend.md`](https://github.com/tsingletaryTT/tt-tnt/blob/main/docs/corpus_blend.md)). 399,594,747 tokens emitted against a 400,000,000-token budget |
+| Tokens seen | **353,495,970** — the full training split, **one epoch** |
+| Steps | 10,787 at batch 64, sequence length 512 |
+| Wall clock | ~58 minutes on a single Blackhole p300c |
+| Final train loss | 3.3125 |
+| **Final validation loss** | **4.2203** |
+| Optimizer | AdamW, constant lr 3e-4, weight decay 0.01, `stochastic_rounding: true` |
 
 ## Limitations — please read these
 
-**It has seen less than half of its training data, once.** 0.43 of an epoch is not a trained
-model in any conventional sense.
+**It has seen its training corpus once, not memorized it.** At batch 64, sequence length 512,
+10,787 steps is one epoch over the blend's 353,495,970-token training split — more data and a
+longer context than the original TinyStories-only checkpoint (which saw 0.43 of an epoch), but
+still a single pass. The validation curve
+(`artifacts/checkpoints-tt-tnt-v1/val_losses.jsonl`) falls from 6.7125 at step 500 to about
+4.29 by step 10,000, then **plateaus** for the remainder of the run — oscillating between 4.29
+and 4.38 for the last ~2,300 steps, including a rise to 4.378125 at step 9000. Read plainly: it
+stopped improving well before training ended; this is not a curve that would keep falling given
+more steps at the same settings.
 
-**TinyStories is synthetic and deliberately simple** — children's stories with a small
-vocabulary and regular grammar, built so that small models can learn it. A low loss on this
-corpus is unsurprising and does **not** transfer to general language ability.
+**The corpus is now a nine-source, licence-audited blend, and the model's behavior is a mix to
+match.** Read against the frozen evaluation set
+([`docs/measurements/samples-tt-tnt-v1.md`](https://github.com/tsingletaryTT/tt-tnt/blob/main/docs/measurements/samples-tt-tnt-v1.md),
+greedy decoding, 15 prompts): the model sometimes engages with a prompt's own material — sticks,
+roses, a procession, bees — where a TinyStories-only baseline would default to a generic moral,
+and one long-form prompt stays coherent for its full 60 tokens. But **TinyStories still
+dominates**: four of the fifteen prompts collapse into "a little girl named Lily" regardless of
+what the prompt was actually about, and several others degenerate into hard repetition loops
+under greedy decoding (e.g. "the procession was ready... the procession was ready..."). The
+oblique, observational voice this blend targets — closer to Fabre's insect notebooks than to a
+children's story — is **not** present in this checkpoint. Treat the promising examples as
+evidence of what the blend can nudge toward, not as evidence the voice has arrived; the
+Lily-collapses and the repetition loops are the more representative outcome.
 
 **It is a base completion model.** No instruction tuning, no chat template. Give it the opening
 of a simple story; do not ask it questions.
 
-**Its context is 256 tokens.** Note that `tokenizer_config.json` carries the conventional
-`model_max_length` sentinel (~1e18). Do not derive a serving length from it — use
-`max_position_embeddings`. Serving this model with a 4k context will silently degrade output.
+**Its context is 512 tokens** (doubled from the original 256-token checkpoint — see Lineage).
+Note that `tokenizer_config.json` carries the conventional `model_max_length` sentinel
+(~1e18). Do not derive a serving length from it — use `max_position_embeddings`. Serving this
+model with a 4k context will silently degrade output.
 
-**Its 13 RMSNorm layers never learned.** All gammas are exactly 1.0. The gradients were real
-(Adam `exp_avg` ≈ 3.6e-4) but the parameters are bfloat16 at 1.0, where one ulp is 0.0039, and
-`stochastic_rounding` was disabled — so every update rounded back to 1.0 and was discarded. The
-model trained with its normalization layers effectively frozen. Remedies for anyone reproducing
-this: set `stochastic_rounding: true` in the optimizer config, or use
-`type: AdamWFullPrecision` (fp32 master weights). Both exist in tt-train today; neither is the
-default.
+**Unlike the original checkpoint, this run's RMSNorm layers did learn.** The very first tt-tnt
+checkpoint (see Lineage) trained with `stochastic_rounding` disabled, which silently froze all
+13 RMSNorm gammas at bfloat16's rounding fixed-point of 1.0 — the gradients were real, but every
+update rounded back to 1.0 and was discarded. This run set `stochastic_rounding: true`, and it
+worked: read directly from the final checkpoint (`tt_tnt_step00010787.pkl`), all 13 gammas have
+moved off 1.0 and are no longer degenerate (per-tensor means 0.86–1.70, per-tensor standard
+deviation 0.036–0.21, values spanning roughly 0.625–2.19 across the set). The model trained with
+its normalization layers genuinely live this time.
 
 ## Verification
 
@@ -133,30 +154,35 @@ Runs on CPU; no Tenstorrent hardware required for inference.
 
 ## Sample output
 
-One sample at temperature 0.8, reported as a single data point rather than as representative:
+Greedy decoding, 60 new tokens, from the frozen evaluation set
+([`docs/measurements/samples-tt-tnt-v1.md`](https://github.com/tsingletaryTT/tt-tnt/blob/main/docs/measurements/samples-tt-tnt-v1.md)):
 
-> Once upon a time, there was a little **girl named Lily. Lily loved to play with her toy car.
-> One day, Lily's toy car was broken. Lily was sad. She wanted to fix it. Lily's mom saw her sad
-> face and said, "I**
+> The old woman kept bees behind the house, and every morning she **would go out and pick up
+> the honey and put it in her basket. One day, she was walking in the garden when she saw a
+> big, red apple. She was so excited and wanted to pick it. She picked it up and took a big
+> bite. It was so sweet and juicy!**
 
-Locally coherent, holds a character, and drifts — which is what 0.43 of an epoch at this scale
-looks like.
+Chosen because it is the most coherent completion in the frozen set of 15, not because it is
+typical — see Limitations above and the linked file for the honest range, including four
+TinyStories collapses to "a little girl named Lily" and several hard repetition loops.
 
 ## Licensing and provenance
 
 **The model weights and this project's code are Apache-2.0.**
 
-**The training corpus is not.** This checkpoint was trained on TinyStories
-(`roneneldan/TinyStories`), a 512 MB subset. Licence, attribution, and the pinned dataset
-revision are recorded in
+**The training corpus is not.** This checkpoint was trained on the nine-source blend described
+above. Two of those sources are share-alike: `tinystories`
+([`roneneldan/TinyStories`](https://huggingface.co/datasets/roneneldan/TinyStories), 31% of the
+blend, CDLA-Sharing-1.0) and `wikipedia_simple`
+([`wikimedia/wikipedia`](https://huggingface.co/datasets/wikimedia/wikipedia), 15% of the
+blend, CC-BY-SA-3.0). Full per-source licence, attribution, and the pinned dataset revisions
+are recorded in
 [`docs/corpus_licensing.md`](https://github.com/tsingletaryTT/tt-tnt/blob/main/docs/corpus_licensing.md),
 which is *generated* from this project's source registry (`train/corpus.py`) rather than
 hand-written, specifically so this card cannot drift out of sync with it the way hand-written
 licensing prose has before. That document's "unsettled Data Derivative" language for
-share-alike sources — including TinyStories' CDLA-Sharing-1.0 — applies to this checkpoint
-exactly as written there; this card does not restate it. (That registry now spans nine
-sources for a broader corpus-assembly effort; this specific released checkpoint was trained
-only on TinyStories, as the training table above shows.)
+share-alike sources applies to this checkpoint exactly as written there, for both of the
+sources named above; this card does not restate it.
 
 **Architectural credit.** The component choices — RoPE, RMSNorm, SwiGLU, GQA, subword BPE —
 follow [Mini-LLM by Ashx098](https://github.com/Ashx098/Mini-LLM), which the originating lesson
@@ -174,9 +200,11 @@ tt-train's own `nanollama3.yaml`, and every checkpoint (including the one this c
 is trained through `ttml` against it. What changed is the corpus and tokenizer this project
 now owns — a nine-source, licence-audited blend and a BPE tokenizer trained on that blend,
 rather than a single downloaded corpus and an inherited vocabulary — and that is what earned
-the new name, `tt-tnt`. (This specific released checkpoint predates that corpus work and was
-trained only on TinyStories, as the training table above shows; the new corpus applies to
-models trained after this one.)
+the new name, `tt-tnt`. (This is now the first `tt-tnt` checkpoint actually trained on that
+corpus: the training table above records a run over the nine-source blend at a 512-token
+context, not TinyStories alone at 256. An earlier TinyStories-only, 256-token checkpoint from
+before the corpus work existed under this same name for a time; this card now describes the
+blend-trained checkpoint that superseded it.)
 
 ## Origin
 

@@ -14,28 +14,41 @@ trained, packaged, published, and served entirely on Tenstorrent tooling.
 
 ## Status
 
-**Working today:** corpus preparation, a 32,000-token BPE tokenizer, a training entrypoint that
-runs on hardware with a real validation loop, checkpointing with resume, and conversion to a
-Hugging Face model directory. **The model has been trained** — 3000 steps, in 6 min 47 s on a
-single Blackhole p300c — **and the Hugging Face conversion is numerically verified**: HF-side
-validation loss on the converted model is **1.9271**, against **1.8781** from the training
-run's own held-out evaluation, computed the same way (10 batches of 32 randomly-sampled
-256-token windows) so the two numbers are comparable.
+**Working today:** corpus preparation (a nine-source, licence-audited blend), a 32,000-token
+BPE tokenizer trained on that blend, a training entrypoint that runs on hardware with a real
+validation loop, checkpointing with resume, and conversion to a Hugging Face model directory.
+**The model has been trained for a full epoch** — 10,787 steps, batch 64, sequence length 512,
+~58 minutes on a single Blackhole p300c — over the blend's 353,495,970-token training split,
+finishing at train loss **3.3125** and validation loss **4.2203**. See
+[`docs/model-card.md`](docs/model-card.md) for the full curve and an honest read of it: it
+plateaus well before the run ends rather than still improving.
 
-**Not done yet:** the trained weights are **not published** — checkpoints are gitignored and
-live only on the machine that produced them, so cloning this repo gets you the pipeline, not a
-model. tt-kernel packaging is the remaining stage. See
-[`docs/superpowers/specs/`](docs/superpowers/specs/) for the full arc.
+**Published, privately.** The trained weights are on Hugging Face at
+[`episod/tt-tnt`](https://huggingface.co/episod/tt-tnt) — `scripts/publish_to_hub.py` creates
+the repo private and never flips it public. tt-kernel packaging manifests already exist under
+[`manifests/`](manifests/). See [`docs/superpowers/specs/`](docs/superpowers/specs/) for the
+full arc.
 
-**Calibrate your expectations.** This is a ~22M-parameter model that has seen 49,152,000
-tokens — about **0.43 of one epoch** over its training split — of TinyStories, a synthetic
-corpus of simple children's stories with a small vocabulary and deliberately regular grammar.
-It demonstrates that the pipeline works end to end. It is not a capable general model. One
-generated sample, reported as a single data point rather than proof of general capability:
+**Calibrate your expectations.** This is a ~22M-parameter model that has seen one epoch of a
+~400M-token, nine-source blend — TinyStories, Simple English Wikipedia, and seven curated
+Project Gutenberg slices (see [`docs/corpus_blend.md`](docs/corpus_blend.md)) — not TinyStories
+alone. It demonstrates that the pipeline works end to end. It is not a capable general model,
+and the corpus swap has not yet produced the oblique, observational voice it targets. Read
+against the frozen evaluation set
+([`docs/measurements/samples-tt-tnt-v1.md`](docs/measurements/samples-tt-tnt-v1.md), greedy
+decoding), the model sometimes engages with a prompt's own material, and one long-form sample
+stays coherent for its full length — chosen here for being the most coherent of the set, not a
+typical one:
 
-> Once upon a time, there was a little dog named Max. Max loved to play with his ball. One day,
-> Max saw a big ball in the park. Max wanted to play with the ball, but he was very dirty. Max
-> had an idea. He would push the ball with his paws to clean it.
+> The old woman kept bees behind the house, and every morning she would go out and pick up the
+> honey and put it in her basket. One day, she was walking in the garden when she saw a big,
+> red apple. She was so excited and wanted to pick it. She picked it up and took a big bite. It
+> was so sweet and juicy!
+
+TinyStories still dominates elsewhere in the set: four of fifteen prompts collapse into "a
+little girl named Lily" regardless of what they asked for, and several others fall into hard
+repetition loops under greedy decoding — see the linked file and
+[`docs/model-card.md`](docs/model-card.md)'s Limitations section for the honest range.
 
 ## The model
 
@@ -45,9 +58,9 @@ generated sample, reported as a single data point rather than proof of general c
 | Embedding dim | 384 |
 | Blocks | 6 |
 | Heads / KV groups | 6 / 3 |
-| Sequence length | 256 |
+| Sequence length | 512 |
 | Vocabulary | 32,000 (byte-level BPE, trained here) |
-| Corpus | TinyStories — 127,635,889 tokens (114.9M train / 12.8M validation) |
+| Corpus | Nine-source blend — 399,594,747 tokens emitted per the provenance manifest; 392,773,300 tokens when the finished file is tokenized as training data (353,495,970 train / 39,277,330 validation) — see [`docs/corpus_blend.md`](docs/corpus_blend.md) for both figures and why they differ |
 | Hardware | Tenstorrent Blackhole — trained on **one** p300c (`mesh_shape [1, 1]`, no DDP/TP) |
 
 **This repository owns its architectures.** They live in
@@ -59,11 +72,13 @@ read out of `$TT_METAL_HOME` so the architecture cannot change under a tt-metal 
 without a signal — `tests/test_sizes.py` compares the two whenever tt-metal is present, and
 holds the registry and the YAML to describing the same model.
 
-Measured on the 3000-step run: first train loss **10.6875** — consistent with a near-uniform
-initial distribution, where `ln(32000) = 10.37` — falling to **1.9219**, with a real held-out
-validation loss of **1.8781** from this repo's own `evaluate()` over 10 sampled batches.
-Steady state ~0.134 s/step (7.44–7.50 it/s); 6 min 47 s wall clock; six checkpoints at steps
-500–3000.
+Measured on the `tt-tnt-v1` run: 10,787 steps — one epoch over the blend's train split — at
+batch 64, sequence length 512, finishing at train loss **3.3125** with a validation loss of
+**4.2203**. The validation curve
+(`artifacts/checkpoints-tt-tnt-v1/val_losses.jsonl`) falls from 6.7125 at step 500 to about
+4.29 by step 10,000, then plateaus — oscillating 4.29–4.38 for the last ~2,300 steps, including
+a rise at step 9000 — rather than continuing to improve. ~58 minutes wall clock on one p300c;
+eleven checkpoints at steps 1000–10787.
 
 **This runs on one chip.** `train/config.py` sets `device_config` to `mesh_shape: [1, 1]` with
 `enable_ddp` and `enable_tp` both false, so training opens a single device. The host this was
@@ -78,11 +93,11 @@ and is **future work here, not something this repo has demonstrated**. It is not
 config edit — see [`docs/multi-chip-notes.md`](docs/multi-chip-notes.md) for the three known
 catches and why the step budget and learning rate move with it.
 
-Validation coming in below training loss is expected here rather than anomalous: at 0.43 of an
-epoch there is no overfitting, dropout is 0.0, and the final train figure is a single batch
-against a ten-batch validation average. That the two differ at all is what confirms the number
-came from our own evaluation rather than tt-train's `val_losses`, which is a documented
-placeholder that copies the training loss.
+Validation finishing *above* training loss (4.2203 vs. 3.3125) is the ordinary generalization
+gap for a full epoch, unlike the original 0.43-epoch checkpoint, where the two were a
+near-noise-dominated tie. The plateau in the curve above — not the train/val gap — is the more
+informative signal for this run: it says the model had largely stopped learning from this
+corpus well before step 10,787, not that it needs a slightly longer run to keep closing the gap.
 
 ## History
 
@@ -149,14 +164,20 @@ source file carries an SPDX header. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTI
 Apache-2.0 covers *our code*. It does not override the terms of what this project consumes,
 and two of those inputs deserve stating plainly rather than being folded into a blanket claim:
 
-**Training corpus — TinyStories, CDLA-Sharing-1.0.** The corpus
-([`roneneldan/TinyStories`](https://huggingface.co/datasets/roneneldan/TinyStories)) is
-licensed under the Community Data License Agreement – Sharing, v1.0, which is a share-alike
-data license. This repository **does not redistribute the corpus**; `train/data.py` downloads
-it from the Hugging Face Hub at a pinned revision. Whether model weights trained on
-CDLA-Sharing data constitute a "Data Derivative" under that license is not settled, and we do
-not assert that they don't. Anyone publishing weights trained with this code should reach
-their own conclusion rather than inheriting ours.
+**Training corpus — a nine-source blend, two sources share-alike.** The corpus (see
+[`docs/corpus_blend.md`](docs/corpus_blend.md) and
+[`docs/corpus_licensing.md`](docs/corpus_licensing.md), the latter generated from
+`train/corpus.py`) mixes TinyStories, Simple English Wikipedia, and seven curated Project
+Gutenberg slices. Two sources carry share-alike data licenses: `tinystories`
+([`roneneldan/TinyStories`](https://huggingface.co/datasets/roneneldan/TinyStories), 31% of the
+blend) under the Community Data License Agreement – Sharing, v1.0, and `wikipedia_simple`
+([`wikimedia/wikipedia`](https://huggingface.co/datasets/wikimedia/wikipedia), 15% of the
+blend) under CC-BY-SA-3.0. This repository **does not redistribute the corpus**; the fetch
+scripts download each source from the Hugging Face Hub at a pinned revision. Whether model
+weights trained on share-alike data constitute a "Data Derivative" (CDLA-Sharing-1.0) or an
+"Adaptation" (CC-BY-SA-3.0) is not settled, and we do not assert that they don't. Anyone
+publishing weights trained with this code should reach their own conclusion rather than
+inheriting ours.
 
 **Architectural inspiration — Mini-LLM.** The lesson arc credits
 [Mini-LLM by Ashx098](https://github.com/Ashx098/Mini-LLM) for its component choices — RoPE,
@@ -165,9 +186,12 @@ granted by it. This is a credit, not a license inheritance: the components thems
 from published papers, and this implementation derives from tt-train's `nanollama3` model
 config and the `ttml` library, not from Mini-LLM's source. No code was copied from it.
 
-**Model weights.** None are published yet. When they are, the model card will state the corpus
-and its license explicitly, and will describe the model honestly as a demonstration rather
-than a capable general model.
+**Model weights.** Published, privately, to
+[`episod/tt-tnt`](https://huggingface.co/episod/tt-tnt) via `scripts/publish_to_hub.py`, which
+creates the repo private and never flips it public. [`docs/model-card.md`](docs/model-card.md)
+is the source of truth for the card pushed there; it states the corpus and its license
+explicitly and describes the model honestly as a demonstration rather than a capable general
+model, per the standard set above.
 
 **Runtime dependencies** — tt-metal / `ttml` / `ttnn` (Apache-2.0), `transformers` and
 `tokenizers` (Apache-2.0), numpy (BSD-3-Clause).
