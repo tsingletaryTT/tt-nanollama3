@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
 
-"""vLLM entrypoint for tt-tnt — stock Llama, plus one runtime patch.
+"""vLLM entrypoint for tt-tnt — stock Llama, plus two runtime patches.
 
 WHAT THIS IS
 ------------
@@ -12,14 +12,17 @@ tt-tnt is a standard HF Llama and the stock
 carries only what tt-metal gets wrong or defaults badly for a model this small:
 
 1. a runtime **patch** to ``ModelArgs.find_grid`` (without it the model cannot run at all
-   on a harvested Blackhole -- see below), and
-2. a **precision default** of ``accuracy`` rather than ``performance`` (see
+   on a harvested Blackhole -- see "THE find_grid BUG" below),
+2. a runtime **patch** to ``ModelArgs.weight_cache_path`` that scopes the converted-weight
+   cache by a fingerprint of the *source* weights, so republishing a model under the same
+   HF repo id cannot silently serve the previous weights (see "THE STALE-CACHE BUG"), and
+3. a **precision default** of ``accuracy`` rather than ``performance`` (see
    ``DEFAULT_OPTIMIZATIONS``).
 
 The point being demonstrated: **a model can carry the tt-metal change it needs, in its
-own distribution bundle, without that change having to land upstream first.** Both travel
-with the bundle, apply at import time in the serving process, and are inert everywhere
-else.
+own distribution bundle, without that change having to land upstream first.** All three
+travel with the bundle, apply at import time in the serving process, and are inert
+everywhere else.
 
 KNOWN UNFIXED DEFECT -- READ BEFORE TRUSTING OUTPUT
 ---------------------------------------------------
@@ -42,8 +45,8 @@ Note that the tt_transformers PCC gate passed at 0.9940-0.9998 while this defect
 present: it exercises prefill far harder than long decode. **A green PCC is not evidence
 of correct generation.**
 
-THE BUG BEING PATCHED
----------------------
+THE find_grid BUG
+-----------------
 ``ModelArgs.find_grid`` (``models/tt_transformers/tt/model_config.py:3205``) picks a core
 grid from hardcoded per-architecture constants::
 
@@ -66,8 +69,8 @@ Measured on this hardware, with the patch applied:
 (performance and accuracy), PCC **0.9940 - 0.9998** across 18 measurements, on
 ``blackhole``, mesh ``(1,1)``, seq 256, batch 1, paged attention.
 
-SCOPE AND SAFETY
-----------------
+find_grid SCOPE AND SAFETY
+--------------------------
 - Patches exactly one method, and only its ``max_rows``/``max_cols`` source. The search
   order, the "closest to 32 cores" heuristic, and the failure assertion are unchanged.
 - **Falls back to the original implementation** whenever the device cannot be queried, so
@@ -81,12 +84,117 @@ This is a **compatibility shim, not a fix.** The real fix belongs upstream: ``fi
 should read ``compute_with_storage_grid_size()`` rather than hardcoding per-arch constants.
 When that lands in a released tt-metal, ``_patch_find_grid`` becomes a no-op that can be
 deleted along with the ``platform.ttnn`` floor that pins this bundle below it.
+
+THE STALE-CACHE BUG -- WHY WEIGHTS ARE FINGERPRINTED
+----------------------------------------------------
+``tt_transformers`` converts HF weights to ``.tensorbin`` once and reuses them forever,
+keyed on the **HF repo id and nothing else**::
+
+    model_config.py:577   self.CACHE_PATH = os.path.join("model_cache", HF_MODEL, self.device_name)
+    model_config.py:3017  def weight_cache_path(self, dtype):   # -> CACHE_PATH / "tensor_cache_bfp8"
+    core.py:719           if not cache_path.exists() or not cache_path.is_file():  # convert
+                          ...                                                      # else: load it
+
+That reuse decision (``ttnn/ttnn/operations/core.py:719``) is a bare *existence* check.
+There is no revision, no content hash, no comparison against the source weights. Only a
+deserialisation failure (``core.py:725``) ever triggers a re-conversion.
+
+So a project that iterates checkpoints under a **stable repo id** -- which is exactly what
+tt-tnt does -- gets the old model's weights under the new model's config, logged as an
+ordinary warm start (``Loaded cache for model_cache/episod/tt-tnt/P150/...``). Observed
+live: a retrained tt-tnt was republished to ``episod/tt-tnt``, the server came up clean,
+reported the correct ``max_model_len: 2048``, and ran the **previous** model. The previous
+model could not emit EOS by construction, so the headline measurement would have been a
+confident "0% termination" and would have read as a real regression. It was caught only
+because a human noticed the cache directory's mtime predated the publish.
+
+**It does not fail. It lies.** That is the failure mode this patch exists to remove.
+
+THE FIX
+-------
+``weight_cache_path`` is the single funnel every weight cache path flows through (all of
+``attention.py``, ``mlp.py``, ``lm_head.py``, ``embedding.py``, and the vLLM KV-cache
+allocator reach the cache only via ``model_args.weight_cache_path(dtype)`` /
+``Generator.cache_path``). The patch appends **one directory component** derived from the
+source weights::
+
+    model_cache/episod/tt-tnt/P150/tensor_cache_bfp8/src-rev-a3c85ec799fe/...
+
+The fingerprint is, in order of preference:
+
+1. ``hf_config._commit_hash`` -- the HF commit sha. ``transformers`` records it on the
+   config object when it resolves ``config.json`` out of the Hub cache
+   (``configuration_utils.py:812``, via ``extract_commit_hash``), and ``ModelArgs.__init__``
+   has already loaded that config (``model_config.py:616``) before any cache path is asked
+   for. This is the authoritative answer and the one upstream should use.
+2. For a **local** checkpoint directory (``HF_MODEL=/some/path``), where there is no commit
+   sha: a sha256 over ``(name, size, mtime_ns)`` of ``config.json`` and every weight file.
+   Sizes alone are useless here -- a retrain of the same architecture produces byte-identical
+   file *sizes*, which is precisely today's bug -- so mtime carries the signal. That means a
+   re-download of unchanged weights produces a *false miss*: one wasted conversion, loudly
+   logged. False misses cost minutes; false hits cost a wrong published measurement.
+3. Nothing. Then the path is left exactly as stock, and a **warning** is logged saying the
+   guard is not in place.
+
+WHY THIS SHAPE AND NOT ANOTHER
+------------------------------
+- *Validate the cache before use and re-convert on mismatch.* To know a cached tensor is
+  wrong you must produce the right one -- i.e. pay the conversion the cache exists to avoid
+  -- unless you store a side manifest, which is this fix with more moving parts and a
+  weaker invariant. It also **overwrites**, so flipping back to the previous revision pays
+  conversion again. Fingerprinting keeps every revision warm.
+- *Refuse a cache older than the source weights (mtime).* The source here is a Hub repo id;
+  there is no local file whose mtime means "publish time". HF blob mtimes are *download*
+  times, and when the download and the conversion happen in one session their order is
+  arbitrary -- the comparison can silently come out the wrong way. Reading a timestamp is
+  what the human had to do today; it is not a thing to automate.
+- *Disable the cache.* Correct, but it pays full conversion on every serve, so it will be
+  switched back off the first busy afternoon -- restoring the bug. A fix that gets disabled
+  is not a fix.
+- Fingerprinting **self-heals**: a republish simply misses and re-converts. It never serves
+  the wrong weights, and it is not silent in the other direction either -- see below.
+
+NOT SILENT IN EITHER DIRECTION
+------------------------------
+The bug being fixed is silence, so the fix must not introduce a different silence:
+
+- New fingerprint where sibling fingerprints already exist -> **WARNING** naming the old
+  ones ("the source weights changed"). That is the sentence that was missing from the log.
+- Un-fingerprinted ``.tensorbin`` files left over from before this patch -> **WARNING**
+  that they are now unused (they are *not* deleted; that is a human's call).
+- Fingerprint unavailable, or ``TT_TNT_CACHE_FINGERPRINT=0`` -> **WARNING** that the guard
+  is off and stale weights are again possible.
+- ``ModelArgs.weight_cache_path`` missing, or its first two parameters are no longer
+  ``(self, dtype)`` -> the patch **declines to install** and says so at WARNING level,
+  rather than crashing the serve or pretending it applied.
+- Every fingerprinted directory gets a ``tt_tnt_cache_source.json`` stamp recording what it
+  was built from, so ``ls`` answers the question that cost an afternoon.
+
+weight_cache_path SCOPE AND SAFETY
+----------------------------------
+- Wraps one method; the returned path is the stock path plus one component, so every
+  existing caller, ``mkdir(parents=True)`` included, keeps working unchanged.
+- The vLLM empty-KV-cache tensors also live under ``cache_path``, so they are re-created
+  per revision too. They are zeros -- cheap to regenerate, and the disk cost is bounded by
+  the number of revisions actually served. Old revision directories are retained, not
+  reclaimed; delete them by hand.
+- Idempotent, reversible via ``restore_patches()``, and affects only the importing process.
+
+Like ``find_grid`` this is a **shim, not a fix**. The real fix belongs upstream: the cache
+key at ``model_config.py:577`` should include the resolved revision. When that lands,
+``_patch_weight_cache_path`` becomes a no-op that can be deleted.
 """
 
 from __future__ import annotations
 
+import hashlib
+import inspect
+import json
 import logging
 import os
+import re
+from datetime import datetime, timezone
+from pathlib import Path
 
 from models.tt_transformers.tt.model_config import ModelArgs
 
@@ -162,18 +270,311 @@ def _patch_find_grid():
     )
 
 
-def restore_patches():
-    """Undo the patch. Provided so a host can leave the process as it found it."""
-    global _ORIGINAL_FIND_GRID
-    if _ORIGINAL_FIND_GRID is None:
+# ---------------------------------------------------------------------------
+# Patch 2 -- scope the converted-weight cache by a fingerprint of the source
+# weights, so a republish under the same repo id cannot be served from cache.
+# See "THE STALE-CACHE BUG" in the module docstring for why this exists.
+# ---------------------------------------------------------------------------
+
+#: Set once the patch is installed, holding the original unbound method.
+_ORIGINAL_WEIGHT_CACHE_PATH = None
+
+#: Written into every fingerprinted cache directory so the directory can say what it was
+#: built from. The whole point of this patch is that ``ls`` should answer the question that
+#: previously required correlating a directory mtime against a Hub publish time.
+CACHE_STAMP_NAME = "tt_tnt_cache_source.json"
+
+#: Files whose identity defines "the model" for a *local* checkpoint directory. ``config.json``
+#: is included so an architecture change is caught even if the weight files are untouched.
+_LOCAL_SOURCE_GLOBS = ("config.json", "*.safetensors", "*.bin", "*.pth", "*.pt")
+
+#: A commit sha as ``transformers`` records it. Anything not shaped like one (a branch name,
+#: a sentinel) is rejected rather than baked into a path, and we fall through to the next probe.
+_SHA_RE = re.compile(r"[0-9a-fA-F]{7,}\Z")
+
+#: Warnings that must be said once, not once per weight tensor (there are hundreds).
+_WARNED_ONCE = set()
+
+#: Cache scopes already reported, keyed by resolved path -- same reason.
+_ANNOUNCED_SCOPES = set()
+
+
+def _warn_once(message, *args):
+    """``logger.warning`` de-duplicated by format string.
+
+    ``weight_cache_path`` is called once per weight tensor. A warning that repeated that
+    often would be scrolled past, which is the same failure as not logging it at all.
+    """
+    if message in _WARNED_ONCE:
         return
-    ModelArgs.find_grid = _ORIGINAL_FIND_GRID
-    _ORIGINAL_FIND_GRID = None
+    _WARNED_ONCE.add(message)
+    logger.warning(message, *args)
+
+
+def fingerprinting_enabled():
+    """Whether the guard is active. ``TT_TNT_CACHE_FINGERPRINT=0`` turns it off.
+
+    Read at call time rather than import time so it can be flipped without a reimport.
+    Turning it off is legitimate (e.g. to reproduce a run against a known cache) but is
+    never silent -- see ``_weight_cache_path_fingerprinted``.
+    """
+    return os.environ.get("TT_TNT_CACHE_FINGERPRINT", "1").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+        "",
+    )
+
+
+def _commit_fingerprint(model_args):
+    """``("rev", <sha12>)`` from the HF commit sha, or None if there isn't one.
+
+    ``transformers`` stamps ``_commit_hash`` onto the config object when it resolves
+    ``config.json`` out of the Hub cache, and ``ModelArgs.__init__`` loads that config
+    before anything asks for a cache path. This is the authoritative source identity.
+    """
+    hf_config = getattr(model_args, "hf_config", None)
+    if hf_config is None:
+        return None
+    sha = getattr(hf_config, "_commit_hash", None)
+    if isinstance(sha, str) and _SHA_RE.match(sha):
+        return "rev", sha[:12].lower()
+    return None
+
+
+def _local_fingerprint(model_args):
+    """``("files", <hash12>)`` over a local checkpoint directory, or None.
+
+    Covers ``HF_MODEL=/some/path``, where there is no commit sha to lean on. ``mtime_ns`` is
+    part of the digest deliberately: a retrained model of the same architecture has
+    byte-identical file *sizes*, so size alone would reproduce the very bug being fixed.
+    The cost is a false miss (one redundant conversion, logged) after a re-download.
+    """
+    ckpt_dir = getattr(model_args, "CKPT_DIR", None)
+    if not isinstance(ckpt_dir, str) or not ckpt_dir:
+        return None
+    root = Path(ckpt_dir)
+    if not root.is_dir():
+        return None
+
+    entries = []
+    for pattern in _LOCAL_SOURCE_GLOBS:
+        for path in root.glob(pattern):
+            try:
+                stat = path.stat()
+            except OSError:  # pragma: no cover - vanished between glob and stat
+                continue
+            entries.append(f"{path.name}:{stat.st_size}:{stat.st_mtime_ns}")
+    if not entries:
+        return None
+
+    digest = hashlib.sha256("\n".join(sorted(entries)).encode("utf-8")).hexdigest()
+    return "files", digest[:12]
+
+
+def source_fingerprint(model_args):
+    """``(kind, value)`` identifying the weights behind ``model_args``, or None.
+
+    None means "cannot tell" and is treated as a loud degradation, never as "assume fresh".
+    A probe that raises is downgraded to None rather than being allowed to kill the serve:
+    a wrong-but-loud cache path is worse than no serve, but a crash here would take out a
+    server that stock tt-metal would have started.
+    """
+    for probe in (_commit_fingerprint, _local_fingerprint):
+        try:
+            result = probe(model_args)
+        except Exception as exc:  # pragma: no cover - diagnostic path
+            _warn_once(
+                "tt-tnt: source fingerprint probe %s failed (%r); trying the next one.",
+                probe.__name__,
+                exc,
+            )
+            continue
+        if result is not None:
+            return result
+    return None
+
+
+def _write_cache_stamp(scoped, kind, value, source):
+    """Record what a fingerprinted cache directory was built from.
+
+    Best-effort by design: a read-only or full filesystem must degrade to a debug line, not
+    to a failed serve. An existing stamp is left alone so it keeps its original timestamp.
+    """
+    stamp = scoped / CACHE_STAMP_NAME
+    try:
+        if stamp.exists():
+            return
+        scoped.mkdir(parents=True, exist_ok=True)
+        stamp.write_text(
+            json.dumps(
+                {
+                    "source": source,
+                    "fingerprint_kind": kind,
+                    "fingerprint": value,
+                    "written_by": "tt_tnt_adapter",
+                    "written_at": datetime.now(timezone.utc).isoformat(),
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    except OSError as exc:  # pragma: no cover - diagnostic path
+        logger.debug("tt-tnt: could not write %s (%r)", stamp, exc)
+
+
+def _announce_cache_scope(base, scoped, kind, value, source):
+    """Say, exactly once per scope, whether this is a warm start or a changed model.
+
+    This is the log line whose absence made the original bug invisible.
+    """
+    key = str(scoped)
+    if key in _ANNOUNCED_SCOPES:
+        return
+    _ANNOUNCED_SCOPES.add(key)
+
+    try:
+        already_cached = scoped.is_dir() and any(scoped.glob("*.tensorbin"))
+        siblings = (
+            sorted(p.name for p in base.glob("src-*") if p.is_dir() and p != scoped)
+            if base.is_dir()
+            else []
+        )
+        legacy = sorted(p.name for p in base.glob("*.tensorbin")) if base.is_dir() else []
+    except OSError as exc:  # pragma: no cover - diagnostic path
+        logger.debug("tt-tnt: could not inspect %s (%r)", base, exc)
+        return
+
+    if already_cached:
+        logger.info(
+            "tt-tnt: reusing the converted-weight cache for %s (%s %s) at %s",
+            source, kind, value, scoped,
+        )
+    elif siblings:
+        # The whole point. Stock tt-metal logs this case as an ordinary cache hit.
+        logger.warning(
+            "tt-tnt: the source weights for %s changed -- no converted-weight cache for "
+            "%s %s. Converting fresh weights. Previously cached revisions of the same repo "
+            "id are still present (%s) and are NOT being used; delete them by hand if you "
+            "want the space back.",
+            source, kind, value, ", ".join(siblings),
+        )
+    else:
+        logger.info(
+            "tt-tnt: first conversion of %s (%s %s) -> %s", source, kind, value, scoped
+        )
+
+    if legacy:
+        _warn_once(
+            "tt-tnt: %s holds un-fingerprinted .tensorbin files from before this guard was "
+            "installed. They are no longer read (that is the fix) and nothing here deletes "
+            "them; remove them by hand when you are sure.",
+            str(base),
+        )
+
+    _write_cache_stamp(scoped, kind, value, source)
+
+
+def _weight_cache_path_fingerprinted(self, dtype, *args, **kwargs):
+    """``ModelArgs.weight_cache_path`` with a source-fingerprint component appended.
+
+    Every path that cannot produce a fingerprint falls back to the stock path *and says so*,
+    so "the guard is not protecting you" is never a silent state.
+    """
+    base = _ORIGINAL_WEIGHT_CACHE_PATH(self, dtype, *args, **kwargs)
+    source = getattr(self, "CKPT_DIR", "<unknown>")
+
+    if not fingerprinting_enabled():
+        _warn_once(
+            "tt-tnt: TT_TNT_CACHE_FINGERPRINT is off -- the converted-weight cache is keyed "
+            "on the repo id alone, so republished weights can be served from a stale cache."
+        )
+        return base
+
+    fingerprint = source_fingerprint(self)
+    if fingerprint is None:
+        _warn_once(
+            "tt-tnt: could not fingerprint the weights behind %r (no HF commit sha on the "
+            "config and no readable local checkpoint directory). Falling back to the stock "
+            "repo-id-keyed cache path -- if these weights were republished under an existing "
+            "repo id, the PREVIOUS model may be served. Verify before trusting any output.",
+            source,
+        )
+        return base
+
+    kind, value = fingerprint
+    try:
+        base_path = Path(base)
+        scoped = base_path / f"src-{kind}-{value}"
+    except TypeError:  # pragma: no cover - upstream returned something un-path-like
+        _warn_once(
+            "tt-tnt: ModelArgs.weight_cache_path returned %r, which is not path-like; the "
+            "stale-cache guard cannot scope it. Serving with the stock cache path.",
+            base,
+        )
+        return base
+
+    _announce_cache_scope(base_path, scoped, kind, value, source)
+    return scoped
+
+
+def _patch_weight_cache_path():
+    """Install the cache-scoping shim. Idempotent; declines loudly if upstream has moved."""
+    global _ORIGINAL_WEIGHT_CACHE_PATH
+    if _ORIGINAL_WEIGHT_CACHE_PATH is not None:
+        return
+
+    original = getattr(ModelArgs, "weight_cache_path", None)
+    if not callable(original):
+        logger.warning(
+            "tt-tnt: ModelArgs.weight_cache_path is missing or not callable (%r). The "
+            "stale-weight-cache guard is NOT installed -- republished weights may be served "
+            "from a stale cache. tt_transformers has moved; this shim needs updating.",
+            original,
+        )
+        return
+
+    # Shape check: we forward *args/**kwargs, so extra parameters are fine, but the first
+    # two must still be (self, dtype) or we would be scoping something else entirely.
+    try:
+        params = list(inspect.signature(original).parameters)
+    except (TypeError, ValueError):  # pragma: no cover - unintrospectable callable
+        params = None
+    if params is not None and params[:2] != ["self", "dtype"]:
+        logger.warning(
+            "tt-tnt: ModelArgs.weight_cache_path has an unexpected signature (%s). The "
+            "stale-weight-cache guard is NOT installed -- republished weights may be served "
+            "from a stale cache. tt_transformers has changed; this shim needs updating.",
+            params,
+        )
+        return
+
+    _ORIGINAL_WEIGHT_CACHE_PATH = original
+    ModelArgs.weight_cache_path = _weight_cache_path_fingerprinted
+    logger.info(
+        "tt-tnt: scoped the tt_transformers weight cache by source fingerprint "
+        "(works around a cache keyed on the HF repo id alone, which silently serves the "
+        "previous model after a republish)."
+    )
+
+
+def restore_patches():
+    """Undo the patches. Provided so a host can leave the process as it found it."""
+    global _ORIGINAL_FIND_GRID, _ORIGINAL_WEIGHT_CACHE_PATH
+    if _ORIGINAL_FIND_GRID is not None:
+        ModelArgs.find_grid = _ORIGINAL_FIND_GRID
+        _ORIGINAL_FIND_GRID = None
+    if _ORIGINAL_WEIGHT_CACHE_PATH is not None:
+        ModelArgs.weight_cache_path = _ORIGINAL_WEIGHT_CACHE_PATH
+        _ORIGINAL_WEIGHT_CACHE_PATH = None
 
 
 # Applied at import time: the plugin imports this module to resolve ``main_class``, which
-# happens before any ModelArgs is constructed, so the shim is in place before first use.
+# happens before any ModelArgs is constructed, so the shims are in place before first use.
 _patch_find_grid()
+_patch_weight_cache_path()
 
 from models.tt_transformers.tt.generator_vllm import (  # noqa: E402
     LlamaForCausalLM as _StockLlamaForCausalLM,
@@ -288,4 +689,11 @@ class LlamaForCausalLM(_StockLlamaForCausalLM):
         )
 
 
-__all__ = ["LlamaForCausalLM", "restore_patches", "DEFAULT_OPTIMIZATIONS"]
+__all__ = [
+    "LlamaForCausalLM",
+    "restore_patches",
+    "DEFAULT_OPTIMIZATIONS",
+    "source_fingerprint",
+    "fingerprinting_enabled",
+    "CACHE_STAMP_NAME",
+]
