@@ -67,7 +67,13 @@ DEFAULT_PROMPTS = [
 #: served, and this script's entire output is a token-by-token comparison against it. A
 #: mismatched reference does not make the script fail; it makes it report divergence that
 #: is real but means nothing, which is worse, because the numbers still look like evidence.
-DEFAULT_HF_DIR_NAME = "artifacts/hf-tt-tnt-v1"
+#:
+#: It then pointed at ``artifacts/hf-tt-tnt-v1`` and went stale the same way one publish
+#: later: the Hub now holds tt-tnt-v3 (2048 context, trained on the EOS-carrying blend).
+#: **This constant must be re-aimed at every republish**, which is precisely why the
+#: ``_check_reference_matches_server`` guard below exists -- so that forgetting produces a
+#: refusal with an explanation rather than a plausible-looking table of numbers.
+DEFAULT_HF_DIR_NAME = "artifacts/hf-tt-tnt-v3"
 
 
 class ReferenceMismatch(RuntimeError):

@@ -55,18 +55,37 @@ def _fake_models_endpoint(monkeypatch, payload):
     monkeypatch.setattr(frc.urllib.request, "urlopen", lambda *a, **k: _Resp())
 
 
-def test_default_reference_is_the_published_artifact_not_the_v2_baseline():
-    """The default must resolve to the artifact matching the published weights.
+def _load_publish_to_hub():
+    """``scripts/publish_to_hub.py``, loaded by path for the same shadowing reason as above."""
+    path = ROOT / "scripts" / "publish_to_hub.py"
+    spec = importlib.util.spec_from_file_location("publish_to_hub_for_frc", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
-    `artifacts/384/hf` is the 256-context v2 model. Defaulting there while the Hub serves
-    512-context weights is the exact wrong-model comparison this guard exists to stop.
+
+def test_default_reference_is_the_artifact_that_publish_to_hub_uploads():
+    """The default reference must be the same directory the publish script uploads.
+
+    Stated against ``publish_to_hub.HF_DIR`` rather than a literal path on purpose. Both
+    constants name "the currently-published artifact", and they have now gone stale
+    together twice -- ``artifacts/384/hf`` (v2, 256) while the Hub served 512, then
+    ``artifacts/hf-tt-tnt-v1`` (512) while the Hub served v3's 2048. Each time, the
+    script kept producing a full table of agreement numbers that measured the gap between
+    two *models* rather than between two *execution paths*.
+
+    A literal assertion here would have to be edited at every republish and would pass
+    the moment someone edited it, which is no gate at all. Tying the two constants
+    together means the next republish cannot move one without the other.
     """
-    assert frc.DEFAULT_HF_DIR_NAME == "artifacts/hf-tt-tnt-v1"
     default = frc._default_hf_dir()
-    assert default == ROOT / "artifacts" / "hf-tt-tnt-v1"
-    assert default != ROOT / "artifacts" / "384" / "hf"
+    assert default == _load_publish_to_hub().HF_DIR, (
+        "the CPU reference and the uploaded artifact must be the same directory"
+    )
+    assert default != ROOT / "artifacts" / "384" / "hf", "that is the v2/256 baseline"
+    assert default != ROOT / "artifacts" / "hf", "that is the protected v2 baseline"
     config = json.loads((default / "config.json").read_text())
-    assert config["max_position_embeddings"] == 512
+    assert config["max_position_embeddings"] == 2048
 
 
 def test_guard_accepts_a_matching_reference(tmp_path, monkeypatch):

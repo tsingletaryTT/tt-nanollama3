@@ -68,15 +68,26 @@ LICENSE = "apache-2.0"
 #: The local HF artifact this script uploads -- i.e. the directory whose contents are
 #: supposed to *be* ``episod/tt-tnt``.
 #:
-#: This was ``artifacts/hf`` up to and including the v2/256 publish. It is deliberately no
-#: longer, and pointing it back would be a silent downgrade: ``artifacts/hf`` is the
-#: protected, unregeneratable v2 baseline (``train/paths.py::PROTECTED_RELATIVE``) and
-#: still holds ``max_position_embeddings: 256`` and the pre-blend tokenizer. The Hub now
-#: holds tt-tnt-v1 (512 context, retrained tokenizer); re-running this script against
-#: ``artifacts/hf`` would overwrite that with the older model, keeping the repo id and the
-#: model card and changing only the weights. ``_assert_local_artifact_is_publishable``
-#: below refuses that, so this constant is checked rather than merely believed.
-HF_DIR = ROOT / "artifacts" / "hf-tt-tnt-v1"
+#: This was ``artifacts/hf`` up to and including the v2/256 publish, and
+#: ``artifacts/hf-tt-tnt-v1`` for the 512 publish. It is deliberately neither now.
+#:
+#: Pointing it back at ``artifacts/hf`` would be a silent downgrade: that is the protected,
+#: unregeneratable v2 baseline (``train/paths.py::PROTECTED_RELATIVE``), still holding
+#: ``max_position_embeddings: 256`` and the pre-blend tokenizer. Pointing it back at
+#: ``artifacts/hf-tt-tnt-v1`` is a subtler downgrade and the one that is live right now: v1
+#: is a *loadable, current-tokenizer, correctly-shaped* artifact that differs from v3 only
+#: in its weights and one config field, so nothing about a mis-aimed upload would look
+#: wrong. It would keep the repo id, the card, the tokenizer and the architecture, and
+#: quietly replace 2048-context weights trained on an EOS-carrying corpus with
+#: 512-context weights that can never emit a document boundary.
+#:
+#: ``_assert_local_artifact_is_publishable`` below refuses any directory whose context
+#: length is not ``EXPECTED_MAX_POSITION_EMBEDDINGS``, so this constant is checked rather
+#: than merely believed. That check is what makes the v1/v3 confusion detectable at all:
+#: the two directories are otherwise byte-identical in every file except
+#: ``config.json`` and ``model.safetensors`` (verified: ``tokenizer.json``,
+#: ``tokenizer_config.json`` and ``special_tokens_map.json`` all compare equal).
+HF_DIR = ROOT / "artifacts" / "hf-tt-tnt-v3"
 CARD_PATH = ROOT / "docs" / "model-card.md"
 
 # What the round trip in --verify must find, and (for the context length) what the local
@@ -85,21 +96,23 @@ CARD_PATH = ROOT / "docs" / "model-card.md"
 # silently if the artifact were malformed (context length, weight tying, vocab, and the
 # exact parameter count as a coarse "did the whole state dict actually load" check).
 #
-# CONTEXT LENGTH, 256 -> 512 (2026-08-14). This constant was deliberately held at 256 for
-# a while after ``train/sizes.py`` moved to 512, on the stated reasoning that it "describes
-# the currently-published Hub artifact; bump only once a model is actually
-# retrained/republished at 512". That has now happened: ``episod/tt-tnt`` commit
-# ``ef0a9a91`` ("tt-tnt-v1: first run on the nine-source corpus (10,787 steps, seq_len 512,
-# val 4.2203)") publishes 512-context weights, the Hub's config.json reads
-# ``max_position_embeddings: 512``, and its model.safetensors sha256 (``dbc46211...``)
-# matches ``artifacts/hf-tt-tnt-v1/model.safetensors`` exactly. The constant still
-# describes the currently-published artifact; the artifact is what changed.
+# CONTEXT LENGTH, 256 -> 512 -> 2048. The standing rule has never changed: this constant
+# describes the artifact that is ACTUALLY published, and it moves only once a model has
+# actually been retrained and republished at the new context. It moved to 512 on
+# 2026-08-14 for tt-tnt-v1, and to 2048 later the same day for tt-tnt-v3, which was
+# trained at seq_len 2048 (``artifacts/checkpoints-tt-tnt-v3``, 10,764 steps, final
+# val_loss 2.939) and whose ``artifacts/hf-tt-tnt-v3/config.json`` reads
+# ``max_position_embeddings: 2048``.
 #
-# Note this is not a loosening: the value moved but the rule did not, and it now guards in
-# BOTH directions -- ``--verify`` fails if the Hub ever stops being 512, and
-# ``_assert_local_artifact_is_publishable`` refuses to upload a local directory that is not
-# 512, which is exactly the 256-over-512 downgrade the HF_DIR note above describes.
-EXPECTED_MAX_POSITION_EMBEDDINGS = 512
+# Note this is not a loosening: the value moved but the rule did not, and it guards in
+# BOTH directions -- ``--verify`` fails if the Hub ever stops being 2048, and
+# ``_assert_local_artifact_is_publishable`` refuses to upload a local directory that is
+# not 2048, which is exactly the v1-over-v3 downgrade the HF_DIR note above describes.
+#
+# 2048 is a power of two, which ``resources.max_model_len`` in the manifests separately
+# requires (``model_config.py:1150-1152``, capped_warmup_seq_len); see
+# ``tests/test_manifests.py``.
+EXPECTED_MAX_POSITION_EMBEDDINGS = 2048
 EXPECTED_TIE_WORD_EMBEDDINGS = True
 EXPECTED_VOCAB_SIZE = 32000
 EXPECTED_PARAM_COUNT = 22_025_088
