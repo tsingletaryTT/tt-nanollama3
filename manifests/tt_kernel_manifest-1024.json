@@ -21,7 +21,7 @@
     "repo": "episod/tt-tnt-1024"
   },
   "resources": {
-    "max_model_len": 256,
+    "max_model_len": 512,
     "max_num_seqs": 32,
     "command_override": {
       "p150": [
@@ -30,7 +30,7 @@
         "--model",
         "episod/tt-tnt-1024",
         "--max_model_len",
-        "256",
+        "512",
         "--max_num_seqs",
         "8"
       ]

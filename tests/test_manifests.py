@@ -156,18 +156,28 @@ def test_architecture_can_shard_onto_the_declared_mesh(path):
 #: trained to." Raising ``seq_len`` to 512 for the next training run (see
 #: ``.superpowers/seqlen-ddp-investigation.md``) gave it a second, forward-looking meaning
 #: -- "what the vendored YAML currently targets for the NEXT run of this architecture" --
-#: and those two meanings now legitimately disagree for ``384``: the registry says 512 (the
-#: next run's target), but ``episod/tt-tnt`` on the Hub, which this manifest actually
-#: serves, is still the v2 checkpoint trained at 256 (see ``docs/model-card.md``,
-#: ``README.md``). Asserting the manifest against the registry's forward-looking value
-#: would therefore assert something false about a real, already-published artifact --
-#: exactly the serving trap this test exists to catch, just introduced from the other
-#: direction. ``1024`` has no published weights at all yet, so 256 here is simply
-#: unchanged from when its manifest was authored as a packaging-path placeholder.
+#: and for a day those two meanings legitimately disagreed for ``384``, so this constant
+#: held 256 against a registry that already said 512.
 #:
-#: Update an entry here (to 512) only once that size's weights are ACTUALLY retrained and
+#: **That gap is now closed for 384.** ``episod/tt-tnt`` was retrained and republished at
+#: seq_len 512 on 2026-08-14 (Hub commit ``ef0a9a91``, "tt-tnt-v1: first run on the
+#: nine-source corpus (10,787 steps, seq_len 512, val 4.2203)"). Verified directly rather
+#: than taken on trust: the Hub's ``config.json`` reads ``max_position_embeddings: 512``,
+#: and its ``model.safetensors`` has sha256 ``dbc46211...`` matching
+#: ``artifacts/hf-tt-tnt-v1/model.safetensors`` byte for byte. The manifest that serves
+#: those weights must therefore declare 512, or serving silently truncates half the
+#: model's trained context -- the same trap this test exists to catch, from the other
+#: direction.
+#:
+#: ``1024`` still has no published weights at all (``episod/tt-tnt-1024`` does not exist on
+#: the Hub -- checked, ``RepositoryNotFoundError``), so its entry is not a *published* fact
+#: but a placeholder. It tracks the registry's design target, which is what that size will
+#: actually be trained to when it is trained, so that the packaging path is exercised
+#: against a coherent number rather than one left behind by an earlier architecture.
+#:
+#: Update a *published* entry here only once that size's weights are ACTUALLY retrained and
 #: republished at the new context length -- not when the registry's design target changes.
-_PUBLISHED_CONTEXT = {"384": 256, "1024": 256}
+_PUBLISHED_CONTEXT = {"384": 512, "1024": 512}
 
 
 @pytest.mark.parametrize("path", _manifests(), ids=lambda p: p.stem)
