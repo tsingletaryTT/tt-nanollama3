@@ -49,13 +49,25 @@ def build_header(
     tokenizer_dir: str,
     corpus_tokens: int,
     batch_size: int,
+    seq_len: int = SEQ_LEN,
     extra: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Assemble the header stored alongside a checkpoint's tensors.
 
-    ``vocab_size`` and ``seq_len`` are recorded from ``train.config`` rather than passed in:
-    they must describe the model that produced these weights, and taking them from the
-    single source of truth removes the chance of a caller recording something else.
+    ``vocab_size`` is recorded from ``train.config`` rather than passed in: it must
+    describe the model that produced these weights, and taking it from the single source
+    of truth removes the chance of a caller recording something else.
+
+    ``seq_len`` records the sequence length **actually used to train this checkpoint**.
+    It defaults to ``train.config.SEQ_LEN`` purely for callers (tests, ad-hoc scripts)
+    that don't care and don't want to plumb it explicitly — but ``seq_len`` is now a CLI
+    flag (``train/run.py --seq-len``), so the module constant is no longer necessarily
+    what any given run actually used. The real training call site always passes
+    ``seq_len=cfg.seq_len`` explicitly (the resolved ``RunConfig`` value for *this* run),
+    precisely so a header never silently records a value the run didn't use. Recording the
+    wrong seq_len here would propagate into ``convert/to_hf.py``'s
+    ``max_position_embeddings`` with no error anywhere along the way — exactly the kind of
+    silent lie this schema exists to prevent for the other fields.
 
     ``corpus_tokens`` is the size of the corpus split the checkpoint was trained against
     (train + val token count) — provenance, not a training-volume claim. ``batch_size`` plus
@@ -72,12 +84,12 @@ def build_header(
         "format": CHECKPOINT_FORMAT,
         "step": int(step),
         "vocab_size": VOCAB_SIZE,
-        "seq_len": SEQ_LEN,
+        "seq_len": int(seq_len),
         "model_config_path": str(model_config_path),
         "tokenizer_dir": str(tokenizer_dir),
         "corpus_tokens": int(corpus_tokens),
         "batch_size": int(batch_size),
-        "tokens_seen": int(step) * int(batch_size) * SEQ_LEN,
+        "tokens_seen": int(step) * int(batch_size) * int(seq_len),
         "created_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
     }
     if extra:

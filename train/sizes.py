@@ -303,13 +303,17 @@ SIZES: Dict[str, ModelSize] = {
         num_heads=6,
         num_groups=3,
         vocab_size=32000,
-        max_sequence_length=256,
+        max_sequence_length=512,
         theta=500000.0,
         rationale=(
             "The original: matches tt-train's shipped nanollama3 example. Trained, "
-            "converted, and published. Single-chip only (num_groups=3 admits mesh widths "
-            "{1,3}) and 11% core utilisation — both consequences of a shape chosen before "
-            "either was measured. Kept as the baseline, not as a template."
+            "converted, and published at max_sequence_length=256 (the v2 checkpoints and "
+            "the published HF model still describe that run, see docs/model-card.md) -- "
+            "max_sequence_length here is now 512 for the NEXT run, to fit the rebuilt "
+            "nine-source corpus's long-form 19th-century naturalist prose. Single-chip "
+            "only (num_groups=3 admits mesh widths {1,3}) and 11% core utilisation — both "
+            "consequences of a shape chosen before either was measured. Kept as the "
+            "baseline, not as a template."
         ),
     ),
     "1024": ModelSize(
@@ -319,7 +323,7 @@ SIZES: Dict[str, ModelSize] = {
         num_heads=16,
         num_groups=4,
         vocab_size=32000,
-        max_sequence_length=256,
+        max_sequence_length=512,
         theta=500000.0,
         rationale=(
             "The multi-chip-capable size. num_groups=4 admits mesh widths {1,2,4}, so "

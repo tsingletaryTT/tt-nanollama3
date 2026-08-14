@@ -24,8 +24,14 @@ from typing import Any, Dict, Union
 
 import yaml
 
-#: tt-train's ``nanollama3.yaml`` declares ``max_sequence_length: 256``.
-SEQ_LEN = 256
+#: Default training sequence length. Both vendored architecture configs
+#: (``train/configs/model/tt-tnt-384.yaml``, ``tt-tnt-1024.yaml``) declare
+#: ``max_sequence_length: 512`` to match -- raised from tt-train's original 256 because the
+#: rebuilt nine-source corpus contains long-form 19th-century naturalist prose that a
+#: 256-token window truncates badly. See ``.superpowers/seqlen-ddp-investigation.md`` for
+#: why 512 is safe (no C++ ceiling, flash-attention SDPA memory is linear in sequence
+#: length, the tokenized data path needs no changes).
+SEQ_LEN = 512
 
 #: Must equal the tokenizer's vocabulary (Plan 1 pins it at exactly this).
 VOCAB_SIZE = 32000
@@ -61,6 +67,7 @@ def build_yaml_config(
     model_config_path: str,
     *,
     seq_len: int = SEQ_LEN,
+    max_sequence_length: int = SEQ_LEN,
     batch_size: int = 64,
     max_steps: int = 20,
     eval_every: int = 200,
@@ -83,11 +90,33 @@ def build_yaml_config(
     ``docs/superpowers/specs/2026-08-11-followups.md`` item 1. Callers that want the fix
     pass ``stochastic_rounding=True`` directly, or point ``train/run.py --config`` at
     ``train/configs/nanollama3_bpe_v2.yaml`` (see ``apply_optimizer_override`` below).
+
+    ``seq_len`` vs. ``max_sequence_length``: these are two independent numbers upstream
+    (``cfg.seq_len`` is the window drawn per training batch; ``max_sequence_length`` is
+    the model's declared context, which sizes the RoPE cos/sin tables built once at model
+    construction) and **must be identical**. ``rotary_embedding_llama``'s prefill-mode
+    validator checks the head dimension but never checks the sequence dimension against
+    the input's (see ``.superpowers/seqlen-ddp-investigation.md``, §1.3), so a mismatch
+    would not raise on-device -- it would silently hand a shorter batch window a
+    differently-shaped rotary cache and produce wrong rotary embeddings with no error at
+    all. That failure mode is worse than a crash, so it is rejected here, at config-build
+    time, before a device is ever opened.
     """
-    if seq_len > SEQ_LEN:
+    if seq_len % 32 != 0:
         raise ValueError(
-            f"seq_len {seq_len} exceeds the model's max_sequence_length ({SEQ_LEN}); "
-            "the RoPE tables and causal mask are built for that length."
+            f"seq_len must be a multiple of 32 (the Tenstorrent tile dimension); got "
+            f"seq_len={seq_len}."
+        )
+    if seq_len != max_sequence_length:
+        raise ValueError(
+            f"seq_len ({seq_len}) must equal the model's max_sequence_length "
+            f"({max_sequence_length}) -- they are independent numbers upstream (the batch "
+            f"window vs. the RoPE cache size) that ttml never cross-checks. A mismatch "
+            f"would not raise inside ttml; it would silently produce wrong rotary "
+            f"embeddings (rotary_embedding_llama's prefill validator does not check the "
+            f"sequence dimension). Pass a --seq-len equal to the selected --size's "
+            f"max_sequence_length, or pick a --size whose max_sequence_length is "
+            f"{seq_len}."
         )
     return {
         "training_config": {

@@ -148,6 +148,28 @@ def test_architecture_can_shard_onto_the_declared_mesh(path):
     )
 
 
+#: The context each manifest's *actually-published* weights were trained to, independent of
+#: ``train/sizes.py``'s ``max_sequence_length``.
+#:
+#: Before 2026-08-13 these two numbers were always the same value, because
+#: ``ModelSize.max_sequence_length`` had only one meaning: "what this architecture was
+#: trained to." Raising ``seq_len`` to 512 for the next training run (see
+#: ``.superpowers/seqlen-ddp-investigation.md``) gave it a second, forward-looking meaning
+#: -- "what the vendored YAML currently targets for the NEXT run of this architecture" --
+#: and those two meanings now legitimately disagree for ``384``: the registry says 512 (the
+#: next run's target), but ``episod/tt-tnt`` on the Hub, which this manifest actually
+#: serves, is still the v2 checkpoint trained at 256 (see ``docs/model-card.md``,
+#: ``README.md``). Asserting the manifest against the registry's forward-looking value
+#: would therefore assert something false about a real, already-published artifact --
+#: exactly the serving trap this test exists to catch, just introduced from the other
+#: direction. ``1024`` has no published weights at all yet, so 256 here is simply
+#: unchanged from when its manifest was authored as a packaging-path placeholder.
+#:
+#: Update an entry here (to 512) only once that size's weights are ACTUALLY retrained and
+#: republished at the new context length -- not when the registry's design target changes.
+_PUBLISHED_CONTEXT = {"384": 256, "1024": 256}
+
+
 @pytest.mark.parametrize("path", _manifests(), ids=lambda p: p.stem)
 def test_max_model_len_matches_the_trained_context(path):
     """Guards the documented serving trap.
@@ -155,13 +177,19 @@ def test_max_model_len_matches_the_trained_context(path):
     ``tokenizer_config.json`` advertises a model_max_length of ~1e18, so any stack deriving
     the context from the tokenizer will happily accept prompts far beyond what the model was
     trained on and return degraded output with no error.
+
+    Compared against ``_PUBLISHED_CONTEXT`` (what the manifest's ``weights.repo`` was
+    ACTUALLY trained to), not ``size.max_sequence_length`` (the registry's current design
+    target for the architecture) -- see that constant's docstring for why those can now
+    differ without either one being wrong.
     """
     raw = json.loads(path.read_text())
     size = _size_of(path)
     declared = (raw.get("resources") or {}).get("max_model_len")
-    assert declared == size.max_sequence_length, (
-        f"{path.name}: resources.max_model_len={declared} but size {size.name} was trained "
-        f"to {size.max_sequence_length}"
+    expected = _PUBLISHED_CONTEXT[size.name]
+    assert declared == expected, (
+        f"{path.name}: resources.max_model_len={declared} but the published weights this "
+        f"manifest serves were trained to {expected}"
     )
 
 

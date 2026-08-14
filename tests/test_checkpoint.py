@@ -46,6 +46,20 @@ def test_header_records_vocab_and_seq_len_from_config():
     assert h["seq_len"] == SEQ_LEN
 
 
+def test_header_records_explicit_seq_len_not_the_module_default():
+    """seq_len is now a CLI flag (train/run.py --seq-len), so build_header must record the
+    seq_len THIS run actually used when the caller passes it explicitly -- not silently
+    fall back to whatever train.config.SEQ_LEN happens to be. A run at a non-default
+    seq_len whose checkpoint header lied about it would propagate a wrong
+    max_position_embeddings into convert/to_hf.py with no error anywhere."""
+    from train.config import SEQ_LEN
+
+    h = _header(step=10, batch_size=4, seq_len=256)
+    assert h["seq_len"] == 256
+    assert h["seq_len"] != SEQ_LEN  # proves it didn't fall back to the default
+    assert h["tokens_seen"] == 10 * 4 * 256
+
+
 def test_header_computes_tokens_seen_from_step_batch_and_seq_len():
     """tokens_seen must be derived, not guessed -- batch_size isn't recorded anywhere
     else a model card could read it from, so this is the only source of truth."""
@@ -53,15 +67,22 @@ def test_header_computes_tokens_seen_from_step_batch_and_seq_len():
 
     h = _header(step=3000, batch_size=64)
     assert h["tokens_seen"] == 3000 * 64 * SEQ_LEN
-    assert h["tokens_seen"] == 49_152_000
+    # Also pinned to a literal (not just the formula above), so a regression that breaks
+    # the multiplication itself (e.g. accidentally swapping in addition) still fails
+    # loudly. This literal assumes SEQ_LEN == 512 (true today) and must be recomputed if
+    # SEQ_LEN ever changes again -- exactly what happened here: the previous literal,
+    # 49_152_000, was only correct while SEQ_LEN was 256.
+    assert SEQ_LEN == 512 and h["tokens_seen"] == 98_304_000
 
 
 def test_corpus_tokens_and_tokens_seen_are_independent_fields():
     """corpus_tokens (whole corpus) must not be confused with tokens_seen (this run's
     actual training volume) -- they differ by design for a partial-epoch run."""
+    from train.config import SEQ_LEN
+
     h = _header(step=3000, batch_size=64, corpus_tokens=127_635_889)
     assert h["corpus_tokens"] == 127_635_889
-    assert h["tokens_seen"] == 49_152_000
+    assert h["tokens_seen"] == 3000 * 64 * SEQ_LEN
     assert h["corpus_tokens"] != h["tokens_seen"]
 
 

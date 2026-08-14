@@ -33,6 +33,7 @@ It is independent of ``--save-every``: the two boundaries need not coincide.
     python train/run.py --steps 100 --save-every 25
     python train/run.py --steps 200 --val-every 100
     python train/run.py --steps 50 --resume latest
+    python train/run.py --steps 20 --seq-len 512  # default; must match --size's max_sequence_length
 """
 
 from __future__ import annotations
@@ -52,6 +53,7 @@ sys.path.insert(0, str(ROOT))
 
 from train import checkpoint  # noqa: E402
 from train.config import (  # noqa: E402
+    SEQ_LEN,
     VOCAB_SIZE,
     apply_optimizer_override,
     build_yaml_config,
@@ -242,6 +244,13 @@ def main() -> int:
                         "'--resume latest --steps 100' trains to start_step + 100, "
                         "not to step 100.")
     p.add_argument("--batch-size", type=int, default=64)
+    p.add_argument("--seq-len", type=int, default=SEQ_LEN,
+                   help=f"Training sequence length in tokens (default: {SEQ_LEN}). Must be "
+                        f"a multiple of 32 (the tile dimension) and must equal the "
+                        f"selected --size's max_sequence_length exactly -- ttml never "
+                        f"cross-checks the two, and a mismatch would silently produce "
+                        f"wrong rotary embeddings rather than raise. See "
+                        f"train.config.build_yaml_config.")
     p.add_argument("--eval-every", type=int, default=10)
     p.add_argument("--size", default=DEFAULT_SIZE, choices=sorted(SIZES),
                    help=f"Model architecture to train, from train/sizes.py "
@@ -327,6 +336,7 @@ def main() -> int:
 
     yaml_config = build_yaml_config(
         str(ROOT / "artifacts" / "tokenizer"), str(model_config),
+        seq_len=args.seq_len, max_sequence_length=size.max_sequence_length,
         batch_size=args.batch_size, max_steps=args.steps, eval_every=args.eval_every,
     )
     if args.config:
@@ -436,6 +446,12 @@ def main() -> int:
                     tokenizer_dir=str(ROOT / "artifacts" / "tokenizer"),
                     corpus_tokens=int(len(train_ids) + len(val_ids)),
                     batch_size=args.batch_size,
+                    # Explicit, not the build_header default: seq_len is now a CLI flag
+                    # (--seq-len), so the header must record what THIS run actually used,
+                    # not train.config.SEQ_LEN's current value. See build_header's
+                    # docstring for why a wrong value here would be a silent lie that
+                    # propagates into convert/to_hf.py's max_position_embeddings.
+                    seq_len=cfg.seq_len,
                     extra={
                         "transformer_config": transformer_config,
                         # These four fields exist only as hardcoded defaults in ttml's

@@ -3,11 +3,20 @@
 #
 # tt-tnt-384 — the architecture this project trained, converted, and published.
 #
-# PROVENANCE. This is a verbatim copy of tt-train's own
+# PROVENANCE. Started as a verbatim copy of tt-train's own
 # `tt-train/configs/model_configs/nanollama3.yaml` as of tt-metal
-# rollback-pre-qwen36-1576-g620793d898. It is vendored here, unchanged, so that this
-# repository OWNS the architectures it ships rather than resolving them out of
-# $TT_METAL_HOME at runtime.
+# rollback-pre-qwen36-1576-g620793d898, vendored here so that this repository OWNS the
+# architectures it ships rather than resolving them out of $TT_METAL_HOME at runtime.
+#
+# DIVERGENCE FROM UPSTREAM (2026-08-13): `max_sequence_length` raised 256 -> 512 for the
+# next training run, ahead of the nine-source/425M-token corpus rebuild -- that corpus
+# contains long-form 19th-century naturalist prose that a 256-token window truncates
+# badly. The already-trained-and-published v2 model (`docs/model-card.md`,
+# `README.md`) used 256 and is unaffected; this value only takes effect on the NEXT run
+# of `train/run.py`. See `.superpowers/seqlen-ddp-investigation.md` for why 512 is safe
+# (no C++ ceiling on sequence length; the only hard constraint is
+# `max_sequence_length % 32 == 0`), and `train/config.py`'s `build_yaml_config` for the
+# invariant this value is paired with: `--seq-len` must equal this number exactly.
 #
 # WHY VENDOR IT. Until now `train/run.py` read this file from the tt-metal tree, which
 # meant (a) the architecture could change underneath us on a tt-metal upgrade with no
@@ -44,6 +53,6 @@ transformer_config:
   dropout_prob: 0.0
   num_blocks: 6
   vocab_size: 32000
-  max_sequence_length: 256
+  max_sequence_length: 512
   runner_type: default
   theta: 500000.0
