@@ -69,3 +69,33 @@ def test_the_tokenizer_ordering_caveat_is_recorded():
 
 def test_the_page_points_at_the_manifest_as_authoritative():
     assert "measurements/blend_manifest.json" in _page()
+
+
+def test_the_manifest_vs_tokenized_gap_is_quoted_correctly():
+    """The one figure in this page that is DERIVED rather than transcribed.
+
+    It shipped wrong twice -- 0.42% here and 0.46% on the published dataset card -- for a gap
+    that is really 1.90%. Both survived review because the number looked small enough to be
+    unremarkable, and because the surrounding prose blamed the eight source-to-source seams,
+    which cannot produce millions of tokens. (The real mechanism is measure_corpus.py
+    tokenizing chunk-by-chunk on "\\n\\n" -- millions of seams, not eight.)
+
+    This parses the CLAIM rather than substring-searching for the right answer: a first
+    attempt at this test merely asserted "1.90%" appeared somewhere on the page, which passed
+    even with the wrong figure restored, because the page states it in two places.
+    """
+    import re
+
+    page, rec = _page(), _record()
+    emitted = sum(s["emitted_tokens"] for s in rec["sources"].values())
+
+    claims = re.findall(r"([\d,]{9,})\s+tokens,\s+or\s+\*{0,2}([\d.]+)%", page)
+    assert claims, "page no longer states the gap as 'N tokens, or X%'"
+
+    for raw_gap, raw_pct in claims:
+        gap = int(raw_gap.replace(",", ""))
+        expected = gap / emitted * 100
+        assert abs(float(raw_pct) - expected) < 0.005, (
+            f"page claims {raw_pct}% for a gap of {gap:,} against {emitted:,} emitted "
+            f"tokens, but that is {expected:.2f}%"
+        )

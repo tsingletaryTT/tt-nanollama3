@@ -188,8 +188,15 @@ BPE merges do not cross an `encode()` call, so tokenizing nine chunks separately
 tokenizing their concatenation as one string can legitimately merge (or fail to merge) a
 different set of byte pairs at every join — the boundary between `flavour`'s last paragraph
 and `folklore`'s first, for instance, is a real encode-time seam in one measurement and
-invisible in the other. A 0.42% difference between 399,508,203 and 391,921,555 is consistent
-with that many source-to-source boundaries, not a sign either count is wrong. **Treat
+invisible in the other. The difference is **7,586,648 tokens, or 1.90%** of 399,508,203.
+
+That magnitude is the point, and an earlier version of this paragraph got it wrong twice — it
+quoted 0.42% and attributed the gap to the eight *source-to-source* seams. Eight seams cannot
+produce 7.6M tokens; they would produce dozens. The real mechanism is that
+`scripts/measure_corpus.py` splits each prepared file on `\n\n` and tokenizes **chunk by chunk**,
+so every chunk boundary — millions of them, one per document or paragraph, not eight — is an
+encode-time seam where a merge can differ. Same phenomenon, five orders of magnitude more of it,
+which is why 1.90% is unremarkable rather than alarming. Neither count is wrong. **Treat
 399,508,203 as the per-source provenance figure (how the blend was assembled) and
 391,921,555/352,729,403/39,192,152 as the tokenized-training-data figure (what
 `train/run.py` actually reads token-by-token)** — use whichever one answers the question being
