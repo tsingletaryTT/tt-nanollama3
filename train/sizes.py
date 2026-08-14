@@ -303,14 +303,19 @@ SIZES: Dict[str, ModelSize] = {
         num_heads=6,
         num_groups=3,
         vocab_size=32000,
-        max_sequence_length=512,
+        max_sequence_length=2048,
         theta=500000.0,
         rationale=(
             "The original: matches tt-train's shipped nanollama3 example. Trained, "
             "converted, and published at max_sequence_length=256 (the v2 checkpoints and "
-            "the published HF model still describe that run, see docs/model-card.md) -- "
-            "max_sequence_length here is now 512 for the NEXT run, to fit the rebuilt "
-            "nine-source corpus's long-form 19th-century naturalist prose. Single-chip "
+            "the published HF model still describe that run, see docs/model-card.md); "
+            "tt-tnt-v1 was then trained and published at 512. max_sequence_length here is "
+            "now 2048 for the NEXT run. The 512 run's own position-wise loss probe is why: "
+            "per-token loss stopped improving around position 64 and stayed flat to 511, "
+            "because the corpus carried no document boundaries and distant context was "
+            "genuinely unpredictable. With </s> now marking every document (see "
+            "scripts/prepare_corpus.py) a longer window has something to learn from. "
+            "Single-chip "
             "only (num_groups=3 admits mesh widths {1,3}) and 11% core utilisation — both "
             "consequences of a shape chosen before either was measured. Kept as the "
             "baseline, not as a template."
@@ -334,7 +339,15 @@ SIZES: Dict[str, ModelSize] = {
             "DERIVED FFN (2816 = 88 tiles = 8x11) fits this harvested grid exactly at "
             "80%, where dim=2560 reaches only 65% on the FFN despite better hidden-dim "
             "utilisation. NOT YET TRAINED — registered so the multi-chip and packaging "
-            "paths can be exercised."
+            "paths can be exercised. max_sequence_length deliberately LEFT at 512 when 384 "
+            "moved to 2048 on 2026-08-14: the argument for 2048 is that the 384 model's "
+            "measured position-wise loss went flat past ~64 tokens once document "
+            "boundaries were restored, and no such measurement exists for this shape at "
+            "any context. Raising an untrained size's declared context on another size's "
+            "evidence would also silently change the activation-memory and per-step-time "
+            "envelope of the multi-chip path this entry exists to exercise. Raise it when "
+            "this size is actually trained, together with tests/test_manifests.py's "
+            "_PUBLISHED_CONTEXT."
         ),
     ),
 }

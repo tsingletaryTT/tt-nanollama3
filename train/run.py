@@ -33,7 +33,7 @@ It is independent of ``--save-every``: the two boundaries need not coincide.
     python train/run.py --steps 100 --save-every 25
     python train/run.py --steps 200 --val-every 100
     python train/run.py --steps 50 --resume latest
-    python train/run.py --steps 20 --seq-len 512  # default; must match --size's max_sequence_length
+    python train/run.py --steps 20                # seq_len defaults to --size's max_sequence_length
 """
 
 from __future__ import annotations
@@ -244,13 +244,16 @@ def main() -> int:
                         "'--resume latest --steps 100' trains to start_step + 100, "
                         "not to step 100.")
     p.add_argument("--batch-size", type=int, default=64)
-    p.add_argument("--seq-len", type=int, default=SEQ_LEN,
-                   help=f"Training sequence length in tokens (default: {SEQ_LEN}). Must be "
-                        f"a multiple of 32 (the tile dimension) and must equal the "
-                        f"selected --size's max_sequence_length exactly -- ttml never "
-                        f"cross-checks the two, and a mismatch would silently produce "
-                        f"wrong rotary embeddings rather than raise. See "
-                        f"train.config.build_yaml_config.")
+    p.add_argument("--seq-len", type=int, default=None,
+                   help="Training sequence length in tokens. Defaults to the selected "
+                        "--size's own max_sequence_length, because that is the ONLY value "
+                        "build_yaml_config accepts: the two must be equal, ttml never "
+                        "cross-checks them, and a mismatch would silently produce wrong "
+                        "rotary embeddings rather than raise (see "
+                        "train.config.build_yaml_config). It was previously a fixed 512, "
+                        "which meant raising a size's context turned the default "
+                        "invocation into a guaranteed error. Pass it explicitly only to "
+                        "assert what you expect; it must be a multiple of 32.")
     p.add_argument("--eval-every", type=int, default=10)
     p.add_argument("--size", default=DEFAULT_SIZE, choices=sorted(SIZES),
                    help=f"Model architecture to train, from train/sizes.py "
@@ -320,6 +323,14 @@ def main() -> int:
               file=sys.stderr)
         return 1
     print(f"  model size: {size.name} ({model_config.name})")
+
+    # --seq-len defaults to the size's own declared context. build_yaml_config rejects any
+    # other value anyway (they are independent numbers upstream that must be identical), so
+    # a fixed default here could only ever be right for whichever sizes happened to share
+    # it -- and 384 moving to 2048 while 1024 stayed at 512 is exactly that case.
+    if args.seq_len is None:
+        args.seq_len = size.max_sequence_length
+    print(f"  seq_len: {args.seq_len} (size's max_sequence_length)")
 
     # Resolve the checkpoint directory now that the size is known, and guard it. The guard
     # applies to an explicitly-passed path too, not just the default: the point is that no

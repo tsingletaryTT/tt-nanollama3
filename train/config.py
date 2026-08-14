@@ -24,13 +24,21 @@ from typing import Any, Dict, Union
 
 import yaml
 
-#: Default training sequence length. Both vendored architecture configs
-#: (``train/configs/model/tt-tnt-384.yaml``, ``tt-tnt-1024.yaml``) declare
-#: ``max_sequence_length: 512`` to match -- raised from tt-train's original 256 because the
-#: rebuilt nine-source corpus contains long-form 19th-century naturalist prose that a
-#: 256-token window truncates badly. See ``.superpowers/seqlen-ddp-investigation.md`` for
-#: why 512 is safe (no C++ ceiling, flash-attention SDPA memory is linear in sequence
-#: length, the tokenized data path needs no changes).
+#: FALLBACK training sequence length, not the value real runs use.
+#:
+#: ``train/run.py`` derives its ``--seq-len`` from the selected ``ModelSize``'s own
+#: ``max_sequence_length``, because ``build_yaml_config`` below rejects anything else. This
+#: constant is only what ``RunConfig`` falls back to when a config dict omits ``seq_len``
+#: and what ``build_yaml_config``'s own keyword defaults are, which is a test convenience.
+#:
+#: It was 256 (tt-train's original), then 512 for the first nine-source run. The vendored
+#: configs no longer agree with each other -- ``tt-tnt-384.yaml`` declares 2048 as of
+#: 2026-08-14 and ``tt-tnt-1024.yaml`` still declares 512 -- so there is no single number
+#: this constant could hold that would be right for both, which is precisely why it must not
+#: be the source of a real run's window. See ``.superpowers/seqlen-ddp-investigation.md``
+#: for why lengthening the window is safe (no C++ ceiling, flash-attention SDPA memory is
+#: linear in sequence length, the tokenized data path needs no changes) and
+#: ``train/sizes.py`` for why 384 moved to 2048 and 1024 did not.
 SEQ_LEN = 512
 
 #: Must equal the tokenizer's vocabulary (Plan 1 pins it at exactly this).

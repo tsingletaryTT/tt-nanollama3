@@ -18,6 +18,19 @@
 # `max_sequence_length % 32 == 0`), and `train/config.py`'s `build_yaml_config` for the
 # invariant this value is paired with: `--seq-len` must equal this number exactly.
 #
+# RAISED AGAIN 512 -> 2048 (2026-08-14), and this time there is a measurement behind it
+# rather than an expectation. A position-wise loss probe on the tt-tnt-v1 weights showed
+# per-token loss flat from position ~64 to 511 -- on books as much as on short items -- so
+# the trained model was extracting nothing from context beyond ~64 tokens and a longer
+# window would have bought nothing. The cause was upstream of the window: the corpus
+# carried NO document boundaries (see `scripts/prepare_corpus.py`), so distant context
+# genuinely was unpredictable and the model correctly learned to ignore it. With `</s>`
+# now marking every document, long context is worth having, which is what this value is
+# for. 2048 is a multiple of 32 and flash-attention SDPA memory is linear in sequence
+# length, so the same "no C++ ceiling" reasoning that cleared 512 covers it; what is NOT
+# yet measured is the per-step time and activation memory at 4x the window, which is a
+# throughput question for the run, not a correctness one.
+#
 # WHY VENDOR IT. Until now `train/run.py` read this file from the tt-metal tree, which
 # meant (a) the architecture could change underneath us on a tt-metal upgrade with no
 # signal, and (b) there was no way to offer a second size, because there was only ever one
@@ -53,6 +66,6 @@ transformer_config:
   dropout_prob: 0.0
   num_blocks: 6
   vocab_size: 32000
-  max_sequence_length: 512
+  max_sequence_length: 2048
   runner_type: default
   theta: 500000.0
