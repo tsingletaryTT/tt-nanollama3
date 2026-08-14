@@ -88,24 +88,84 @@ empty `--resume` and dies in argparse. Use `--fresh` and checkpoint frequently.
 
 ## The arithmetic that is easy to get wrong
 
-DDP across 4 chips at `batch_size: 64` means **256 sequences per step**, not 64. Consequences:
+**Correction (2026-08-13): the claim that used to be here was backwards.** `batch_size` under
+ttml's DDP is the **total** batch, sharded across devices on dim 0 — not multiplied by the
+device count. `ttml/common/trainer.py:30-38` builds `batch_size` host-side samples and shards
+them across the mesh with `shard_tensor_to_mesh_mapper(device, 0)`; each of the 4 chips sees
+`batch_size / 4` samples, not `batch_size` samples. Gradients are then all-reduced and
+explicitly **divided by the axis size** (`core/distributed/distributed.cpp:36`,
+`ttnn::multiply(result, 1.0F / scaler)`), i.e. a proper mean — so the optimizer sees the
+gradient for a batch of exactly `batch_size`, identical to single-chip. This is corroborated
+by tt-train's own shipped config comment in `training_llama8b_tp_ddp_galaxy.yaml`:
+`batch_size: 8  # Total batch size across all DP groups`.
 
-- **The step budget moves.** Three epochs over the 114.9M-token training split is ~21,033
-  steps at batch 64. At an effective batch of 256 the same token count is **~5,258 steps**.
-  Reusing `--steps 21034` under DDP would train roughly *four times* the intended data.
-- **The learning rate probably moves too.** `lr: 3e-4` was chosen for batch 64. A 4× larger
-  batch conventionally wants a higher LR; leaving it unchanged is a different optimization
-  problem, not merely a faster version of the same one.
-- **`batch_size` must be divisible by the device count** (`ct3`). 64 / 4 = 16, so this is fine.
+DDP across 4 chips at `batch_size: 64` therefore means **64 sequences per step, not 256** —
+the opposite of what the previous version of this section claimed (that version was also
+internally inconsistent: its own "`batch_size` must be divisible by the device count... 64 /
+4 = 16" bullet only makes sense under sharding, and directly contradicts the "256 sequences"
+headline above it). Consequences, corrected:
+
+- **The step budget does not move.** Effective batch stays 64 whether the run is single-chip
+  or `[1,4]` DDP at `batch_size: 64`. The same `--steps` value trains the same amount of data
+  either way.
+- **The learning rate does not need to move**, for the same reason — DDP at unchanged
+  `batch_size` is not a larger-batch optimization problem, just a faster wall-clock version of
+  the same one. (A learning rate change would become necessary only if `batch_size` is *also*
+  raised, e.g. to 256, to make full use of 4 chips' worth of compute per step — that is a
+  separate, deliberate decision, not a side effect of turning DDP on.)
+- **`batch_size` must still be divisible by the device count** (`ct3`) so it shards evenly:
+  64 / 4 = 16 per chip.
 
 Expected speedup, from `ct5`'s measurements: **~1.95× on 2 chips, ~3.98× on 4** — near-linear.
 Whether that holds for a model this small is untested; at 0.134 s/step the per-step
 gradient-synchronization overhead may claim a meaningful share.
 
+## Why DDP is not enabled on this run — a silent-failure trap, not an oversight
+
+Turning on `enable_ddp: True` in `train/config.py`'s `device_config` today would change
+**nothing** — `ttml.common.utils.initialize_device` only ever reads `mesh_shape`
+(`ttml/common/utils.py:108-119`); `enable_ddp` is read by `ttml.common.model_factory` for
+vocab padding but never by the device-init path, and `train/run.py` calls `train()` with
+`use_ddp` **hardcoded to `False`** (`train/run.py`'s `train_fn(cfg, model, optimizer,
+train_ids, False, False)` call). So a config-only edit is inert.
+
+The dangerous part is what happens if someone fixes *only* that — passes `use_ddp=True` to
+`train()` without also initialising the parallelism context. `train()`'s gradient
+synchronization goes through `core/distributed/distributed.cpp:56-59`:
+
+```cpp
+void synchronize_gradients(const serialization::NamedParameters& parameters) {
+    if (!autograd::ctx().is_parallelism_context_initialized()) {
+        return;                                  // <-- silent early return
+    }
+```
+
+`is_parallelism_context_initialized()` only becomes true after an explicit call to
+`AutoContext::initialize_parallelism_context(DistributedConfig)`
+(`autograd/auto_context.cpp:233-238`). Nothing in this repo calls it (grepped: zero hits for
+`initialize_parallelism_context` / `DistributedConfig` / `ttml.Mesh`). So the batch would be
+correctly sharded across 4 chips, but the gradients would **never be reduced** — each replica
+computes its own gradient from its own quarter of the batch and takes its own step. The four
+replicas diverge from step 1. The reported loss is the mean over four increasingly different
+models, nothing crashes, and the checkpoint silently keeps only replica 0's weights. This is
+the same failure class this repo keeps finding: no error, no warning, just a wrong number
+that looks fine.
+
+That is why this run stays single-chip, `mesh_shape: [1, 1]`: enabling DDP correctly needs at
+least three coordinated changes (pass `use_ddp=True` to both `train()` and `evaluate()`,
+initialise the parallelism context after `initialize_device`, and give `evaluate()` a
+composer for the multi-device case) — it is not a one-line flip, and doing it partially is
+worse than not doing it at all. See `.superpowers/seqlen-ddp-investigation.md` §2 for the
+full gap analysis, including why `[1,4]` is the only viable mesh shape and `[2,2]` is a hard
+`TT_FATAL`.
+
 ## If we do this
 
 The honest reason is demonstration: a Tenstorrent-first reference model that never uses more
 than one chip of a four-chip mesh is leaving the most Tenstorrent-specific thing about the
-hardware unshown. It should be its own plan with its own measured baseline — a fresh run at a
-corrected step count and LR, compared against the v2 single-chip result on the same held-out
-windows — and not a config edit bolted onto an existing run.
+hardware unshown. It should be its own plan with its own measured baseline — a fresh run
+compared against the single-chip result on the same held-out windows, at `batch_size`
+unchanged (per the correction above, keeping `batch_size` fixed under `[1,4]` DDP needs no
+step-count or LR retuning — the effective batch is identical) — and not a config edit bolted
+onto an existing run, given the three coordinated code changes §"Why DDP is not enabled"
+above lists as still outstanding.
