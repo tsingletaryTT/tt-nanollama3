@@ -59,6 +59,79 @@ DEFAULT_PROMPTS = [
 ]
 
 
+#: The local HF artifact matching what ``episod/tt-tnt`` actually publishes.
+#:
+#: This used to default to ``train.paths.read_dir("384", "hf")``, which resolves to
+#: ``artifacts/384/hf`` -- the v2 model, 256 context, pre-blend tokenizer. Once the Hub was
+#: republished at 512 that default silently became a *different model* from the one being
+#: served, and this script's entire output is a token-by-token comparison against it. A
+#: mismatched reference does not make the script fail; it makes it report divergence that
+#: is real but means nothing, which is worse, because the numbers still look like evidence.
+DEFAULT_HF_DIR_NAME = "artifacts/hf-tt-tnt-v1"
+
+
+class ReferenceMismatch(RuntimeError):
+    """The CPU reference is not the model the server is serving."""
+
+
+def _default_hf_dir() -> Path:
+    """The matching reference directory, falling back to the size registry.
+
+    The fallback exists so this script keeps working in a tree where the v1 artifact has
+    been moved or renamed; the guard below is what makes either choice safe, so the
+    fallback cannot quietly reintroduce the wrong-model comparison.
+    """
+    preferred = ROOT / DEFAULT_HF_DIR_NAME
+    if (preferred / "config.json").is_file():
+        return preferred
+    from train.paths import read_dir
+
+    return read_dir("384", "hf")
+
+
+def _check_reference_matches_server(
+    hf_dir: Path, url: str, model: str, timeout: float
+) -> None:
+    """Refuse to compare a CPU reference against a server running a different model.
+
+    Compares the reference's ``max_position_embeddings`` with the served model's
+    ``max_model_len`` as reported by ``/v1/models``. That is a coarse check -- it cannot
+    tell two models of the same context apart -- but it catches the failure that actually
+    happened here (a 256-context reference against 512-context served weights), it needs no
+    extra dependency, and it costs one HTTP GET.
+
+    Deliberately not fatal-by-default-and-unskippable: comparing two deliberately different
+    models is a legitimate experiment, so ``--allow-reference-mismatch`` exists. What is not
+    legitimate is doing it by accident and reading the result as a decode measurement.
+    """
+    config_path = hf_dir / "config.json"
+    if not config_path.is_file():
+        raise ReferenceMismatch(f"{config_path} does not exist -- {hf_dir} is not an HF model dir")
+    ref_ctx = json.loads(config_path.read_text()).get("max_position_embeddings")
+
+    try:
+        with urllib.request.urlopen(f"{url}/v1/models", timeout=timeout) as resp:
+            served = json.load(resp)
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        raise ReferenceMismatch(f"could not read {url}/v1/models to verify the reference: {exc}")
+
+    entry = next((m for m in served.get("data", []) if m.get("id") == model), None)
+    if entry is None:
+        raise ReferenceMismatch(
+            f"server at {url} does not serve {model!r}; it offers "
+            f"{[m.get('id') for m in served.get('data', [])]}"
+        )
+    served_ctx = entry.get("max_model_len")
+    if ref_ctx != served_ctx:
+        raise ReferenceMismatch(
+            f"CPU reference {hf_dir} has max_position_embeddings={ref_ctx!r} but the server "
+            f"serves {model!r} at max_model_len={served_ctx!r}. These are different models, "
+            f"so a token-by-token comparison measures the difference between them, not the "
+            f"decode path. Pass --hf-dir pointing at the matching artifact (or "
+            f"--allow-reference-mismatch if the difference is the point)."
+        )
+
+
 def tt_generate(prompt: str, n: int, url: str, model: str, timeout: float) -> list[str]:
     """Greedy generation through the real serving path, returning token strings."""
     body = json.dumps(
@@ -111,7 +184,12 @@ def main() -> int:
     p.add_argument("--url", default="http://localhost:8000")
     p.add_argument("--model", default="episod/tt-tnt")
     p.add_argument("--hf-dir", default=None,
-                   help="CPU reference model directory (default: the 384 size's artifacts).")
+                   help=f"CPU reference model directory (default: {DEFAULT_HF_DIR_NAME}, the "
+                        f"artifact that matches the published weights).")
+    p.add_argument("--allow-reference-mismatch", action="store_true",
+                   help="Proceed even when the CPU reference's context length disagrees with "
+                        "the served model's. Only meaningful when you are deliberately "
+                        "comparing two different models.")
     p.add_argument("--tokens", type=int, default=40)
     p.add_argument("--timeout", type=float, default=300.0)
     p.add_argument("--json", type=Path, default=None, help="Write full results here.")
@@ -121,14 +199,22 @@ def main() -> int:
     args = p.parse_args()
 
     if args.hf_dir is None:
-        from train.paths import read_dir
-
-        args.hf_dir = str(read_dir("384", "hf"))
+        args.hf_dir = str(_default_hf_dir())
 
     import warnings
 
     warnings.filterwarnings("ignore")
     from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    try:
+        _check_reference_matches_server(
+            Path(args.hf_dir), args.url, args.model, args.timeout
+        )
+    except ReferenceMismatch as exc:
+        if not args.allow_reference_mismatch:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 3
+        print(f"WARNING (--allow-reference-mismatch): {exc}", file=sys.stderr)
 
     print(f"CPU reference: {args.hf_dir}")
     tok = AutoTokenizer.from_pretrained(args.hf_dir)
