@@ -1004,3 +1004,84 @@ whole `tests/` directory is collected.
 `test_a_rationale_that_cites_availability_cites_the_CURRENT_availability`, exactly as designed:
 seven rationales still quoted the pre-separator numbers. That gate has now caught stale prose
 on three separate occasions, which is the argument for having it.
+
+## The weight cache that lied (2026-08-14)
+
+**Prompt:** "Design and implement a fix for a stale-cache bug, carried in this model's own
+adapter." Hardware paused by the owner — source reading, unit tests, CPU-only work; any
+device verification deferred with an exact command.
+
+The bug, from `.superpowers/serve-tt-tnt-v3.md` F7: `tt_transformers` caches converted
+weights at `model_cache/<repo_id>/<device>/tensor_cache_bfp8/` and decides to reuse them
+with a bare existence check. tt-tnt was retrained, republished to the **same** repo id, and
+served — the server came up clean, reported the correct `max_model_len: 2048`, and ran the
+**previous** model's weights, logged as an ordinary warm start. Because that model could not
+emit EOS by construction, the headline number would have been a confident "0% termination"
+and would have read as a real regression in the very fix being tested. Caught only because
+someone noticed a directory mtime predated the publish.
+
+**Where it actually lives** — three facts, all now pinned by a canary test:
+
+| what | where |
+|---|---|
+| cache key computed | `model_config.py:577` — `os.path.join("model_cache", HF_MODEL, self.device_name)` |
+| the single funnel every weight path flows through | `model_config.py:3017` — `weight_cache_path(self, dtype)` |
+| reuse-vs-reconvert decided | `ttnn/ttnn/operations/core.py:719` — `if not cache_path.exists() or not cache_path.is_file()` |
+
+Only a *deserialisation* failure (`core.py:725`) ever triggers a re-conversion. Nothing
+compares the cache against the weights it came from.
+
+**The fix: content-address the cache key**, by appending one component to
+`weight_cache_path` —
+`…/tensor_cache_bfp8/src-rev-a3c85ec799fe/`. The fingerprint is the HF commit sha
+(`hf_config._commit_hash`, which `transformers` stamps on the config at
+`configuration_utils.py:812` and `ModelArgs.__init__` has already loaded by
+`model_config.py:616`), falling back for local checkpoint directories to a sha256 over
+`(name, size, mtime_ns)` of `config.json` and the weight files.
+
+**Why not the alternatives**, all of which were on the table:
+* *Validate before use.* To know a cached tensor is wrong you must produce the right one —
+  i.e. pay the conversion the cache exists to avoid — unless you keep a side manifest, which
+  is this fix with more moving parts. It also overwrites, so flipping back to the previous
+  revision pays again. Fingerprinting keeps every revision warm.
+* *Refuse a cache older than the weights (mtime).* There is no local file whose mtime means
+  "publish time" — the source is a Hub repo id and HF blob mtimes are *download* times, whose
+  order against the conversion is arbitrary within one session. Reading a timestamp is what
+  the human had to do; it is not a thing to automate.
+* *Disable the cache.* Correct and slow, so it gets switched back off the first busy
+  afternoon, restoring the bug. **A fix that gets disabled is not a fix.**
+
+**The failure mode was silence, so the fix must not introduce a different silence.** Every
+state in which the guarantee does not hold is audible: a new fingerprint beside an existing
+one WARNs and names the superseded revision (the log line whose absence made this invisible);
+leftover un-fingerprinted `.tensorbin` files WARN that they are now dead (and are *not*
+deleted — that is a human's call); an unavailable fingerprint or `TT_TNT_CACHE_FINGERPRINT=0`
+WARNs that stale weights are possible again; and if `weight_cache_path` has moved or its
+first two parameters are no longer `(self, dtype)`, the patch **declines to install** and
+says so rather than crashing the serve or silently no-opping. Each fingerprinted directory
+also gets a `tt_tnt_cache_source.json` stamp, so `ls` answers the question that cost an
+afternoon.
+
+**Local checkpoints need `mtime_ns`, not just size.** A retrain of the same architecture
+writes byte-identical file *sizes* — a size-only digest would reproduce this exact bug. The
+cost is a false miss (one redundant conversion, logged) after a re-download. False misses
+cost minutes; false hits cost a published measurement. `test_local_checkpoint_retrain_…`
+asserts the premise (`len(v1) == len(v2)`) before asserting the behaviour, so the test cannot
+pass for the wrong reason.
+
+**Tests run without tt-metal and without hardware** by installing a fake
+`models.tt_transformers` into `sys.modules` before loading the adapter — so 18 of the 19 gates
+always execute rather than skipping into vacuity. The 19th, the upstream-drift canary, reads
+tt-metal's *source text* (never imports it, so no ttnn, no device) and asserts all three
+anchors above still exist; it skips with a reason when the tree is absent. **Mutation-checked
+three ways**: reverting the patch fails 13, keying on a constant fails 9, dropping `mtime_ns`
+fails the retrain test specifically.
+
+**F8 is deliberately not in the adapter.** `~/.cache/tt-kernel/bundles/` is consumed by
+`tt-kernel serve` *before* the vLLM process exists: the stale bundle's `vllm_metadata.json`
+supplies the launch command (`--max_model_len 512`) that starts the process that would import
+this adapter. The adapter cannot reach backwards past its own `argv`. It belongs in tt-kernel
+(`cli.py:1276 _serve_vllm` → `_ensure_vllm_pulled`), as a `--refresh` flag plus a revision
+comparison against the Hub on serve.
+
+Suite: **600 passed, 1 skipped** (581 + 19 before this change, baseline held).
