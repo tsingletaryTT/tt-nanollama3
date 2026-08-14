@@ -29,6 +29,15 @@ the repo private and never flips it public. tt-kernel packaging manifests alread
 [`manifests/`](manifests/). See [`docs/superpowers/specs/`](docs/superpowers/specs/) for the
 full arc.
 
+**The corpus ships as a recipe, not as text.**
+[`episod/tt-tnt-corpus`](https://huggingface.co/datasets/episod/tt-tnt-corpus) (also private)
+carries the source registry with pinned revisions, the fetch/prepare/measure/blend scripts, the
+generated licensing table, and the provenance manifest with the blend's `sha256` — everything
+needed to reconstruct the corpus byte-identically, and nothing that would redistribute it. That
+is a licensing necessity rather than a stylistic choice: 46% of the blend is share-alike under
+two mutually incompatible copyleft terms (CDLA-Sharing-1.0 and CC-BY-SA-3.0), which no single
+concatenated file can satisfy at once.
+
 **Calibrate your expectations.** This is a ~22M-parameter model that has seen one epoch of a
 ~400M-token, nine-source blend — TinyStories, Simple English Wikipedia, and seven curated
 Project Gutenberg slices (see [`docs/corpus_blend.md`](docs/corpus_blend.md)) — not TinyStories
