@@ -1,0 +1,166 @@
+{
+  "checkpoint_step": 10787,
+  "hf_model": "/home/ttuser/code/tt-tnt/artifacts/hf-tt-tnt-v1",
+  "seq_len": 512,
+  "sources": {
+    "flavour": {
+      "slice": "flavour",
+      "target_share": 0.005,
+      "repetition_factor": 3.476,
+      "train_tokens": 1935233,
+      "train_share_of_train_split": 0.005474554632122115,
+      "train_sample_loss": {
+        "mean": 3.7098372941836715,
+        "sem": 0.04456893836942313,
+        "n_windows": 256,
+        "n_tokens_available": 1935233
+      },
+      "held_out_loss": null,
+      "held_out_kind": "",
+      "note": "no unseen tail exists: the blend contains at least one complete pass over this source's entire raw file, so every word was shown to the model at least once"
+    },
+    "folklore": {
+      "slice": "folklore",
+      "target_share": 0.08,
+      "repetition_factor": 1.5041,
+      "train_tokens": 31294378,
+      "train_share_of_train_split": 0.08852824545637678,
+      "train_sample_loss": {
+        "mean": 3.939672525972128,
+        "sem": 0.029647918169310138,
+        "n_windows": 256,
+        "n_tokens_available": 31294378
+      },
+      "held_out_loss": null,
+      "held_out_kind": "",
+      "note": "no unseen tail exists: the blend contains at least one complete pass over this source's entire raw file, so every word was shown to the model at least once"
+    },
+    "gutenberg_children": {
+      "slice": "backbone",
+      "target_share": 0.15,
+      "repetition_factor": 1.7516,
+      "train_tokens": 59022372,
+      "train_share_of_train_split": 0.166967595132697,
+      "train_sample_loss": {
+        "mean": 3.5836165864020586,
+        "sem": 0.024590698832643365,
+        "n_windows": 256,
+        "n_tokens_available": 59022372
+      },
+      "held_out_loss": null,
+      "held_out_kind": "",
+      "note": "no unseen tail exists: the blend contains at least one complete pass over this source's entire raw file, so every word was shown to the model at least once"
+    },
+    "poetry": {
+      "slice": "weird",
+      "target_share": 0.01,
+      "repetition_factor": 0.1309,
+      "train_tokens": 3950672,
+      "train_share_of_train_split": 0.011176002940005229,
+      "train_sample_loss": {
+        "mean": 5.005275180563331,
+        "sem": 0.021000952046137764,
+        "n_windows": 256,
+        "n_tokens_available": 3950672
+      },
+      "held_out_loss": {
+        "mean": 4.850084261037409,
+        "sem": 0.031354637090902894,
+        "n_windows": 256,
+        "n_tokens_available": 4024013
+      },
+      "held_out_kind": "unused tail of artifacts/corpus/poetry.txt beyond word 2,874,612 (3,000,002 words sampled, never included in any training corpus)",
+      "note": ""
+    },
+    "procedural": {
+      "slice": "agentic",
+      "target_share": 0.12,
+      "repetition_factor": 3.911,
+      "train_tokens": 46551134,
+      "train_share_of_train_split": 0.13168787751668004,
+      "train_sample_loss": {
+        "mean": 3.5011451127938926,
+        "sem": 0.041146971343760205,
+        "n_windows": 256,
+        "n_tokens_available": 46551134
+      },
+      "held_out_loss": null,
+      "held_out_kind": "",
+      "note": "no unseen tail exists: the blend contains at least one complete pass over this source's entire raw file, so every word was shown to the model at least once"
+    },
+    "spine": {
+      "slice": "spine",
+      "target_share": 0.135,
+      "repetition_factor": 2.061,
+      "train_tokens": 53156134,
+      "train_share_of_train_split": 0.150372673272626,
+      "train_sample_loss": {
+        "mean": 3.8356859860941768,
+        "sem": 0.026807256670022622,
+        "n_windows": 256,
+        "n_tokens_available": 53156134
+      },
+      "held_out_loss": null,
+      "held_out_kind": "",
+      "note": "no unseen tail exists: the blend contains at least one complete pass over this source's entire raw file, so every word was shown to the model at least once"
+    },
+    "tinystories": {
+      "slice": "backbone",
+      "target_share": 0.31,
+      "repetition_factor": 0.2795,
+      "train_tokens": 123983650,
+      "train_share_of_train_split": 0.3507356816543057,
+      "train_sample_loss": {
+        "mean": 1.8213809672743082,
+        "sem": 0.018914180750213727,
+        "n_windows": 256,
+        "n_tokens_available": 123983650
+      },
+      "held_out_loss": {
+        "mean": 1.8280696510337293,
+        "sem": 0.01973484713884221,
+        "n_windows": 256,
+        "n_tokens_available": 3574369
+      },
+      "held_out_kind": "unused tail of artifacts/corpus/tinystories.txt beyond word 103,880,945 (3,000,001 words sampled, never included in any training corpus)",
+      "note": ""
+    },
+    "weird": {
+      "slice": "weird",
+      "target_share": 0.04,
+      "repetition_factor": 2.2724,
+      "train_tokens": 15870676,
+      "train_share_of_train_split": 0.04489634209974162,
+      "train_sample_loss": {
+        "mean": 3.7004485949873924,
+        "sem": 0.034877570682742436,
+        "n_windows": 256,
+        "n_tokens_available": 15870676
+      },
+      "held_out_loss": null,
+      "held_out_kind": "",
+      "note": "no unseen tail exists: the blend contains at least one complete pass over this source's entire raw file, so every word was shown to the model at least once"
+    },
+    "wikipedia_simple": {
+      "slice": "grounding",
+      "target_share": 0.15,
+      "repetition_factor": 0.8825,
+      "train_tokens": 17731721,
+      "train_share_of_train_split": 0.05016102729544555,
+      "train_sample_loss": {
+        "mean": 4.201416860334575,
+        "sem": 0.038435376049362126,
+        "n_windows": 256,
+        "n_tokens_available": 17731721
+      },
+      "held_out_loss": {
+        "mean": 4.284696782939136,
+        "sem": 0.044047415181190125,
+        "n_windows": 256,
+        "n_tokens_available": 39277330
+      },
+      "held_out_kind": "artifacts/tokens/val_ids.npy (the training run's own held-out split; confirmed above to be entirely this source)",
+      "note": ""
+    }
+  }
+}
