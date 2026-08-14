@@ -3,7 +3,8 @@
 # SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
 """Publish (or re-publish) the tt-tnt HF artifact to the Hugging Face Hub.
 
-Uploads ``artifacts/hf/`` and applies ``docs/model-card.md`` as the model card to
+Uploads the current HF artifact directory (``HF_DIR``, see below -- it is *not*
+``artifacts/hf`` any more) and applies ``docs/model-card.md`` as the model card to
 ``episod/tt-tnt``. Re-runnable by design, because it has to be run more than once:
 
 * Once, to do the initial publish (default action, below).
@@ -54,14 +55,42 @@ sys.path.insert(0, str(ROOT))
 
 REPO_ID_DEFAULT = "episod/tt-tnt"
 LICENSE = "apache-2.0"
-HF_DIR = ROOT / "artifacts" / "hf"
+
+#: The local HF artifact this script uploads -- i.e. the directory whose contents are
+#: supposed to *be* ``episod/tt-tnt``.
+#:
+#: This was ``artifacts/hf`` up to and including the v2/256 publish. It is deliberately no
+#: longer, and pointing it back would be a silent downgrade: ``artifacts/hf`` is the
+#: protected, unregeneratable v2 baseline (``train/paths.py::PROTECTED_RELATIVE``) and
+#: still holds ``max_position_embeddings: 256`` and the pre-blend tokenizer. The Hub now
+#: holds tt-tnt-v1 (512 context, retrained tokenizer); re-running this script against
+#: ``artifacts/hf`` would overwrite that with the older model, keeping the repo id and the
+#: model card and changing only the weights. ``_assert_local_artifact_is_publishable``
+#: below refuses that, so this constant is checked rather than merely believed.
+HF_DIR = ROOT / "artifacts" / "hf-tt-tnt-v1"
 CARD_PATH = ROOT / "docs" / "model-card.md"
 
-# What the round trip in --verify must find. These are not arbitrary: they are the
+# What the round trip in --verify must find, and (for the context length) what the local
+# artifact must be before it may be uploaded at all. These are not arbitrary: they are the
 # properties the packaging plan calls out as the ones a serving stack would get wrong
 # silently if the artifact were malformed (context length, weight tying, vocab, and the
 # exact parameter count as a coarse "did the whole state dict actually load" check).
-EXPECTED_MAX_POSITION_EMBEDDINGS = 256
+#
+# CONTEXT LENGTH, 256 -> 512 (2026-08-14). This constant was deliberately held at 256 for
+# a while after ``train/sizes.py`` moved to 512, on the stated reasoning that it "describes
+# the currently-published Hub artifact; bump only once a model is actually
+# retrained/republished at 512". That has now happened: ``episod/tt-tnt`` commit
+# ``ef0a9a91`` ("tt-tnt-v1: first run on the nine-source corpus (10,787 steps, seq_len 512,
+# val 4.2203)") publishes 512-context weights, the Hub's config.json reads
+# ``max_position_embeddings: 512``, and its model.safetensors sha256 (``dbc46211...``)
+# matches ``artifacts/hf-tt-tnt-v1/model.safetensors`` exactly. The constant still
+# describes the currently-published artifact; the artifact is what changed.
+#
+# Note this is not a loosening: the value moved but the rule did not, and it now guards in
+# BOTH directions -- ``--verify`` fails if the Hub ever stops being 512, and
+# ``_assert_local_artifact_is_publishable`` refuses to upload a local directory that is not
+# 512, which is exactly the 256-over-512 downgrade the HF_DIR note above describes.
+EXPECTED_MAX_POSITION_EMBEDDINGS = 512
 EXPECTED_TIE_WORD_EMBEDDINGS = True
 EXPECTED_VOCAB_SIZE = 32000
 EXPECTED_PARAM_COUNT = 22_025_088
@@ -73,6 +102,39 @@ def _artifact_files() -> list[Path]:
     if not HF_DIR.is_dir():
         raise FileNotFoundError(f"{HF_DIR} does not exist -- run scripts/convert_checkpoint.py first")
     return sorted(p for p in HF_DIR.iterdir() if p.is_file())
+
+
+def _assert_local_artifact_is_publishable() -> None:
+    """Refuse to upload a local artifact whose context length isn't what we claim to ship.
+
+    ``--verify`` checks the artifact *after* it is on the Hub, which is too late to prevent
+    a bad publish -- it only tells you one happened. This is the same constant applied
+    before the write, so ``EXPECTED_MAX_POSITION_EMBEDDINGS`` guards the upload rather than
+    only describing it.
+
+    The failure it exists to stop is concrete and has a live trigger: several local
+    directories in ``artifacts/`` are loadable HF models of this architecture
+    (``artifacts/hf``, ``artifacts/384/hf``, ``artifacts/hf-v2-scratch``), they differ only
+    in weights and a config field, and all of them would upload perfectly happily. Pointing
+    ``HF_DIR`` at the wrong one produces a Hub repo that still has the right name, the
+    right card, and the right shape -- and half the trained context.
+    """
+    import json
+
+    config_path = HF_DIR / "config.json"
+    if not config_path.is_file():
+        raise FileNotFoundError(f"{config_path} does not exist -- {HF_DIR} is not an HF model dir")
+
+    config = json.loads(config_path.read_text())
+    actual = config.get("max_position_embeddings")
+    if actual != EXPECTED_MAX_POSITION_EMBEDDINGS:
+        raise ValueError(
+            f"{config_path} has max_position_embeddings={actual!r}, but this script "
+            f"publishes {EXPECTED_MAX_POSITION_EMBEDDINGS}-context weights. Refusing to "
+            f"upload: this is how a shorter-context model silently replaces a longer one "
+            f"under the same repo id. Point HF_DIR at the right artifact, or update "
+            f"EXPECTED_MAX_POSITION_EMBEDDINGS if the published context really is changing."
+        )
 
 
 def _print_upload_plan(repo_id: str) -> int:
@@ -155,6 +217,9 @@ def _report_card_state(repo_id: str) -> None:
 
 def cmd_publish(repo_id: str, dry_run: bool, yes: bool) -> int:
     """Create the repo (private), set the license, upload the artifact, apply the card."""
+    # Before the plan is even printed, so a wrong HF_DIR is reported by --dry-run too --
+    # the preview is worth nothing if it happily previews an upload that must not happen.
+    _assert_local_artifact_is_publishable()
     _print_upload_plan(repo_id)
 
     if dry_run:
@@ -229,21 +294,27 @@ def cmd_verify(repo_id: str) -> int:
         print(f"[{status}] {name}{('  ' + detail) if detail else ''}")
         checks.append(bool(cond))
 
-    print(f"loading {repo_id} fresh from the Hub (not from artifacts/hf/) ...")
+    print(f"loading {repo_id} fresh from the Hub (not from {HF_DIR.name}/) ...")
     tok = AutoTokenizer.from_pretrained(repo_id)
     model = AutoModelForCausalLM.from_pretrained(repo_id)
     model.eval()
     cfg = model.config
 
-    check("max_position_embeddings == 256", cfg.max_position_embeddings == EXPECTED_MAX_POSITION_EMBEDDINGS,
+    # Labels are interpolated from the constants, never spelled out. A hardcoded
+    # "max_position_embeddings == 256" next to a comparison against a constant that says
+    # 512 is a check that lies in its own output -- and this file had exactly that until
+    # the 512 bump, which is precisely when a reader most needs the label to be true.
+    check(f"max_position_embeddings == {EXPECTED_MAX_POSITION_EMBEDDINGS}",
+          cfg.max_position_embeddings == EXPECTED_MAX_POSITION_EMBEDDINGS,
           f"(got {cfg.max_position_embeddings})")
-    check("tie_word_embeddings is True", cfg.tie_word_embeddings is EXPECTED_TIE_WORD_EMBEDDINGS,
+    check(f"tie_word_embeddings is {EXPECTED_TIE_WORD_EMBEDDINGS}",
+          cfg.tie_word_embeddings is EXPECTED_TIE_WORD_EMBEDDINGS,
           f"(got {cfg.tie_word_embeddings})")
-    check("vocab_size == 32000", cfg.vocab_size == EXPECTED_VOCAB_SIZE,
+    check(f"vocab_size == {EXPECTED_VOCAB_SIZE}", cfg.vocab_size == EXPECTED_VOCAB_SIZE,
           f"(got {cfg.vocab_size})")
 
     n_params = sum(p.numel() for p in model.parameters())
-    check("parameter count == 22,025,088", n_params == EXPECTED_PARAM_COUNT,
+    check(f"parameter count == {EXPECTED_PARAM_COUNT:,}", n_params == EXPECTED_PARAM_COUNT,
           f"(got {n_params:,})")
 
     import torch

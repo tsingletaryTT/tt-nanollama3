@@ -12,6 +12,7 @@ failure mode this suite exists to catch).
 """
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -49,14 +50,89 @@ def test_source_never_sets_private_false():
     assert "private=True" in source
 
 
-def test_artifact_files_matches_real_artifacts_hf_dir():
-    """The upload plan's file list must be exactly what's on disk in artifacts/hf/,
+def test_artifact_files_matches_real_hf_dir():
+    """The upload plan's file list must be exactly what's on disk in HF_DIR,
     non-recursively -- no silent drift between what this prints and what upload_folder
-    actually sends."""
+    actually sends.
+
+    Reads ``publish_to_hub.HF_DIR`` rather than naming a directory: this test previously
+    hardcoded ``artifacts/hf``, which meant it kept passing while agreeing with the script
+    about a directory that had stopped being the published artifact.
+    """
     files = publish_to_hub._artifact_files()
-    expected = sorted(p.name for p in (ROOT / "artifacts" / "hf").iterdir() if p.is_file())
+    expected = sorted(p.name for p in publish_to_hub.HF_DIR.iterdir() if p.is_file())
     assert [f.name for f in files] == expected
     assert len(files) > 0
+
+
+def test_hf_dir_is_not_the_protected_v2_baseline():
+    """HF_DIR must never point at ``artifacts/hf``.
+
+    That directory is the protected, unregeneratable v2 baseline
+    (``train/paths.py::PROTECTED_RELATIVE``) and still holds 256-context weights and the
+    pre-blend tokenizer. Uploading it to ``episod/tt-tnt`` would replace the published
+    512-context tt-tnt-v1 with an older model under the same repo id, same card, same
+    shape -- a downgrade with nothing in the repo to signal it happened.
+    """
+    assert publish_to_hub.HF_DIR != ROOT / "artifacts" / "hf"
+    assert publish_to_hub.HF_DIR.is_dir()
+
+
+def test_local_artifact_context_length_matches_what_the_script_claims_to_publish():
+    """The real artifact on disk must satisfy the pre-upload guard."""
+    publish_to_hub._assert_local_artifact_is_publishable()
+    config = json.loads((publish_to_hub.HF_DIR / "config.json").read_text())
+    assert config["max_position_embeddings"] == publish_to_hub.EXPECTED_MAX_POSITION_EMBEDDINGS
+
+
+def test_publish_refuses_an_artifact_with_the_wrong_context_length(tmp_path, monkeypatch):
+    """The guard must actually fire, and must fire before anything reaches the Hub.
+
+    Verified by pointing HF_DIR at a config that differs from the expected context in the
+    one field that matters -- the 256-over-512 downgrade, reproduced.
+    """
+    def _boom(*a, **k):
+        raise AssertionError("a refused publish must not contact the Hub")
+
+    stale = tmp_path / "hf"
+    stale.mkdir()
+    (stale / "config.json").write_text(json.dumps({
+        "max_position_embeddings": publish_to_hub.EXPECTED_MAX_POSITION_EMBEDDINGS // 2,
+    }))
+    monkeypatch.setattr(publish_to_hub, "HF_DIR", stale)
+    monkeypatch.setattr(publish_to_hub, "_push_card", _boom)
+    monkeypatch.setattr(publish_to_hub, "_set_license", _boom)
+
+    with pytest.raises(ValueError, match="max_position_embeddings"):
+        publish_to_hub.cmd_publish("episod/tt-tnt", dry_run=False, yes=True)
+    # ...and --dry-run does not get a pass either: a preview that previews a forbidden
+    # upload is worse than no preview.
+    with pytest.raises(ValueError, match="max_position_embeddings"):
+        publish_to_hub.cmd_publish("episod/tt-tnt", dry_run=True, yes=False)
+
+
+def test_verify_labels_are_not_hardcoded_numbers():
+    """``--verify``'s printed labels must interpolate the constants, not restate them.
+
+    The bug this pins: the label spelled the number out while the comparison used a
+    constant. Bumping the constant to 512 left the check correct and its own output wrong
+    -- it reported passing a check named for 256 having just verified 512.
+
+    Scans only the ``check(...)`` call lines, not the whole file: the prose above those
+    calls necessarily quotes the old bad label to explain it, and a whole-file scan would
+    fire on the explanation.
+    """
+    check_lines = [
+        line for line in _SCRIPT_PATH.read_text().splitlines()
+        if line.lstrip().startswith("check(")
+    ]
+    assert check_lines, "found no check(...) calls to inspect -- the scan is looking at nothing"
+    for line in check_lines:
+        assert "== 256" not in line
+        assert "== 512" not in line
+        assert "== 32000" not in line
+        assert "22,025,088" not in line
+    assert any("{EXPECTED_MAX_POSITION_EMBEDDINGS}" in line for line in check_lines)
 
 
 def test_dry_run_publish_never_touches_the_hub(monkeypatch, capsys):
