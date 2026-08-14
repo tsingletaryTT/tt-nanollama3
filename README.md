@@ -71,7 +71,7 @@ repetition loops under greedy decoding — see the linked file and
 | Heads / KV groups | 6 / 3 |
 | Sequence length | 512 |
 | Vocabulary | 32,000 (byte-level BPE, trained here) |
-| Corpus | Nine-source blend — 399,594,747 tokens emitted per the provenance manifest; 392,773,300 tokens when the finished file is tokenized as training data (353,495,970 train / 39,277,330 validation) — see [`docs/corpus_blend.md`](docs/corpus_blend.md) for both figures and why they differ |
+| Corpus | Nine-source blend, **as it stood before 2026-08-14** — 399,594,747 tokens emitted per the provenance manifest; 392,773,300 tokens when the finished file is tokenized as training data (353,495,970 train / 39,277,330 validation). That revision carried no document separators, which has since been fixed and the blend rebuilt; see [`docs/corpus_blend.md`](docs/corpus_blend.md) for the current figures, for both of these, and for why they differ |
 | Hardware | Tenstorrent Blackhole — trained on **one** p300c (`mesh_shape [1, 1]`, no DDP/TP) |
 
 **This repository owns its architectures.** They live in

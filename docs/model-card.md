@@ -72,7 +72,7 @@ a verbatim copy of tt-train's own `nanollama3.yaml`.
 
 | | |
 |---|---|
-| Corpus | Nine-source, licence-audited blend — TinyStories, Simple English Wikipedia, and seven curated Project Gutenberg slices (see [`docs/corpus_blend.md`](https://github.com/tsingletaryTT/tt-tnt/blob/main/docs/corpus_blend.md)). 399,594,747 tokens emitted against a 400,000,000-token budget. The blend recipe — source registry, fetch/prepare/measure/blend scripts, and the provenance manifest — is published separately as [`episod/tt-tnt-corpus`](https://huggingface.co/datasets/episod/tt-tnt-corpus) |
+| Corpus | Nine-source, licence-audited blend — TinyStories, Simple English Wikipedia, and seven curated Project Gutenberg slices (see [`docs/corpus_blend.md`](https://github.com/tsingletaryTT/tt-tnt/blob/main/docs/corpus_blend.md)). 399,594,747 tokens emitted against a 400,000,000-token budget — the revision of the blend as it stood before 2026-08-14, which carried no document separators (`</s>`); this model therefore never saw an end-of-document token, which is the documented cause of its mid-generation topic changes and its failure to stop. The blend recipe — source registry, fetch/prepare/measure/blend scripts, and the provenance manifest — is published separately as [`episod/tt-tnt-corpus`](https://huggingface.co/datasets/episod/tt-tnt-corpus) |
 | Tokens seen | **353,495,970** — the full training split, **one epoch** |
 | Steps | 10,787 at batch 64, sequence length 512 |
 | Wall clock | ~58 minutes on a single Blackhole p300c |

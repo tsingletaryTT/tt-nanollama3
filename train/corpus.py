@@ -127,7 +127,10 @@ SOURCES: Dict[str, CorpusSource] = {
                   "vocabulary was tinystories-specialised to begin with). Tinystories has "
                   "enormous headroom (443,704,924 measured tokens against a 124,000,000 "
                   "requirement, needing only 0.28x) so it absorbs the point shaved from "
-                  "procedural rather than any strange slice giving up share.",
+                  "procedural rather than any strange slice giving up share. Re-measured "
+                  "2026-08-14 after document separators were added: 447,943,902 tokens, "
+                  "+4,238,978 on the figure above and exactly two tokens per document "
+                  "(the </s> and its newline), needing 0.2768x.",
     ),
     "gutenberg_children": CorpusSource(
         name="gutenberg_children",
@@ -146,7 +149,9 @@ SOURCES: Dict[str, CorpusSource] = {
                   "needs 1.75x upsample at a 15% share -- upsample=2 covers it with margin "
                   "(a 17.13% ceiling), well under the 4x working limit. The pre-retrain "
                   "measurement was 36,437,242 tokens needing 1.65x; the -6.0% shift is the "
-                  "smallest of any slice.",
+                  "smallest of any slice. Re-measured 2026-08-14 after document separators "
+                  "were added: 34,255,022 tokens (+1,166, two per document), needing "
+                  "1.7516x -- upsample=2 still covers it.",
     ),
     "wikipedia_simple": CorpusSource(
         name="wikipedia_simple",
@@ -216,7 +221,10 @@ SOURCES: Dict[str, CorpusSource] = {
                   "upsample raised to 3 (achieves 78,602,724, comfortable margin, still well "
                   "under the 4x limit at 2.06x actual need). The 13.5% share and the 26% "
                   "combined strange-slice figure are UNCHANGED by this re-settle; only the "
-                  "upsample factor moved. Browne, Thomas, Sir is deliberately NOT here "
+                  "upsample factor moved. Re-measured 2026-08-14 after document separators "
+                  "were added: 26,201,390 tokens (+482, exactly two per document), needing "
+                  "2.0610x -- upsample=3 still covers it."
+                  " Browne, Thomas, Sir is deliberately NOT here "
                   "despite being in the pre-task list — he is weird's selector, and listing him "
                   "in both would double-count him. Andrew Lang is excluded for the same reason: "
                   "he is folklore's selector. Blavatsky and Swedenborg are deliberately excluded: "
@@ -239,7 +247,9 @@ SOURCES: Dict[str, CorpusSource] = {
                   "Measured availability (21,274,517 tokens against the retrained tokenizer, "
                   "-9.6% on the 23,540,834 measured before it) needs 1.50x upsample at an 8% "
                   "share -- upsample=2 covers it with margin (a 10.64% ceiling), well under "
-                  "the 4x working limit.",
+                  "the 4x working limit. Re-measured 2026-08-14 after document separators "
+                  "were added: 21,274,911 tokens (+394, two per document), needing "
+                  "1.5041x -- upsample=2 still covers it.",
     ),
     "weird": CorpusSource(
         name="weird",
@@ -256,7 +266,10 @@ SOURCES: Dict[str, CorpusSource] = {
         rationale="Weird fiction and baroque prose. Unambiguously PD, unlike Lovecraft. Measured "
                   "availability (7,040,931 tokens against the retrained tokenizer, -11.5% on the "
                   "7,951,195 measured before it) needs 2.27x upsample at a 4% share -- "
-                  "upsample=3 covers it (a 5.28% ceiling), under the 4x working limit.",
+                  "upsample=3 covers it (a 5.28% ceiling), under the 4x working limit. "
+                  "Re-measured 2026-08-14 after document separators were added: 7,041,041 "
+                  "tokens (+110, two per document), needing 2.2724x -- upsample=3 still "
+                  "covers it.",
     ),
     "poetry": CorpusSource(
         name="poetry",
@@ -303,7 +316,9 @@ SOURCES: Dict[str, CorpusSource] = {
                   "swing. The freed 1 point moved to tinystories (see its rationale), not to any "
                   "strange slice, so spine+folklore+weird+flavour is untouched by this move. Do "
                   "not raise this share again without re-measuring: it is still the tightest "
-                  "slice in the registry.",
+                  "slice in the registry. Re-measured 2026-08-14 after document separators "
+                  "were added: 12,273,447 tokens (+360, two per document), needing 3.9109x "
+                  "-- still the tightest slice, and still inside the 4x limit.",
     ),
     "flavour": CorpusSource(
         name="flavour",
@@ -331,7 +346,10 @@ SOURCES: Dict[str, CorpusSource] = {
                   "retrain took -7.8% of it and more than a third of that margin with it. The "
                   "share stayed at 0.5% because it still fits, not because it fits well — do "
                   "not raise it, and re-measure before trusting it after any tokenizer change. "
-                  "The 1.5 points freed when it dropped from 2.00% moved to spine.",
+                  "The 1.5 points freed when it dropped from 2.00% moved to spine. "
+                  "Re-measured 2026-08-14 after document separators were added: 575,391 "
+                  "tokens (+14 — this slice is seven documents), needing 3.4759x. The "
+                  "ceiling moves to 0.5754%, so the headroom is unchanged at 0.075 points.",
     ),
 }
 

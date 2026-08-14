@@ -916,3 +916,91 @@ Nine findings; the artifact did not match what the manifest claimed.
   the branch), the tokenizer-ordering note above, and this section.
 
 Test suite: **419 passed, 1 skipped**.
+
+## The corpus had no document boundaries at all (2026-08-14)
+
+The prompt: `artifacts/corpus/blend.txt` contains **zero** document separators, while the old
+TinyStories-only `corpus.txt` — the corpus the *published* model trained on — contains
+**662,878**. Find where document identity is lost between the raw jsonl and the prepared
+`.txt`, fix it at the right layer, rebuild every artifact, and set up a 2048-context run.
+
+**Where it was lost: `scripts/prepare_corpus.py` wrote each document as `text + "\n\n"`.** A
+document boundary was spelled exactly the way a paragraph break *inside* a document is
+spelled, so nothing downstream could distinguish them. `train/tokenization.py` then finished
+the job — it encodes the corpus one line at a time and drops the newline, so blank lines
+contribute no tokens whatsoever. Zero `</s>` in the corpus, zero id 2 in the token arrays
+(still verifiable: `artifacts/tokens/` and `artifacts/tokens-stratified/` are kept, and both
+have zero in their first 20M tokens).
+
+That is not a tidiness bug. A position-wise loss probe showed per-token loss flat from
+position ~64 to 511, on books as much as on short items — with boundaries unmarked, distant
+context genuinely *is* unpredictable, so the model was right to ignore it. The mid-generation
+topic collapse in the samples is the same fact from the other side. **Lesson: a delimiter that
+is indistinguishable from ordinary formatting is not a delimiter.** The old pipeline got this
+right by accident, because TinyStories shipped an explicit `<|endoftext|>` line; the
+nine-source rewrite dropped the idea along with the format.
+
+* **The separator belongs in `prepare_corpus.py`, and nowhere else.** It is the only stage
+  that can see a document at all: `fetch_corpus.py` writes one JSON object per document,
+  `prepare_corpus.py` consumes them one at a time, and `blend_corpus.py` sees only
+  concatenated text which it repeats and truncates. Putting the boundary anywhere later would
+  have meant guessing at it.
+* **`</s>` was already the right token, and this was checked rather than assumed.** Id 2, an
+  *added* token (so byte-level BPE can neither split it nor absorb a neighbour),
+  `special_tokens_map.json`'s `eos_token`, and already written as `eos_token_id` into
+  `config.json` *and* `generation_config.json` by `convert/to_hf.py`. The serving path was
+  waiting for a token the training data never contained.
+* **The fix nearly introduced a worse bug.** `biglam/gutenberg-poetry-corpus` has one row per
+  **line** of verse — 3,085,117 rows of ~7 words. A per-row separator would have fired an
+  end-of-document token every seven words and, at poetry's 1% share, put roughly a *third* of
+  every `</s>` in the blend inside that slice: a seven-word prior for "stop". Caught by asking
+  what a "document" is for each source before writing any. `CorpusSource.rows_per_document`
+  (64 for poetry, 1 elsewhere) makes it 48,205 documents and 6,002 separators instead.
+  **Lesson: "one row = one document" is an assumption about the upstream dataset, not a
+  property of jsonl.**
+* **The truncated tail is closed deliberately.** `_emit` truncates each source's final pass at
+  word level, mid-document. Left open, source A's half-sentence would run into source B's
+  first document at each of the nine seams — the same defect, just rarer. The closing
+  separator is counted in `emitted_words`, because that number is what the stratified split
+  uses to locate each source's boundary in the finished corpus.
+* **`train/tokenization.py`'s `add_special_tokens=False` comment was wrong in both halves.**
+  It claimed the corpus already carried separators (true of the legacy path, false of this
+  one) and that `True` would double them (false outright — this tokenizer's post-processor is
+  a plain ByteLevel, so `True` injects nothing; measured). The flag stays `False` for the real
+  reason: that function is called once per **line**, so a tokenizer that ever gained a
+  template post-processor would wrap every line rather than every document. **A comment that
+  survives the code it describes becomes a trap.**
+
+**Verified empirically, not declared.** `blend.txt` holds **798,771** `</s>` lines against
+zero before. `artifacts/tokens-v3/` holds 734,978 + 63,793 = **798,771** occurrences of id 2 —
+equal to the token, so none were added, lost, or split. Decoded windows put the separator
+exactly where documents end: a TinyStories story closing before "Once upon a time"; the last
+line of an Oz book before the *next* book's title page; the Vatican City article's category
+tail before "Velocity is a measure of how fast something moves".
+
+**Shares did not need re-settling.** Availability rose by exactly **2 tokens per document**
+for every source (the separator plus its newline), which can only loosen the scarcity gate.
+The blend totals 399,508,203 tokens against the 400M budget (−0.123%), every slice within
+0.083 points of target. The expected "+1.4% of tokens" did not happen either: the budget is
+fixed, so the separators *displace* text rather than adding to the total. And ~800k, not
+~5.5M — most of the document-heavy sources are used fractionally (`tinystories` 0.28x,
+`wikipedia_simple` 0.88x), so most of their documents never enter the blend.
+
+**2048 context.** Raised in `train/configs/model/tt-tnt-384.yaml` and `train/sizes.py`
+together (the anti-drift test holds them equal). `tt-tnt-1024` deliberately stays at 512 — the
+evidence for 2048 is a measurement on the 384 shape, and that size has never been trained.
+That divergence is what forced `--seq-len` to default to the selected size's own
+`max_sequence_length` instead of a fixed 512: `build_yaml_config` enforces
+`seq_len == max_sequence_length`, so a fixed default had become a guaranteed error for the
+default size. **Lesson: a constant shared by two things that are allowed to differ is a bug
+waiting for the day they do.** No training was started.
+
+Test suite: **511 passed, 1 skipped** for this change (500 before it). A concurrent,
+still-untracked `tests/test_probe_context_use.py` — the position-wise loss probe whose
+measurement motivated all of the above — adds 36 more, for **547 passed, 1 skipped** when the
+whole `tests/` directory is collected.
+
+**A registry rationale is an artifact too.** Re-measuring availability broke
+`test_a_rationale_that_cites_availability_cites_the_CURRENT_availability`, exactly as designed:
+seven rationales still quoted the pre-separator numbers. That gate has now caught stale prose
+on three separate occasions, which is the argument for having it.

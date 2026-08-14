@@ -2,15 +2,15 @@
   "budget": 400000000,
   "upsample_cap": 8,
   "available": {
-    "flavour": 575377,
-    "folklore": 21274517,
-    "gutenberg_children": 34253856,
-    "poetry": 30557187,
-    "procedural": 12273087,
-    "spine": 26200908,
-    "tinystories": 443704924,
-    "weird": 7040931,
-    "wikipedia_simple": 67985428
+    "flavour": 575391,
+    "folklore": 21274911,
+    "gutenberg_children": 34255022,
+    "poetry": 30653597,
+    "procedural": 12273447,
+    "spine": 26201390,
+    "tinystories": 447943902,
+    "weird": 7041041,
+    "wikipedia_simple": 68469002
   },
   "methods": {
     "flavour": "tokenizer",
