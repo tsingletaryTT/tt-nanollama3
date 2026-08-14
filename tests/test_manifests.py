@@ -159,15 +159,17 @@ def test_architecture_can_shard_onto_the_declared_mesh(path):
 #: and for a day those two meanings legitimately disagreed for ``384``, so this constant
 #: held 256 against a registry that already said 512.
 #:
-#: **That gap is now closed for 384.** ``episod/tt-tnt`` was retrained and republished at
-#: seq_len 512 on 2026-08-14 (Hub commit ``ef0a9a91``, "tt-tnt-v1: first run on the
-#: nine-source corpus (10,787 steps, seq_len 512, val 4.2203)"). Verified directly rather
-#: than taken on trust: the Hub's ``config.json`` reads ``max_position_embeddings: 512``,
-#: and its ``model.safetensors`` has sha256 ``dbc46211...`` matching
-#: ``artifacts/hf-tt-tnt-v1/model.safetensors`` byte for byte. The manifest that serves
-#: those weights must therefore declare 512, or serving silently truncates half the
-#: model's trained context -- the same trap this test exists to catch, from the other
-#: direction.
+#: **That gap closed for 384 at 512, and has now closed again at 2048.** The size registry
+#: moved ``384`` to ``max_sequence_length=2048``, and ``episod/tt-tnt`` was retrained at
+#: that context as tt-tnt-v3 (``artifacts/checkpoints-tt-tnt-v3``, 10,764 steps, final
+#: val_loss 2.939, against v1's 4.31 on a differently-composed val split) and republished.
+#: Verified directly rather than taken on trust:
+#: ``artifacts/hf-tt-tnt-v3/config.json`` reads ``max_position_embeddings: 2048``, and its
+#: ``model.safetensors`` (sha256 ``97e19118...``) is what was uploaded -- distinct from
+#: v1's ``dbc46211...``. The manifest that serves those weights must therefore declare
+#: 2048, or serving silently truncates three quarters of the model's trained context --
+#: the same trap this test exists to catch, from the other direction, and a bigger bite of
+#: it than the 512 case was.
 #:
 #: ``1024`` still has no published weights at all (``episod/tt-tnt-1024`` does not exist on
 #: the Hub -- checked, ``RepositoryNotFoundError``), so its entry is not a *published* fact
@@ -177,7 +179,7 @@ def test_architecture_can_shard_onto_the_declared_mesh(path):
 #:
 #: Update a *published* entry here only once that size's weights are ACTUALLY retrained and
 #: republished at the new context length -- not when the registry's design target changes.
-_PUBLISHED_CONTEXT = {"384": 512, "1024": 512}
+_PUBLISHED_CONTEXT = {"384": 2048, "1024": 512}
 
 
 @pytest.mark.parametrize("path", _manifests(), ids=lambda p: p.stem)

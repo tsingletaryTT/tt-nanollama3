@@ -20,7 +20,7 @@
     "repo": "episod/tt-tnt"
   },
   "resources": {
-    "max_model_len": 512,
+    "max_model_len": 2048,
     "max_num_seqs": 8
   },
   "env": {
