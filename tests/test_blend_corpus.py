@@ -271,3 +271,43 @@ def test_recorded_total_is_stated_against_the_budget():
         s["emitted_tokens"] for s in rec["sources"].values())
     assert rec["total_vs_budget_tokens"] == rec["total_emitted_tokens"] - rec["budget"]
     assert abs(rec["total_vs_budget_pct"]) < 1.0
+
+
+# --- the truncated tail must not be an unmarked document transition.
+#
+# `scripts/prepare_corpus.py` terminates every document with `</s>`, but `_emit` truncates
+# each source's final pass at word level to hit its token target, which lands mid-document.
+# Without a closing separator, source A's half-sentence runs straight into source B's first
+# document at each of the nine seams -- the same unmarked transition the separators exist to
+# remove, just rarer.
+
+
+def test_emit_closes_a_truncated_tail_with_a_document_separator(tmp_path):
+    from scripts.blend_corpus import DOCUMENT_SEPARATOR, _emit
+    src = tmp_path / "s.txt"
+    src.write_text("\n".join(f"w{i}" for i in range(10_000)) + "\n", encoding="utf-8")
+    out = tmp_path / "out.txt"
+    with out.open("w", encoding="utf-8") as fh:
+        emission = _emit(src, want_tokens=1_300, out=fh, tokens_per_word=1.3)
+    text = out.read_text(encoding="utf-8")
+    assert text.rstrip("\n").endswith(DOCUMENT_SEPARATOR)
+    assert text.count(DOCUMENT_SEPARATOR) == 1
+    # The added word is counted: emitted_words is what train/tokenization.py's stratified
+    # split uses to locate this source's boundary in the finished corpus, so a word written
+    # but not counted would shift every later source's boundary by one.
+    assert emission.words == len(text.split())
+
+
+def test_emit_does_not_double_a_separator_it_lands_on(tmp_path):
+    """Truncation can land exactly on a separator line the source already carried."""
+    from scripts.blend_corpus import DOCUMENT_SEPARATOR, _emit
+    src = tmp_path / "s.txt"
+    src.write_text(f"alpha beta\n{DOCUMENT_SEPARATOR}\n\ngamma delta\n"
+                   f"{DOCUMENT_SEPARATOR}\n\n", encoding="utf-8")
+    out = tmp_path / "out.txt"
+    # 3 words at 1.0 tokens/word: "alpha", "beta", then the separator line itself.
+    with out.open("w", encoding="utf-8") as fh:
+        emission = _emit(src, want_tokens=3, out=fh, tokens_per_word=1.0)
+    text = out.read_text(encoding="utf-8")
+    assert text.count(DOCUMENT_SEPARATOR) == 1, f"separator doubled: {text!r}"
+    assert emission.words == len(text.split()) == 3

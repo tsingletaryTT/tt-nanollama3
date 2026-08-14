@@ -62,9 +62,31 @@ def encode_batch(batch: List[str], tok) -> np.ndarray:
     """Tokenize a batch of already newline-stripped lines into one flat id array.
 
     Shared by both split strategies in this module so they can never tokenize the same
-    text two different ways. ``add_special_tokens=False``: the corpus already carries its
-    own ``</s>`` separators (see ``scripts/prepare_corpus.py``'s ``DOCUMENT_SEPARATOR``
-    rewrite); letting the tokenizer inject more would double them at every story boundary.
+    text two different ways.
+
+    ``add_special_tokens=False``. The old justification for this flag -- "the corpus
+    already carries its own ``</s>`` separators, so letting the tokenizer inject more would
+    double them at every story boundary" -- described the TinyStories-only pipeline
+    (``train/data.py``) and was false for the nine-source one for as long as that pipeline
+    emitted no separators at all. Both halves of it were wrong, and the second half is wrong
+    even now that ``scripts/prepare_corpus.py`` writes a ``DOCUMENT_SEPARATOR`` line after
+    every document: ``artifacts/tokenizer``'s post-processor is a plain ``ByteLevel``, not a
+    ``TemplateProcessing``, so ``add_special_tokens=True`` would inject nothing and the two
+    settings produce identical ids today (measured, not assumed).
+
+    The flag is kept ``False`` for a different and still-live reason: **this function is
+    called once per LINE, not once per document.** The corpus is encoded line by line (see
+    the loops below), so if the tokenizer ever did gain a template post-processor -- a
+    retrain, a config edit, a newer ``tokenizers`` default -- ``True`` would wrap every
+    single line of the corpus in bos/eos rather than every document, burying the real
+    document boundaries under millions of spurious ones. ``False`` makes the separators the
+    corpus text carries the ONLY source of eos in the token stream, which is exactly the
+    property the position-wise-loss fix depends on.
+
+    The separators themselves survive this flag: ``</s>`` is an *added token* in
+    ``tokenizer.json``, and added tokens are matched in the input text before
+    pre-tokenization regardless of ``add_special_tokens``, so a line holding exactly
+    ``"</s>"`` encodes to exactly ``[2]``.
 
     Each line is encoded independently of its neighbours (the HF tokenizer treats each
     element of ``batch`` as its own sequence), so grouping lines into batches of any size,

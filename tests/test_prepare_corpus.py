@@ -6,13 +6,19 @@ The Gutenberg boilerplate test matters for licensing, not tidiness: PG applies a
 licence to its headers and footers while the underlying pre-1929 text is public domain.
 Stripping them is what keeps the "public domain texts" claim accurate.
 """
+import json
+
+import pytest
+
 from scripts.prepare_corpus import (
+    DOCUMENT_SEPARATOR,
     MARKER_BOTH,
     MARKER_NONE,
     MARKER_START_ONLY,
     MARKER_END_ONLY,
     _FRONT_MATTER,
     normalise,
+    prepare_source,
     strip_front_matter,
     strip_gutenberg_boilerplate,
 )
@@ -372,3 +378,93 @@ def test_genuine_uppercase_credit_still_stripped_after_capital_p_fix():
     ):
         out, removed = strip_front_matter(credit)
         assert removed == 1, f"genuine credit was not stripped: {credit!r}"
+
+
+# --- Document boundaries -----------------------------------------------------------------
+#
+# THE REGRESSION THESE PIN. The nine-source pipeline wrote every document as `text + "\n\n"`,
+# spelling a document boundary exactly the way a paragraph break inside a document is
+# spelled. Nothing downstream could tell them apart, and `train/tokenization.py` drops
+# newlines entirely, so the shipped blend contained ZERO `</s>` and the shipped token arrays
+# contained zero occurrences of id 2. The model never saw a boundary and never saw a stop
+# token.
+
+
+def _prepare(tmp_path, rows, rows_per_document=1):
+    """Run prepare_source over ``rows`` and return ``(text, counts)``."""
+    src = tmp_path / "input.jsonl"
+    dest = tmp_path / "output.txt"
+    src.write_text("".join(json.dumps({"text": r}) + "\n" for r in rows), encoding="utf-8")
+    counts = prepare_source("test", src, dest, rows_per_document=rows_per_document)
+    return dest.read_text(encoding="utf-8"), counts
+
+
+def test_every_document_is_terminated_with_the_separator(tmp_path):
+    text, counts = _prepare(tmp_path, ["alpha story", "beta story"])
+    assert text == (f"alpha story\n{DOCUMENT_SEPARATOR}\n\n"
+                    f"beta story\n{DOCUMENT_SEPARATOR}\n\n")
+    assert counts["documents"] == 2
+    assert counts["kept"] == 2
+
+
+def test_the_separator_is_distinguishable_from_an_internal_paragraph_break(tmp_path):
+    """THE bug in one assertion: a document containing a blank line must not look like two
+    documents. Only the separator marks a boundary."""
+    text, counts = _prepare(tmp_path, ["para one\n\npara two"])
+    assert text.count(DOCUMENT_SEPARATOR) == 1
+    assert counts["documents"] == 1
+    # The internal blank line survives; it just no longer carries boundary meaning.
+    assert "para one\n\npara two\n" in text
+
+
+def test_the_separator_sits_on_a_line_of_its_own(tmp_path):
+    """`train/tokenization.py` encodes one LINE per sequence. On its own line the separator
+    encodes to exactly the eos id; glued to the last line of prose it would not."""
+    text, _ = _prepare(tmp_path, ["alpha"])
+    assert DOCUMENT_SEPARATOR in text.split("\n")
+
+
+def test_grouped_rows_become_one_document(tmp_path):
+    """poetry's upstream rows are single lines of verse, so a per-row separator would fire
+    every ~7 words. Grouped rows share one boundary and stay separate paragraphs."""
+    text, counts = _prepare(tmp_path, [f"line {i}" for i in range(5)], rows_per_document=2)
+    assert counts["kept"] == 5
+    assert counts["documents"] == 3, "two full groups plus the short tail"
+    assert text.count(DOCUMENT_SEPARATOR) == 3
+    assert text.startswith(f"line 0\n\nline 1\n{DOCUMENT_SEPARATOR}\n\n")
+
+
+def test_the_short_final_group_is_still_terminated(tmp_path):
+    """An unterminated tail is the same unmarked boundary the whole change removes."""
+    text, counts = _prepare(tmp_path, ["a", "b", "c"], rows_per_document=2)
+    assert counts["documents"] == 2
+    assert text.endswith(f"c\n{DOCUMENT_SEPARATOR}\n\n")
+
+
+def test_empty_documents_do_not_produce_a_bare_separator(tmp_path):
+    """A row that normalises to nothing is skipped, so it cannot emit a boundary with no
+    document in front of it."""
+    text, counts = _prepare(tmp_path, ["alpha", "   \n\n  ", "beta"])
+    assert text.count(DOCUMENT_SEPARATOR) == 2
+    assert counts["documents"] == 2
+
+
+def test_a_preexisting_separator_in_the_source_text_is_reported(tmp_path):
+    """Measured as zero across all nine pinned sources, but it must be visible if it ever
+    stops being zero: such a row carries a boundary this script did not place."""
+    _, counts = _prepare(tmp_path, [f"alpha {DOCUMENT_SEPARATOR} beta", "plain"])
+    assert counts["preexisting_separators"] == 1
+
+
+def test_rows_per_document_must_be_at_least_one(tmp_path):
+    src = tmp_path / "input.jsonl"
+    src.write_text('{"text": "a"}\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="rows_per_document"):
+        prepare_source("test", src, tmp_path / "out.txt", rows_per_document=0)
+
+
+def test_the_separator_is_the_tokenizers_eos_literal():
+    """Not any string: the literal the trained tokenizer maps to id 2, which is what
+    convert/to_hf.py writes as eos_token_id into config.json and generation_config.json."""
+    from train.data import EOS_TOKEN_TEXT
+    assert DOCUMENT_SEPARATOR == EOS_TOKEN_TEXT == "</s>"

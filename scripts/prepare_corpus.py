@@ -10,6 +10,34 @@ domain. Removing them is what makes "public domain texts" an accurate claim.
 NOTE: Pre-1997 SMALL PRINT-era boilerplate is NOT stripped. Its legal block is front matter
 (marking where the book begins), not a footer, so it requires different handling than the
 START/END marker model. No such document has been observed in currently pinned sources.
+
+THIS LAYER OWNS THE DOCUMENT BOUNDARY. It is the only stage of the pipeline that can:
+``scripts/fetch_corpus.py`` writes one JSON object per document, this script consumes them
+one at a time, and everything downstream sees only concatenated text. Each document is
+therefore terminated here with a literal ``</s>`` line -- the trained tokenizer's eos token
+(id 2) -- so document identity survives into the blend and into the token stream.
+
+THE REGRESSION THIS CLOSES. Before this, a document was written as ``text + "\\n\\n"``, so a
+document boundary was spelled exactly like a paragraph break INSIDE a document, and nothing
+downstream could tell them apart. Worse, ``train/tokenization.py`` encodes the corpus line by
+line and drops the newline, so blank lines contribute no tokens at all: the blend held zero
+``</s>`` and the shipped token arrays held zero occurrences of id 2 -- verified over the
+first 20M tokens of ``artifacts/tokens-stratified/train_ids.npy``. The model was trained on a
+stream with no structural signal whatsoever, which is consistent with the measured
+position-wise loss curve (per-token loss stops improving around position 64 and stays flat to
+511: with unmarked boundaries, distant context genuinely is unpredictable) and with the
+observed mid-generation topic collapse, which is the model faithfully reproducing the
+unmarked document transitions it was trained on. It also never saw an eos token, so it could
+not learn to terminate.
+
+WHY ``</s>`` AND NOT SOMETHING ELSE. It is already id 2 in ``artifacts/tokenizer`` (added as
+a special token, so it encodes to exactly one id and never splits), it is
+``special_tokens_map.json``'s ``eos_token``, and ``convert/to_hf.py`` writes
+``eos_token_id: 2`` into both ``config.json`` and ``generation_config.json``. A model that
+learns to emit it therefore stops cleanly under ``transformers`` and vLLM with no extra
+plumbing. The legacy TinyStories-only path (``train/data.py``) already used this exact
+literal, which is why ``artifacts/corpus/corpus.txt`` -- the corpus the previously-published
+model trained on -- contains 662,878 of them.
 """
 from __future__ import annotations
 
@@ -24,7 +52,21 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from train.corpus import SOURCES, get_source  # noqa: E402
+# EOS_TOKEN_TEXT is imported rather than re-declared so the nine-source pipeline and the
+# legacy TinyStories-only path (train/data.py) can never disagree about what a document
+# separator looks like. train/data.py imports nothing beyond the stdlib, so this costs
+# nothing here.
+from train.data import EOS_TOKEN_TEXT  # noqa: E402
 from train.paths import shared_dir  # noqa: E402
+
+#: Written on a line of its own after every document. One line, not appended to the last
+#: line of the text, because ``train/tokenization.py`` encodes the corpus one LINE per
+#: sequence: on its own line the separator is encoded as the single string ``"</s>"`` and
+#: comes back as exactly ``[2]``, with no dependence on how the preceding line happens to
+#: end. ``scripts/measure_corpus.py`` and ``blend_corpus.TokenMeter`` chunk on blank lines
+#: instead, and both count it as one token there too (verified: ``</s>`` is an added token,
+#: so neither the ByteLevel pre-tokenizer nor BPE can split or absorb it).
+DOCUMENT_SEPARATOR = EOS_TOKEN_TEXT
 
 # Marker status constants to prevent typos and ensure consistency
 MARKER_BOTH = "both"
@@ -228,30 +270,64 @@ def normalise(text: str) -> str:
     return text.strip("\n")
 
 
-def prepare_source(name: str, src: Path, dest: Path) -> dict:
-    """Normalise one source's raw jsonl into a plain-text file.
+def prepare_source(name: str, src: Path, dest: Path, rows_per_document: int = 1) -> dict:
+    """Normalise one source's raw jsonl into a plain-text file of separated documents.
+
+    Every document is written as its normalised text, then a line holding exactly
+    ``DOCUMENT_SEPARATOR``, then a blank line. The blank line keeps the paragraph chunking
+    that ``scripts/measure_corpus.py`` and ``blend_corpus.TokenMeter`` split on; the
+    separator line is what makes a document boundary distinguishable from the paragraph
+    breaks inside a document, which are also blank lines.
+
+    ``rows_per_document`` (from the registry) is how many consecutive raw rows form one
+    document. It is 1 everywhere except ``poetry``, whose upstream rows are single lines of
+    verse -- see ``CorpusSource.rows_per_document``. Grouped rows are joined with a blank
+    line, so each row stays its own paragraph and the bytes are unchanged from before this
+    fix apart from the added separators; only the trailing group is short, and it is
+    terminated like any other.
 
     Returns a dict with:
-    - kept: documents successfully written
+    - kept: raw rows successfully written
+    - documents: separator-terminated documents written (== kept unless rows are grouped)
     - both: documents with both START and END markers
     - start_only: documents with START marker but no END
     - end_only: documents with END marker but no START
     - none: documents with no markers
     - skipped: malformed JSON or missing text field
     - front_matter_lines: total lines of residual PG front matter stripped across all docs
+    - preexisting_separators: rows whose own text already contained ``DOCUMENT_SEPARATOR``
+      before this script added any. Reported rather than rewritten: such a row would carry a
+      boundary this script did not put there, and the caller needs to know. Measured as 0
+      across all nine pinned sources when this was written.
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
+    if rows_per_document < 1:
+        raise ValueError(
+            f"{name}: rows_per_document must be >= 1, got {rows_per_document}")
     counts = {
         "kept": 0,
+        "documents": 0,
         "both": 0,
         "start_only": 0,
         "end_only": 0,
         "none": 0,
         "skipped": 0,
         "front_matter_lines": 0,
+        "preexisting_separators": 0,
     }
 
     with src.open("r", encoding="utf-8") as fin, dest.open("w", encoding="utf-8") as fout:
+        group: list = []
+
+        def flush_group() -> None:
+            """Write the buffered rows as ONE separator-terminated document."""
+            if not group:
+                return
+            fout.write("\n\n".join(group))
+            fout.write("\n" + DOCUMENT_SEPARATOR + "\n\n")
+            counts["documents"] += 1
+            group.clear()
+
         for line in fin:
             try:
                 data = json.loads(line)
@@ -282,9 +358,18 @@ def prepare_source(name: str, src: Path, dest: Path) -> dict:
             if not text:
                 continue
 
-            fout.write(text)
-            fout.write("\n\n")
+            if DOCUMENT_SEPARATOR in text:
+                counts["preexisting_separators"] += 1
+
+            group.append(text)
             counts["kept"] += 1
+            if len(group) >= rows_per_document:
+                flush_group()
+
+        # The final group is short whenever the row count is not a multiple of
+        # rows_per_document. Terminate it anyway: an unterminated tail is exactly the
+        # unmarked boundary this whole change exists to remove.
+        flush_group()
 
     return counts
 
@@ -298,7 +383,7 @@ def main() -> int:
     names = args.source or sorted(SOURCES)
     for name in names:
         try:
-            get_source(name)
+            source = get_source(name)
         except KeyError as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1
@@ -307,7 +392,8 @@ def main() -> int:
             print(f"skipping {name}: {src} not found (run fetch_corpus.py first)")
             continue
         dest = shared_dir("corpus") / f"{name}.txt"
-        counts = prepare_source(name, src, dest)
+        counts = prepare_source(name, src, dest,
+                                rows_per_document=source.rows_per_document)
         size_mb = dest.stat().st_size / 1e6
         marker_info = (f"both: {counts['both']}, start-only: {counts['start_only']}, "
                        f"end-only: {counts['end_only']}, none: {counts['none']}")
@@ -315,8 +401,14 @@ def main() -> int:
             marker_info += f", skipped: {counts['skipped']}"
         if counts['front_matter_lines'] > 0:
             marker_info += f", front-matter-lines: {counts['front_matter_lines']}"
-        print(f"{name:22} {counts['kept']:>7,} docs -> {dest.name} ({size_mb:,.1f} MB) "
-              f"({marker_info})")
+        rows_note = ("" if source.rows_per_document == 1
+                     else f" ({source.rows_per_document} rows/doc)")
+        print(f"{name:22} {counts['kept']:>9,} rows -> {counts['documents']:>9,} docs"
+              f"{rows_note} -> {dest.name} ({size_mb:,.1f} MB) ({marker_info})")
+        if counts["preexisting_separators"]:
+            print(f"  WARNING: {counts['preexisting_separators']:,} {name} rows already "
+                  f"contained {DOCUMENT_SEPARATOR!r} in their own text, so they carry "
+                  f"document boundaries this script did not place.", file=sys.stderr)
     return 0
 
 

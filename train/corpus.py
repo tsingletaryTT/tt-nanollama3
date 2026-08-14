@@ -64,6 +64,26 @@ class CorpusSource:
     bookshelves: List[str] = field(default_factory=list)
     #: Repetition factor applied when blending. >1 only for deliberately small sources.
     upsample: int = 1
+    #: How many CONSECUTIVE rows of ``artifacts/raw/<name>/text.jsonl`` make up one
+    #: document, i.e. one span that ``scripts/prepare_corpus.py`` terminates with a ``</s>``.
+    #:
+    #: 1 for every source whose rows really are documents (a story, an article, a book).
+    #: It is >1 only where the upstream dataset's row is SMALLER than a document, which is
+    #: true of exactly one source here: ``biglam/gutenberg-poetry-corpus`` has one row per
+    #: LINE of verse (3,085,117 rows averaging ~7 words), so treating a row as a document
+    #: would put an end-of-document token every ~7 words. That is not a boundary the model
+    #: should learn: measured against the shipped shares it would have made ``poetry`` --
+    #: 1% of the blend -- carry about a third of every ``</s>`` in the corpus, teaching a
+    #: ~7-word prior for "stop", which is the opposite of the termination signal document
+    #: separators exist to provide.
+    #:
+    #: Rows arrive in dataset order and that corpus is ordered by Gutenberg id, so N
+    #: consecutive rows are N consecutive lines of the same poem (occasionally straddling a
+    #: book boundary at the seam). The upstream row's ``gid`` would give exact poem
+    #: boundaries, but ``scripts/fetch_corpus.py`` keeps only the text column, so recovering
+    #: them means re-fetching. Grouping is the cheaper approximation and is honest about
+    #: being one: it restores document-scale spans without claiming to reconstruct poems.
+    rows_per_document: int = 1
     #: Why this source exists, in one line. Shown by ``describe()``.
     rationale: str = ""
 
@@ -247,7 +267,14 @@ SOURCES: Dict[str, CorpusSource] = {
         license_id="CC0-1.0",
         license_url="https://creativecommons.org/publicdomain/zero/1.0/",
         attribution="Gutenberg Poetry Corpus (Allison Parrish), biglam/gutenberg-poetry-corpus",
-        rationale="Density and associative leaps, per line rather than per book.",
+        rows_per_document=64,
+        rationale="Density and associative leaps, per line rather than per book. The only "
+                  "source whose upstream row is a LINE and not a document, hence "
+                  "rows_per_document=64: ~7 words per row means a per-row </s> would fire "
+                  "every ~7 words, and this 1% slice would then hold roughly a third of "
+                  "every document separator in the blend. 64 lines is ~450 words, the "
+                  "scale of a short story, so the separator marks a document-sized span "
+                  "the way it does everywhere else.",
     ),
     "procedural": CorpusSource(
         name="procedural",

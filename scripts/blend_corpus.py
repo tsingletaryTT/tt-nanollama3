@@ -21,6 +21,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from scripts.prepare_corpus import DOCUMENT_SEPARATOR  # noqa: E402
 from train.corpus import SOURCES, format_share  # noqa: E402
 from train.paths import shared_dir  # noqa: E402
 
@@ -207,6 +208,19 @@ def _emit(src_path: Path, want_tokens: int, out, *, tokens_per_word: float,
     ``on_text`` receives every string written, so a ``TokenMeter`` can count the real
     tokens of exactly this emission without a second pass over the output.
 
+    THE TRUNCATED TAIL IS CLOSED WITH A ``DOCUMENT_SEPARATOR``. Word-level truncation lands
+    wherever the token target lands, which is almost always in the middle of some document.
+    Leaving that fragment unterminated would put an unmarked document transition at each of
+    the nine source seams -- source A's half-sentence running straight into source B's first
+    document -- which is precisely the failure this project is fixing everywhere else.
+    Nine separators against ~400M tokens costs nothing; nine unmarked transitions is the
+    exact shape of the bug. The separator is only added when the tail does not already end
+    with one (a truncation can land exactly on a separator line), so it is never doubled,
+    and the word it adds is counted in ``Emission.words`` -- ``emitted_words`` is what
+    ``train/tokenization.py``'s stratified split uses to find each source's boundary in the
+    finished corpus, so it must be the number of words actually written, not the number
+    aimed at.
+
     The truncation, streaming, word-level-boundary and measured-ratio behaviour described
     above is covered by ``tests/test_blend_corpus.py``.
     """
@@ -219,6 +233,9 @@ def _emit(src_path: Path, want_tokens: int, out, *, tokens_per_word: float,
             on_text(text)
 
     words = 0
+    #: Last whitespace-delimited word written, so the tail can be closed without
+    #: re-reading the output. Blank lines contribute no words and leave it alone.
+    last_word = ""
     target_words = want_tokens / tokens_per_word
     while True:
         pass_words = 0
@@ -231,10 +248,16 @@ def _emit(src_path: Path, want_tokens: int, out, *, tokens_per_word: float,
                     if need > 0:
                         write(" ".join(parts[:need]) + "\n")
                         words += need
+                        last_word = parts[need - 1]
+                    if last_word != DOCUMENT_SEPARATOR:
+                        write(DOCUMENT_SEPARATOR + "\n")
+                        words += 1
                     return Emission(words=words, tokens=int(round(words * tokens_per_word)))
                 write(line)
                 words += n
                 pass_words += n
+                if parts:
+                    last_word = parts[-1]
         if pass_words == 0:
             # size > 0 but nothing but whitespace: the repeat loop would never terminate.
             raise ValueError(f"{src_path} contains no words; cannot emit tokens from it")
