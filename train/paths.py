@@ -10,8 +10,9 @@ from when there was exactly one model. With two sizes registered that is no long
 a second size would write its checkpoints on top of the first size's.
 
 Worse, ``artifacts/checkpoints`` and ``artifacts/hf`` hold **the baseline evidence**: the
-weights published to the private Hub repo, the checkpoint the NumPy parity gate pins
-against, and the only copy of a training run that cost 47 minutes of hardware. Until now
+weights published to the Hub repo (``episod/tt-tnt``, public since 2026-08-14), the
+checkpoint the NumPy parity gate pins against, and the only copy of a training run that cost
+47 minutes of hardware. Until now
 ``--checkpoint-dir`` *defaulted* to that directory. A plain ``python train/run.py`` with no
 flags would have written into it.
 
@@ -102,8 +103,9 @@ LEGACY_SIZE = "384"
 #: Directories holding irreplaceable evidence, relative to ``artifacts/``.
 #:
 #: ``checkpoints`` is the 3000-step baseline the parity gate pins against; ``hf`` is the
-#: converted artifact uploaded to the private Hub repo. Neither can be regenerated without
-#: retraining, so :func:`write_dir` refuses to hand either out as a write target.
+#: converted artifact uploaded to the Hub repo (``episod/tt-tnt``, public since 2026-08-14).
+#: Neither can be regenerated without retraining, so :func:`write_dir` refuses to hand either
+#: out as a write target.
 PROTECTED_RELATIVE = frozenset({"checkpoints", "hf"})
 
 

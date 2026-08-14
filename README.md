@@ -23,14 +23,16 @@ finishing at train loss **3.3125** and validation loss **4.2203**. See
 [`docs/model-card.md`](docs/model-card.md) for the full curve and an honest read of it: it
 plateaus well before the run ends rather than still improving.
 
-**Published, privately.** The trained weights are on Hugging Face at
+**Published, and public.** The trained weights are on Hugging Face at
 [`episod/tt-tnt`](https://huggingface.co/episod/tt-tnt) — `scripts/publish_to_hub.py` creates
-the repo private and never flips it public. tt-kernel packaging manifests already exist under
-[`manifests/`](manifests/). See [`docs/superpowers/specs/`](docs/superpowers/specs/) for the
-full arc.
+the repo private by default and has no code path that flips it public itself; the repo's
+visibility was changed to public separately, as an explicitly-authorized action outside that
+script (2026-08-14), and is expected to stay that way. tt-kernel packaging manifests already
+exist under [`manifests/`](manifests/). See [`docs/superpowers/specs/`](docs/superpowers/specs/)
+for the full arc.
 
 **The corpus ships as a recipe, not as text.**
-[`episod/tt-tnt-corpus`](https://huggingface.co/datasets/episod/tt-tnt-corpus) (also private)
+[`episod/tt-tnt-corpus`](https://huggingface.co/datasets/episod/tt-tnt-corpus) (also public)
 carries the source registry with pinned revisions, the fetch/prepare/measure/blend scripts, the
 generated licensing table, and the provenance manifest with the blend's `sha256` — everything
 needed to reconstruct the corpus byte-identically, and nothing that would redistribute it. That
@@ -195,12 +197,14 @@ granted by it. This is a credit, not a license inheritance: the components thems
 from published papers, and this implementation derives from tt-train's `nanollama3` model
 config and the `ttml` library, not from Mini-LLM's source. No code was copied from it.
 
-**Model weights.** Published, privately, to
+**Model weights.** Published, and public, at
 [`episod/tt-tnt`](https://huggingface.co/episod/tt-tnt) via `scripts/publish_to_hub.py`, which
-creates the repo private and never flips it public. [`docs/model-card.md`](docs/model-card.md)
-is the source of truth for the card pushed there; it states the corpus and its license
-explicitly and describes the model honestly as a demonstration rather than a capable general
-model, per the standard set above.
+creates the repo private by default and has no code path of its own that flips it public — the
+repo's visibility was changed separately, as an explicitly-authorized action (2026-08-14), and
+is expected to stay public. [`docs/model-card.md`](docs/model-card.md) is the source of truth
+for the card pushed there; it states the corpus and its license explicitly and describes the
+model honestly as a demonstration rather than a capable general model, per the standard set
+above.
 
 **Runtime dependencies** — tt-metal / `ttml` / `ttnn` (Apache-2.0), `transformers` and
 `tokenizers` (Apache-2.0), numpy (BSD-3-Clause).

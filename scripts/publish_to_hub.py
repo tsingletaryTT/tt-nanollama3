@@ -19,6 +19,15 @@ Safety rules baked into this script, not left to the caller's discipline:
 * The repo is created private and is NEVER flipped public here. There is no ``--public``
   flag. Flipping visibility is a separate, explicitly-confirmed action (plan Task 4 Step 5)
   and does not belong in a re-runnable publish script.
+
+  That flip has since happened, out-of-band, with explicit authorization: ``episod/tt-tnt``
+  and ``episod/tt-tnt-corpus`` were both made public on 2026-08-14. This script's behavior
+  did not change and does not need to -- ``create_repo(..., private=True, exist_ok=True)``
+  only applies ``private=True`` when it actually creates a repo; per ``huggingface_hub``'s
+  own docs, "this value is ignored if the repo already exists," so re-running the initial
+  publish path against the now-public repo cannot silently flip it back. ``EXPECTED_PRIVATE``
+  below records the current expectation for ``--verify`` rather than leaving it as a
+  hardcoded assumption that would go stale the way this docstring almost did.
 * Any action that writes to the Hub (initial publish, ``--restore-card``) requires ``--yes``.
   ``--dry-run`` never touches the Hub, regardless of ``--yes``.
 * ``--verify`` is read-only: it round-trips the *published* copy through ``transformers``,
@@ -96,6 +105,15 @@ EXPECTED_VOCAB_SIZE = 32000
 EXPECTED_PARAM_COUNT = 22_025_088
 PROMPT = "Once upon a time, there was a little"
 
+# PRIVACY, False since 2026-08-14. The repo was created private (as this script still does
+# for any repo it has to create fresh) and was later flipped public out-of-band, with
+# explicit authorization -- not through this script, which has no code path that can do
+# that (see test_publish_to_hub.py::test_source_never_sets_private_false and the module
+# docstring). ``--verify`` checks the Hub against this constant so the expectation lives in
+# one edited place rather than as a hardcoded ``True`` that would silently start failing --
+# or worse, stop meaning anything -- the day visibility legitimately changed again.
+EXPECTED_PRIVATE = False
+
 
 def _artifact_files() -> list[Path]:
     """Files ``upload_folder`` would send, in a stable order for printing and testing."""
@@ -141,7 +159,9 @@ def _print_upload_plan(repo_id: str) -> int:
     """Print the file list and total size that would be uploaded. Returns the total bytes."""
     files = _artifact_files()
     total = 0
-    print(f"repo:    {repo_id} (private=True, license={LICENSE})")
+    print(f"repo:    {repo_id} (private=True if newly created -- per huggingface_hub, "
+          f"ignored if it already exists, so this cannot silently re-privatize an existing "
+          f"public repo; license={LICENSE})")
     print(f"card:    {CARD_PATH.relative_to(ROOT)}")
     print("files:")
     for f in files:
@@ -235,7 +255,8 @@ def cmd_publish(repo_id: str, dry_run: bool, yes: bool) -> int:
 
     api = HfApi()
 
-    print(f"creating (or reusing) PRIVATE repo {repo_id} ...")
+    print(f"creating (or reusing) repo {repo_id} (private=True only takes effect if this "
+          f"call actually creates it) ...")
     api.create_repo(repo_id, repo_type="model", private=True, exist_ok=True)
 
     print(f"setting repo-level license={LICENSE} ...")
@@ -256,7 +277,7 @@ def cmd_publish(repo_id: str, dry_run: bool, yes: bool) -> int:
     _set_license(repo_id)
 
     _report_card_state(repo_id)
-    print("done. Repo remains PRIVATE -- visibility is never changed by this script.")
+    print("done. Visibility is never changed by this script, in either direction.")
     return 0
 
 
@@ -334,7 +355,8 @@ def cmd_verify(repo_id: str) -> int:
 
     api = HfApi()
     info = api.model_info(repo_id)
-    check("repo is private", info.private is True, f"(got {info.private})")
+    check(f"repo private == {EXPECTED_PRIVATE}", info.private is EXPECTED_PRIVATE,
+          f"(got {info.private})")
 
     card = ModelCard.load(repo_id, repo_type="model")
     check("card front matter has license == apache-2.0", getattr(card.data, "license", None) == LICENSE,

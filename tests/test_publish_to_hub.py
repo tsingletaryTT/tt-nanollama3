@@ -32,11 +32,14 @@ _spec.loader.exec_module(publish_to_hub)
 def test_source_never_sets_private_false():
     """There must be no code path in this script that can flip the repo public.
 
-    This is the plan's hardest constraint for Task 2: the repo is created private and
-    stays private until a separate, explicitly-confirmed action (Task 4 Step 5). Scanning
-    the source rather than the runtime behavior catches a future edit that adds a
-    `--public` flag or a `private=False` call before it ever runs, not just before it runs
-    against the real repo.
+    This is the plan's hardest constraint for Task 2: the repo is created private, and
+    flipping it public is a separate, explicitly-confirmed action (Task 4 Step 5) that does
+    not belong in this file. That flip has since happened, out-of-band and with explicit
+    authorization (see ``EXPECTED_PRIVATE`` in ``publish_to_hub.py``) -- which makes this
+    guarantee more relevant, not less: nothing in here should be able to reverse that flip
+    either. Scanning the source rather than the runtime behavior catches a future edit that
+    adds a `--public` flag or a `private=False` call before it ever runs, not just before it
+    runs against the real repo.
     """
     source = _SCRIPT_PATH.read_text()
     assert "private=False" not in source

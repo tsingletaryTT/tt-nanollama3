@@ -26,6 +26,7 @@ datasets:
   - sedthh/gutenberg_english
   - biglam/gutenberg-poetry-corpus
   - wikimedia/wikipedia
+  - episod/tt-tnt-corpus
 language:
   - en
 ---
@@ -71,7 +72,7 @@ a verbatim copy of tt-train's own `nanollama3.yaml`.
 
 | | |
 |---|---|
-| Corpus | Nine-source, licence-audited blend — TinyStories, Simple English Wikipedia, and seven curated Project Gutenberg slices (see [`docs/corpus_blend.md`](https://github.com/tsingletaryTT/tt-tnt/blob/main/docs/corpus_blend.md)). 399,594,747 tokens emitted against a 400,000,000-token budget |
+| Corpus | Nine-source, licence-audited blend — TinyStories, Simple English Wikipedia, and seven curated Project Gutenberg slices (see [`docs/corpus_blend.md`](https://github.com/tsingletaryTT/tt-tnt/blob/main/docs/corpus_blend.md)). 399,594,747 tokens emitted against a 400,000,000-token budget. The blend recipe — source registry, fetch/prepare/measure/blend scripts, and the provenance manifest — is published separately as [`episod/tt-tnt-corpus`](https://huggingface.co/datasets/episod/tt-tnt-corpus) |
 | Tokens seen | **353,495,970** — the full training split, **one epoch** |
 | Steps | 10,787 at batch 64, sequence length 512 |
 | Wall clock | ~58 minutes on a single Blackhole p300c |
@@ -183,6 +184,11 @@ hand-written, specifically so this card cannot drift out of sync with it the way
 licensing prose has before. That document's "unsettled Data Derivative" language for
 share-alike sources applies to this checkpoint exactly as written there, for both of the
 sources named above; this card does not restate it.
+
+The corpus itself is not redistributed here or anywhere else — this repository only ships the
+*recipe* to reconstruct it byte-identically: source registry, pinned revisions, and
+fetch/prepare/measure/blend scripts, published as
+[`episod/tt-tnt-corpus`](https://huggingface.co/datasets/episod/tt-tnt-corpus) on the Hub.
 
 **Architectural credit.** The component choices — RoPE, RMSNorm, SwiGLU, GQA, subword BPE —
 follow [Mini-LLM by Ashx098](https://github.com/Ashx098/Mini-LLM), which the originating lesson
