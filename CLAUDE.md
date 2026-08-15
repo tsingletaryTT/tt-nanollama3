@@ -1242,3 +1242,71 @@ as a finding is exactly what freezing a set beforehand is meant to prevent.
 
 Suite: **697 passed, 1 skipped** (667 + 30 before this change, baseline held). CPU-only: no ttnn,
 no ttml, no device touched, nothing written under `artifacts/`.
+
+---
+
+## The first run of the `1024` size (tt-tnt-1024a) — and what it says about register
+
+**Prompt.** Train `1024` for the first time ever: seed 5489, 10,764 steps, batch 64, seq 512
+(the size's own `max_sequence_length`), `artifacts/tokens-v3`, `nanollama3_bpe_v2.yaml`. The
+brief was explicit that this was unexercised territory — "treat failure as a likely and
+reportable outcome, not something to force past" — and that register, unmoved across four runs,
+was the last open quality axis. Full report: `.superpowers/1024-first-run.md`.
+
+**It ran, first time, with nothing tuned.** 123.0M parameters, 2h42m on one p300c at
+**903 s/1000 steps** (the 40-step smoke run measured 873 and projected 2.61 h; actual 2h42m, the
+3.4% gap being 22 validation passes and 11 checkpoint writes). Mesh auto-discovered as `(1,1)`;
+`TT_VISIBLE_DEVICES` deliberately never exported. Memory was never close to binding.
+
+**The smoke run paid for itself immediately.** Its 40-step checkpoint would not convert:
+`config.json` said `intermediate_size: 1024` while the weights were 2816 wide.
+`train/run.py` wrote the header's `intermediate_dim` as a **literal 1024** — the value ttml
+*derives* for the 384 model, so the constant was invisibly correct for the only size ever
+trained and silently wrong for this one. Training never read the field (the weights were always
+right), but `convert/to_hf.py` copies it into `config.json`, so every 1024 checkpoint would have
+produced an unloadable model. Fixed in `bd9a2d2` by moving the four ttml-C++-only header facts
+into `ttml_cxx_header_fields(size)`, which derives from the size registry. The long run was
+restarted 4 minutes in, so all 11 checkpoints are correct by construction.
+
+**Loss: no capacity effect at the end.** Final validation 2.9281 vs v3's 2.9391 — a 0.011-nat
+difference against a 0.1944 seed-only noise floor. 5.6x the parameters bought nothing
+measurable at convergence. It *did* descend far faster early (−0.81 nats at step 1000, decaying
+to −0.01 by the end): the signature of a **data-bound** loss, consistent with ct8's ~80M
+binding-constraint estimate, which this run does not refute.
+
+⚠️ **Those two losses are not on the same scale.** `evaluate()` windows at `cfg.seq_len`, so
+v3's number is over 2048-token windows and 1024a's over 512 — a harder problem. 1024a matched v3
+under a worse evaluation condition, but the size of any real advantage is unrecoverable from
+these numbers.
+
+**Register moved — the first thing in this project that has.** On set B, against v3:
+
+| signal | delta | seed-only delta | ratio |
+|---|---:|---:|---:|
+| tinystories margin | −0.2613 | −0.0745 | **3.51x** |
+| nearest source == tinystories | −0.1368 | −0.0368 | **3.72x** |
+
+Both clear their paired CIs by a wide margin *and* are multiples of the seed-only floor.
+Register is not immovable and is not purely a corpus-mix problem.
+
+**The trap sprang exactly as the brief predicted.** The collapse-rate signals came back "better"
+from the paired test while moving **1.01x and 1.05x** what the *seed alone* moves them
+(−0.0549 vs −0.0542; −0.0590 vs −0.0563) — not near the noise floor, numerically identical to
+it. Reported as not interpretable. `engagement` is the mirror-image error: a 2.99x ratio over a
+tiny denominator that fails its own paired minimum-detectable (+0.0198 vs 0.0275). A finding has
+to clear **both** gates.
+
+⚠️ **The confound, not papered over.** This run changed capacity (22M → 123M) **and** context
+(2048 → 512). It cannot attribute the register effect to capacity alone. The clean experiment is
+a **384-at-512 run on `artifacts/tokens-v3` at seed 5489** — identical to v3 but for sequence
+length. It does not exist, it costs about one v3-length run, and it is the obvious next step:
+context is the cheaper variable to rule out. A seed replicate of 1024a would further harden the
+claim, which currently rests on one run per arm.
+
+**Multi-chip is still unexercised.** The whole reason `num_groups=4` was chosen is mesh widths
+{1,2,4}; this run used `(1,1)`. What it delivers is the first *weights* those paths can be
+tested with.
+
+Suite: **735 passed, 1 skipped** (729 + 6 header-derivation regression tests, parametrized over
+every registered size). Nothing deleted; nothing written under the protected v3/v4/v5, tokenizer,
+tokens, or corpus paths. Not pushed.

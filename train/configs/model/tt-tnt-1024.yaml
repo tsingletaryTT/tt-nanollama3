@@ -32,11 +32,24 @@
 # fits this harvested grid exactly. dim=2560, despite better hidden-dimension utilisation
 # (73%), derives an FFN of 6912 = 216 tiles whose best fit is only 72 cores (65%).
 #
-# NOT YET TRAINED. This architecture is registered, validated, and packaged-for, but no
-# weights exist. It is here so the multi-chip and packaging paths can be exercised;
-# training it is a separate, much larger job than the 384 model was (roughly an order of
-# magnitude more parameters, on a corpus that ct8 already showed to be the binding
-# constraint at ~80M).
+# FIRST TRAINED 2026-08-15 as tt-tnt-1024a (seed 5489, 10,764 steps, batch 64 x seq 512,
+# artifacts/tokens-v3; artifacts/checkpoints-tt-tnt-1024a, converted to
+# artifacts/hf-tt-tnt-1024a). 123.0M parameters, 2h42m on a single p300c at 903 s/1000
+# steps — it auto-discovered as a (1,1) mesh, so the multi-chip path this shape was
+# designed for is still unexercised by an actual training run.
+#
+# What it showed, and did not show. Final validation loss 2.928 against the 384 model's
+# 2.939 — a 0.011-nat difference, far inside the 0.194 seed-only noise floor, i.e. 5.6x
+# the parameters bought no measurable end-of-run loss. It did descend markedly faster
+# early (-0.81 nats at step 1000), which is what the corpus-bound prediction below
+# predicts: capacity buys early speed and then the data becomes the constraint. ct8's
+# ~80M binding-constraint estimate is consistent with that and was NOT refuted.
+# Where it did move something: the two register signals (tinystories margin, nearest-
+# source share) moved 3.5x and 3.7x their seed-only noise floor on prompt set B — the
+# first intervention in this project to move register beyond noise. That result is
+# confounded: this run changed BOTH capacity (22M -> 123M) and context (2048 -> 512)
+# relative to v3, so it cannot be attributed to capacity alone. See
+# .superpowers/1024-first-run.md.
 transformer_config:
   model_type: "llama"
   num_heads: 16
