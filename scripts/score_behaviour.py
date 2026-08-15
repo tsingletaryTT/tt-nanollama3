@@ -13,10 +13,27 @@ the 15 greedy completions ``scripts/generate_samples.py`` writes. Fifteen determ
 completions cannot separate a real improvement from noise and cannot be run in a loop, so the
 project's binding constraint is measurement, not training.
 
-This script is the numeric version. It draws MANY sampled completions per frozen prompt (the
-prompt set in ``docs/evaluation_prompts.json`` is digest-pinned for cross-checkpoint
-comparability and is never touched here -- statistical power comes from more samples per
-prompt, never from more prompts) and reports five behaviours with standard errors.
+This script is the numeric version. It draws MANY sampled completions per frozen prompt and
+reports five behaviours with standard errors. Every prompt set it reads is digest-pinned for
+cross-checkpoint comparability and none of them is ever written here.
+
+WHICH PROMPT SET, AND WHY THERE ARE TWO
+---------------------------------------
+``--prompt-set a`` (the default, ``docs/evaluation_prompts.json``, 15 prompts) is the original
+frozen set and the one every committed measurement in ``docs/measurements/`` was produced
+against. Its output filenames are unchanged, so every existing invocation stays reproducible.
+
+``--prompt-set b`` (``docs/evaluation_prompts_b.json``, 45 prompts) exists because this script's
+own comparison report found that power is capped by the PROMPT count, not the sample count: for
+story-frame collapse the within-prompt sampling noise is 0.015 of the observed 0.042 paired SEM,
+so doubling the completions per prompt buys ~3%. The earlier claim in this docstring -- "power
+comes from more samples per prompt, never from more prompts" -- was the design intent and turned
+out to be wrong; it is corrected here rather than left standing.
+
+**The two sets are reported separately and are never pooled.** Set B's outputs carry ``-setB`` in
+their filenames, its JSON records which set produced it, and ``--compare`` refuses to pair runs
+from different sets. Two sets written at different times by different means are not exchangeable;
+averaging them would silently redefine the metric rather than sharpen it.
 
 THE FIVE SIGNALS
 ----------------
@@ -74,17 +91,18 @@ standard error over that prompt's own samples (n=``--num-samples``). Every row s
 no bare means anywhere. 95% intervals are the normal approximation ``mean ± 1.96 × SEM`` and are
 labelled as such.
 
-Comparing two runs (``--compare``) is **paired by prompt**: both runs answered the same 15
+Comparing two runs (``--compare``) is **paired by prompt**: both runs answered the same frozen
 prompts, so the difference is computed per prompt and averaged, which removes between-prompt
-variance and is what makes 15 prompts enough to see a real change.
+variance and is what makes a set this small able to see a real change at all.
 
 CONSTRAINTS THIS SCRIPT RESPECTS
 ---------------------------------
 CPU only. Never imports ttml/ttnn, never opens a Tenstorrent device. Never writes under
-``artifacts/``. No dependency beyond numpy/transformers/tokenizers. ``docs/evaluation_prompts.json``
-is read-only here.
+``artifacts/``. No dependency beyond numpy/transformers/tokenizers. Both prompt-set files under
+``docs/`` are read-only here.
 
     python scripts/score_behaviour.py --hf-model artifacts/hf-tt-tnt-v3
+    python scripts/score_behaviour.py --hf-model artifacts/hf-tt-tnt-v3 --prompt-set b
     python scripts/score_behaviour.py --compare docs/measurements/behaviour-tt-tnt-v1.json \\
         docs/measurements/behaviour-tt-tnt-v3.json --label tt-tnt-v1-vs-v3
 """
@@ -111,8 +129,51 @@ from train.corpus import SOURCES  # noqa: E402
 PROMPTS_PATH = ROOT / "docs" / "evaluation_prompts.json"
 CORPUS_DIR = ROOT / "artifacts" / "corpus"
 
-#: Completions drawn per prompt. Power comes from here, never from editing the frozen prompt
-#: set. 32 x 15 prompts x 60 tokens takes well under a minute on CPU for a model this size.
+
+@dataclass(frozen=True)
+class PromptSet:
+    """One frozen prompt set: where it lives and how its outputs are named.
+
+    ``suffix`` is what keeps a reader from ever mistaking one set's numbers for another's.
+    Set A's suffix is deliberately EMPTY so that ``behaviour-tt-tnt-v3.md`` still means exactly
+    what it meant when it was committed -- renaming set A's outputs would orphan every measurement
+    already in ``docs/measurements/`` and every reference to them. Every set added afterwards
+    carries its name in the filename.
+    """
+
+    key: str
+    path: Path
+    suffix: str
+    description: str
+
+
+#: The frozen prompt sets, by ``--prompt-set`` key. Adding a third set is a new entry here plus
+#: its own digest test; it is never an edit to an existing set's file.
+PROMPT_SETS: Dict[str, PromptSet] = {
+    "a": PromptSet(
+        key="a", path=PROMPTS_PATH, suffix="",
+        description="set A (docs/evaluation_prompts.json, 15 prompts) -- the original frozen "
+                    "set every committed measurement was produced against"),
+    "b": PromptSet(
+        key="b", path=ROOT / "docs" / "evaluation_prompts_b.json", suffix="-setB",
+        description="set B (docs/evaluation_prompts_b.json, 45 prompts) -- a second frozen set "
+                    "added for statistical power, derived from the corpus design; reported "
+                    "beside set A and never pooled with it"),
+}
+
+#: Which set a run used when its JSON does not say. Every JSON written before ``--prompt-set``
+#: existed was produced against set A -- set B did not exist yet -- so this is a fact about the
+#: repository's history, not a guess, and it keeps ``--compare`` working on committed files.
+LEGACY_PROMPT_SET = "a"
+
+#: Completions drawn per prompt.
+#:
+#: This was once documented as the ONLY place power comes from. That was wrong, and the
+#: correction is worth keeping visible: decomposing the paired SEM of the v1-vs-v3 comparison
+#: showed within-prompt sampling noise is 0.015 of the observed 0.042 for story-frame collapse,
+#: so doubling to 64 completions buys ~3%. Power is bought with PROMPTS -- which is why there is
+#: a set B -- and this number is merely large enough not to be the bottleneck.
+#: 32 x 15 prompts x 60 tokens takes well under a minute on CPU for a model this size.
 DEFAULT_NUM_SAMPLES = 32
 
 #: Matches ``scripts/generate_samples.py``'s default, so a behaviour run and the human-read
@@ -826,8 +887,21 @@ def detector_controls(profile: RegisterProfile, excerpt_words: int,
 # ---------------------------------------------------------------------------------------
 
 
+def resolve_prompt_set(key: str) -> PromptSet:
+    """Look up a prompt set by ``--prompt-set`` key, naming the alternatives on a miss."""
+    try:
+        return PROMPT_SETS[key]
+    except KeyError:
+        raise KeyError(f"unknown prompt set {key!r}; known sets: "
+                       f"{sorted(PROMPT_SETS)}") from None
+
+
 def load_prompts(path: Path = PROMPTS_PATH) -> List[dict]:
-    """The frozen prompt set. Read-only: this script never writes it."""
+    """A frozen prompt set's prompts. Read-only: this script never writes one.
+
+    Defaults to set A so that every caller written before ``--prompt-set`` existed keeps reading
+    the set it was written against.
+    """
     return json.loads(path.read_text())["prompts"]
 
 
@@ -917,15 +991,24 @@ def render_markdown(reports: Sequence[PromptReport], *, hf_model: Path, label: s
                     seed: int, eos_id: int, controls: Optional[Sequence[ControlRow]],
                     control_excerpt_words: Optional[int],
                     register_sources: Optional[Sequence[str]],
-                    checkpoint_note: str = "") -> str:
+                    checkpoint_note: str = "",
+                    prompt_set: PromptSet = PROMPT_SETS[LEGACY_PROMPT_SET]) -> str:
     lines: List[str] = list(_SPDX)
-    lines += ["", f"# Behavioural quality — {label}", ""]
+    lines += ["", f"# Behavioural quality — {label} (prompt set {prompt_set.key.upper()})", ""]
     lines.append(
         f"Model `{hf_model}`, {num_samples} sampled completions per prompt across "
         f"{len(reports)} frozen prompts ({num_samples * len(reports)} completions total), "
         f"{max_new_tokens} new tokens, temperature {temperature}, top_p {top_p}, seed {seed}, "
         f"EOS id {eos_id}. Generated by `scripts/score_behaviour.py`."
     )
+    lines += ["", (
+        f"**Prompt set {prompt_set.key.upper()}** "
+        f"(`{prompt_set.path.name}`, {len(reports)} prompts). Numbers here are comparable ONLY "
+        f"with other runs on the same set. The project's frozen sets are reported separately "
+        f"and are never pooled into one score: they were written at different times by "
+        f"different means and are not exchangeable, so averaging them would redefine the metric "
+        f"rather than sharpen it."
+    )]
     if checkpoint_note:
         lines += ["", checkpoint_note]
     lines += ["", "## Why this exists", ""]
@@ -939,13 +1022,13 @@ def render_markdown(reports: Sequence[PromptReport], *, hf_model: Path, label: s
     )
     lines += ["", "## Method, in brief", ""]
     lines += [
-        "- The frozen prompt set (`docs/evaluation_prompts.json`) is **unchanged and "
-        "unchangeable here** -- power comes from more samples per prompt, never from more "
-        "prompts, so numbers stay comparable across checkpoints.",
+        f"- The frozen prompt set (`docs/{prompt_set.path.name}`) is **unchanged and "
+        "unchangeable here**: this script reads it and never writes it, which is what keeps "
+        "numbers comparable across checkpoints. Power is bought by adding a NEW frozen set with "
+        "new ids and reporting it separately, never by editing an existing one.",
         "- Every signal is computed on the **completion only**, never on prompt+completion: "
-        "three of the frozen prompts hand the model its genre outright (`voice-03` opens "
-        "\"Once upon a time, there was a little\"), and a detector that read the prompt would "
-        "credit the model with the prompt's own register.",
+        "some of the frozen prompts hand the model a register outright, and a detector that "
+        "read the prompt would credit the model with the prompt's own register.",
         "- The aggregate is the mean over the **per-prompt** means, with the standard error "
         "taken **over prompts** (n=" + str(len(reports)) + "). Completions of the same prompt "
         "are not independent observations of model behaviour, so pooling them would report an "
@@ -953,9 +1036,12 @@ def render_markdown(reports: Sequence[PromptReport], *, hf_model: Path, label: s
         "unit\" convention `probe_context_use.py` applies to windows.",
         "- Per-prompt rows report the standard error over that prompt's own "
         f"{num_samples} completions. 95% intervals are `mean ± 1.96 × SEM`.",
-        "- `stutter-01` and `stutter-02` deliberately ASK for repetition, so the repetition "
-        "aggregate is reported twice -- over all prompts and excluding the `stutter` probe -- "
-        "and both are labelled. Per-prompt rows always include every prompt.",
+        "- The `" + DELIBERATE_REPETITION_PROBE + "` prompts (" + (", ".join(
+            f"`{r.prompt_id}`" for r in reports
+            if r.probe == DELIBERATE_REPETITION_PROBE) or "none in this set")
+        + ") deliberately ASK for repetition, so the repetition aggregate is reported twice -- "
+        "over all prompts and excluding the `" + DELIBERATE_REPETITION_PROBE + "` probe -- and "
+        "both are labelled. Per-prompt rows always include every prompt.",
     ]
     lines += ["", "## Headline (aggregate over prompts)", ""]
     lines.append("| signal | better | mean ± SEM over prompts | 95% CI | n prompts |")
@@ -1126,11 +1212,18 @@ def report_to_json(reports: Sequence[PromptReport], *, hf_model: str, label: str
                    num_samples: int, max_new_tokens: int, temperature: float, top_p: float,
                    seed: int, eos_id: int, controls: Optional[Sequence[ControlRow]],
                    control_excerpt_words: Optional[int],
-                   register_sources: Optional[Sequence[str]]) -> dict:
-    """The same numbers as the markdown, keyed for `--compare` to pair by prompt id."""
+                   register_sources: Optional[Sequence[str]],
+                   prompt_set: str = LEGACY_PROMPT_SET) -> dict:
+    """The same numbers as the markdown, keyed for `--compare` to pair by prompt id.
+
+    ``prompt_set`` is recorded so a comparison can REFUSE to pair runs from different sets
+    rather than discovering the mismatch as an empty intersection of prompt ids -- or worse,
+    silently pairing two sets that happened to share an id.
+    """
     payload: dict = {
         "hf_model": hf_model,
         "label": label,
+        "prompt_set": prompt_set,
         "num_samples": num_samples,
         "max_new_tokens": max_new_tokens,
         "temperature": temperature,
@@ -1230,6 +1323,15 @@ def paired_differences(baseline: dict, candidate: dict) -> List[PairedDifference
     15 prompts enough to see a real change. Raises if the two runs share no prompts, rather than
     reporting a comparison of nothing.
     """
+    base_set = baseline.get("prompt_set", LEGACY_PROMPT_SET)
+    cand_set = candidate.get("prompt_set", LEGACY_PROMPT_SET)
+    if base_set != cand_set:
+        raise ValueError(
+            f"the two runs used different prompt sets ({base_set!r} vs {cand_set!r}). They are "
+            f"reported separately by design: two sets written at different times by different "
+            f"means are not exchangeable, and a comparison across them would be a comparison of "
+            f"the sets as much as of the models. Score both models on the SAME set and compare "
+            f"those.")
     shared = [p for p in baseline["per_prompt"] if p in candidate["per_prompt"]]
     if not shared:
         raise ValueError(
@@ -1256,11 +1358,14 @@ def paired_differences(baseline: dict, candidate: dict) -> List[PairedDifference
 def render_comparison(baseline: dict, candidate: dict, diffs: Sequence[PairedDifference],
                       *, label: str) -> str:
     n_shared = max((d.n_prompts for d in diffs), default=0)
+    set_key = baseline.get("prompt_set", LEGACY_PROMPT_SET)
+    set_name = PROMPT_SETS[set_key].path.name if set_key in PROMPT_SETS else f"set {set_key}"
     lines: List[str] = list(_SPDX)
-    lines += ["", f"# Behavioural quality — {label}", ""]
+    lines += ["", f"# Behavioural quality — {label} (prompt set {set_key.upper()})", ""]
     lines.append(
         f"Baseline `{baseline['hf_model']}` ({baseline['label']}) vs candidate "
-        f"`{candidate['hf_model']}` ({candidate['label']}). "
+        f"`{candidate['hf_model']}` ({candidate['label']}), both scored on **prompt set "
+        f"{set_key.upper()}** (`{set_name}`). "
         f"{baseline['num_samples']} and {candidate['num_samples']} completions per prompt "
         f"respectively, over {n_shared} shared prompts. "
         f"Generated by `scripts/score_behaviour.py --compare`."
@@ -1278,6 +1383,9 @@ def render_comparison(baseline: dict, candidate: dict, diffs: Sequence[PairedDif
         "- `min. detectable` is `1.96 × SEM` of the difference: the smallest change this "
         "comparison had the power to call. Read every **no change** verdict against it -- a "
         "null result only means \"nothing there\" for effects larger than that number.",
+        f"- **Both runs used prompt set {set_key.upper()}**, and a comparison across sets is "
+        "refused rather than computed. The project's frozen sets are reported side by side, "
+        "never averaged together.",
     ]
     lines += ["", "## Signal by signal", ""]
     lines.append("| signal | better | baseline | candidate | difference (cand − base) | "
@@ -1325,11 +1433,20 @@ def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
                    help="Converted HF model directory to score (CPU only, default: "
                         "%(default)s).")
     p.add_argument("--label", type=str, default=None,
-                   help="Tag for this run; output goes to docs/measurements/behaviour-LABEL."
-                        "{md,json}. Defaults to --hf-model's directory name minus 'hf-'.")
+                   help="Tag for this run; output goes to docs/measurements/behaviour-LABEL"
+                        "[-setX].{md,json}. Defaults to --hf-model's directory name minus 'hf-'.")
+    p.add_argument("--prompt-set", type=str, default=LEGACY_PROMPT_SET,
+                   choices=sorted(PROMPT_SETS),
+                   help="Which frozen prompt set to score against (default: %(default)s). "
+                        + "  ".join(f"{k}: {s.description}."
+                                    for k, s in sorted(PROMPT_SETS.items()))
+                        + "  The sets are reported SEPARATELY and never pooled: output "
+                          "filenames carry the set, and --compare refuses to pair runs from "
+                          "different sets.")
     p.add_argument("--num-samples", type=int, default=DEFAULT_NUM_SAMPLES,
-                   help="Completions drawn per frozen prompt (default: %(default)s). This is "
-                        "where statistical power comes from; the prompt set never changes.")
+                   help="Completions drawn per frozen prompt (default: %(default)s). Large "
+                        "enough not to be the bottleneck; power is bought with PROMPTS, which "
+                        "is what --prompt-set b is for.")
     p.add_argument("--max-new-tokens", type=int, default=DEFAULT_MAX_NEW_TOKENS)
     p.add_argument("--temperature", type=float, default=DEFAULT_TEMPERATURE)
     p.add_argument("--top-p", type=float, default=DEFAULT_TOP_P)
@@ -1369,9 +1486,17 @@ def default_label(hf_model: Path) -> str:
     return tag[len("hf-"):] if tag.startswith("hf-") else tag
 
 
-def output_paths(label: str) -> Tuple[Path, Path]:
+def output_paths(label: str, prompt_set: str = LEGACY_PROMPT_SET) -> Tuple[Path, Path]:
+    """Markdown and JSON paths for a run, with the prompt set baked into the filename.
+
+    Set A keeps its historical names (``behaviour-tt-tnt-v3.md``); every other set appends its
+    suffix (``behaviour-tt-tnt-v3-setB.md``). A reader who sees only a filename can therefore
+    never mistake one set's numbers for the other's, and the two can never overwrite each other.
+    """
     out_dir = ROOT / "docs" / "measurements"
-    return out_dir / f"behaviour-{label}.md", out_dir / f"behaviour-{label}.json"
+    suffix = resolve_prompt_set(prompt_set).suffix
+    return (out_dir / f"behaviour-{label}{suffix}.md",
+            out_dir / f"behaviour-{label}{suffix}.json")
 
 
 def _run_compare(args: argparse.Namespace) -> int:
@@ -1388,7 +1513,10 @@ def _run_compare(args: argparse.Namespace) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     label = args.label or f"{baseline['label']}-vs-{candidate['label']}"
-    out, json_out = output_paths(label)
+    # The set comes from the JSONs being compared, not from --prompt-set: a comparison names the
+    # set its INPUTS were produced against, so a stray flag cannot mislabel the output.
+    prompt_set = baseline.get("prompt_set", LEGACY_PROMPT_SET)
+    out, json_out = output_paths(label, prompt_set)
     out = args.out or out
     json_out = args.json_out or json_out
 
@@ -1397,6 +1525,7 @@ def _run_compare(args: argparse.Namespace) -> int:
     out.write_text(md, encoding="utf-8")
     print(f"wrote {out}")
     json_out.write_text(json.dumps({
+        "prompt_set": prompt_set,
         "baseline": {"label": baseline["label"], "hf_model": baseline["hf_model"],
                      "json": str(baseline_path)},
         "candidate": {"label": candidate["label"], "hf_model": candidate["hf_model"],
@@ -1432,7 +1561,13 @@ def main() -> int:
         return 1
 
     label = args.label or default_label(model_dir)
-    prompts = load_prompts()
+    try:
+        prompt_set = resolve_prompt_set(args.prompt_set)
+        prompts = load_prompts(prompt_set.path)
+    except (KeyError, FileNotFoundError, json.JSONDecodeError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    print(f"prompt set {prompt_set.key}: {prompt_set.path.relative_to(ROOT)}")
     print(f"{len(prompts)} frozen prompts x {args.num_samples} samples = "
           f"{len(prompts) * args.num_samples} completions")
 
@@ -1500,7 +1635,7 @@ def main() -> int:
             print(f"  {row.source:22} collapse-fires={row.collapse_rate:.2%} "
                   f"register-correct={row.register_accuracy:.1%} (n={row.n_excerpts})")
 
-    md_out, json_out = output_paths(label)
+    md_out, json_out = output_paths(label, prompt_set.key)
     md_out = args.out or md_out
     json_out = args.json_out or json_out
     register_sources = profile.sources if profile else None
@@ -1511,7 +1646,7 @@ def main() -> int:
         max_new_tokens=args.max_new_tokens, temperature=args.temperature, top_p=args.top_p,
         seed=args.seed, eos_id=eos_id, controls=controls,
         control_excerpt_words=control_excerpt_words, register_sources=register_sources,
-        checkpoint_note=args.checkpoint_note), encoding="utf-8")
+        checkpoint_note=args.checkpoint_note, prompt_set=prompt_set), encoding="utf-8")
     print(f"wrote {md_out}")
 
     json_out.write_text(json.dumps(report_to_json(
@@ -1519,7 +1654,8 @@ def main() -> int:
         max_new_tokens=args.max_new_tokens, temperature=args.temperature, top_p=args.top_p,
         seed=args.seed, eos_id=eos_id, controls=controls,
         control_excerpt_words=control_excerpt_words,
-        register_sources=register_sources), indent=2), encoding="utf-8")
+        register_sources=register_sources, prompt_set=prompt_set.key), indent=2),
+        encoding="utf-8")
     print(f"wrote {json_out}")
     return 0
 

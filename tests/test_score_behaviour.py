@@ -30,7 +30,9 @@ sys.path.insert(0, str(ROOT))
 from scripts.score_behaviour import (  # noqa: E402
     COLLAPSE_MARKERS,
     FRAME_MARKERS,
+    LEGACY_PROMPT_SET,
     LEXICAL_MARKERS,
+    PROMPT_SETS,
     SIGNALS,
     ControlRow,
     Estimate,
@@ -51,6 +53,7 @@ from scripts.score_behaviour import (  # noqa: E402
     load_prompts,
     longest_repeated_ngram,
     ngram_repeat_rate,
+    output_paths,
     paired_differences,
     prompt_engagement,
     read_corpus_tokens,
@@ -59,6 +62,7 @@ from scripts.score_behaviour import (  # noqa: E402
     report_to_json,
     resolve_eos_id,
     resolve_model_dir,
+    resolve_prompt_set,
     score_completion,
     strip_at_eos,
     summarise_prompt,
@@ -663,6 +667,123 @@ def test_the_stutter_probe_tag_this_script_excludes_actually_exists_in_the_promp
     # would silently become a duplicate of the plain one. This is the tripwire for that.
     probes = {p["probe"] for p in load_prompts()}
     assert "stutter" in probes
+
+
+# ---------------------------------------------------------------------------------------
+# Two frozen prompt sets, reported separately and never pooled
+# ---------------------------------------------------------------------------------------
+
+
+def test_the_default_prompt_set_is_still_set_a_so_committed_measurements_reproduce():
+    """Every measurement in docs/measurements/ was produced against set A with no flag at all.
+    If the default ever moved, those files would silently stop being reproducible."""
+    assert LEGACY_PROMPT_SET == "a"
+    assert PROMPT_SETS["a"].path.name == "evaluation_prompts.json"
+    assert load_prompts() == load_prompts(PROMPT_SETS["a"].path)
+
+
+def test_every_registered_prompt_set_exists_and_parses():
+    for key, prompt_set in PROMPT_SETS.items():
+        prompts = load_prompts(prompt_set.path)
+        assert prompts, key
+        for prompt in prompts:
+            assert {"id", "probe", "text"} <= set(prompt)
+
+
+def test_set_b_is_the_bigger_set_which_is_the_entire_reason_it_exists():
+    # Power on set A is capped by its 15 prompts, not by the samples drawn from them.
+    assert len(load_prompts(PROMPT_SETS["b"].path)) > len(load_prompts(PROMPT_SETS["a"].path))
+
+
+def test_no_two_prompt_sets_share_a_prompt_id():
+    """A shared id would let paired_differences silently pair two prompts that are not the
+    same prompt -- a comparison of nothing, reported as a comparison of models."""
+    seen = {}
+    for key, prompt_set in PROMPT_SETS.items():
+        for prompt in load_prompts(prompt_set.path):
+            assert prompt["id"] not in seen, (prompt["id"], key, seen.get(prompt["id"]))
+            seen[prompt["id"]] = key
+
+
+def test_output_filenames_carry_the_set_so_one_cannot_be_read_as_the_other():
+    md_a, json_a = output_paths("tt-tnt-v3", "a")
+    md_b, json_b = output_paths("tt-tnt-v3", "b")
+    # Set A's names are unchanged -- renaming them would orphan every committed measurement.
+    assert md_a.name == "behaviour-tt-tnt-v3.md"
+    assert json_a.name == "behaviour-tt-tnt-v3.json"
+    assert md_b.name == "behaviour-tt-tnt-v3-setB.md"
+    assert json_b.name == "behaviour-tt-tnt-v3-setB.json"
+    assert {md_a, json_a}.isdisjoint({md_b, json_b})
+
+
+def test_an_unknown_prompt_set_names_the_ones_that_exist():
+    with pytest.raises(KeyError, match="unknown prompt set"):
+        resolve_prompt_set("nope")
+
+
+def test_the_report_json_records_which_prompt_set_produced_it():
+    payload = report_to_json([_one_real_report()], hf_model="artifacts/hf-x", label="x",
+                             num_samples=2, max_new_tokens=60, temperature=0.8, top_p=0.95,
+                             seed=0, eos_id=2, controls=None, control_excerpt_words=None,
+                             register_sources=None, prompt_set="b")
+    assert payload["prompt_set"] == "b"
+
+
+def test_comparing_across_prompt_sets_is_refused_rather_than_computed():
+    """THE POOLING GUARD. Two sets written at different times by different means are not
+    exchangeable; a cross-set comparison would measure the sets as much as the models."""
+    base = report_to_json([_one_real_report()], hf_model="a", label="a", num_samples=2,
+                          max_new_tokens=60, temperature=0.8, top_p=0.95, seed=0, eos_id=2,
+                          controls=None, control_excerpt_words=None, register_sources=None,
+                          prompt_set="a")
+    cand = report_to_json([_one_real_report()], hf_model="b", label="b", num_samples=2,
+                          max_new_tokens=60, temperature=0.8, top_p=0.95, seed=0, eos_id=2,
+                          controls=None, control_excerpt_words=None, register_sources=None,
+                          prompt_set="b")
+    with pytest.raises(ValueError, match="different prompt sets"):
+        paired_differences(base, cand)
+    # ... and the refusal is not an accident of the ids: these two payloads share every id.
+    assert set(base["per_prompt"]) == set(cand["per_prompt"])
+
+
+def test_a_json_written_before_prompt_sets_existed_still_compares_as_set_a():
+    """The committed behaviour-tt-tnt-v{1,3}.json predate --prompt-set. They were produced
+    against set A, so a missing key means set A -- a fact about this repo's history, not a
+    guess -- and `--compare` on them must keep working."""
+    payload = report_to_json([_one_real_report()], hf_model="x", label="x", num_samples=2,
+                             max_new_tokens=60, temperature=0.8, top_p=0.95, seed=0, eos_id=2,
+                             controls=None, control_excerpt_words=None, register_sources=None)
+    legacy = {k: v for k, v in payload.items() if k != "prompt_set"}
+    assert "prompt_set" not in legacy
+    diffs = paired_differences(legacy, payload)     # legacy vs set A: allowed
+    assert diffs and all(d.difference.mean == 0.0 for d in diffs if d.difference)
+
+
+def test_the_markdown_names_its_prompt_set_and_says_the_sets_are_not_pooled():
+    md = render_markdown([_one_real_report()], hf_model=Path("artifacts/hf-x"), label="x",
+                         num_samples=2, max_new_tokens=60, temperature=0.8, top_p=0.95,
+                         seed=0, eos_id=2, controls=None, control_excerpt_words=None,
+                         register_sources=None, prompt_set=PROMPT_SETS["b"])
+    assert "prompt set B" in md
+    assert "evaluation_prompts_b.json" in md
+    assert "never pooled" in md
+    # And set A's report does not claim to be set B's.
+    md_a = render_markdown([_one_real_report()], hf_model=Path("artifacts/hf-x"), label="x",
+                           num_samples=2, max_new_tokens=60, temperature=0.8, top_p=0.95,
+                           seed=0, eos_id=2, controls=None, control_excerpt_words=None,
+                           register_sources=None)
+    assert "evaluation_prompts_b.json" not in md_a
+    assert "prompt set A" in md_a
+
+
+def test_the_comparison_report_names_the_prompt_set_both_runs_used():
+    payload = report_to_json([_one_real_report()], hf_model="x", label="x", num_samples=2,
+                             max_new_tokens=60, temperature=0.8, top_p=0.95, seed=0, eos_id=2,
+                             controls=None, control_excerpt_words=None, register_sources=None,
+                             prompt_set="b")
+    md = render_comparison(payload, payload, paired_differences(payload, payload), label="x-vs-x")
+    assert "prompt set B" in md
+    assert "evaluation_prompts_b.json" in md
 
 
 def test_score_behaviour_does_not_write_the_frozen_prompt_set():
