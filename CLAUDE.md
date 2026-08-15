@@ -1085,3 +1085,73 @@ this adapter. The adapter cannot reach backwards past its own `argv`. It belongs
 comparison against the Hub on serve.
 
 Suite: **600 passed, 1 skipped** (581 + 19 before this change, baseline held).
+
+## A behavioural metric, and the correction it needed (2026-08-14)
+
+**The prompt.** "Build a behavioural quality metric... it is the binding constraint on the
+project." We could measure loss (per-source, stratified), context use, termination and
+genre-collapse rate — but the actual goal is qualitative prose, and that was assessed by a human
+reading 15 greedy completions. Fifteen deterministic completions cannot separate an improvement
+from noise and cannot be run in a loop. `scripts/score_behaviour.py` is the numeric version:
+many sampled completions per frozen prompt, five signals, standard errors everywhere.
+
+**Power comes from samples, not prompts.** `docs/evaluation_prompts.json` is digest-pinned for
+cross-checkpoint comparability and stays frozen; 32 completions per prompt at T=0.8 give the
+variance. The aggregate is the mean over the 15 *per-prompt* means with the SEM taken over
+prompts — completions of one prompt are not independent observations of model behaviour, the
+same "what is the exchangeable sampling unit" rule `probe_context_use.py` applies to windows.
+Comparisons are **paired by prompt**, which removes between-prompt variance and is what makes 15
+prompts enough to see anything at all.
+
+**Every detector is calibrated in-run, not asserted.** The collapse markers were chosen by
+measuring each candidate's rate per million words in `tinystories.txt` against the eight other
+prepared corpora (nothing under ~45x lift is included), and every run re-measures the whole
+detector on held-out corpus text at completion length: 48.5% sensitivity on real TinyStories,
+0.0–1.6% on the other eight sources. So the reported collapse rate is a **lower bound**, usable
+as a comparator, never as an absolute prevalence — the report says so in those words. The
+register signal (per-source interpolated unigram+bigram LMs, deliberately simple enough to check
+by hand) reports its own 9-way accuracy the same way: 99.9% on `tinystories`, and much lower on
+the narrative trio `folklore`/`gutenberg_children`/`weird`, which is stated so nobody reads a
+claim the model cannot support.
+
+**The correction, which is the interesting part.** Built as a single union of eleven markers, the
+collapse detector said v1 and v3 collapse at indistinguishable rates — contradicting the 9/15 vs
+1/15 hand count. The per-marker breakdown said why: `once_upon_a_time` went 10.8% → **0.0%** and
+`little_X_named` 8.3% → **0.4%**, while `one_day_comma` (14.8% → 12.5%) and `so_very_happy`
+(7.9% → 10.2%) did not move. The union averaged a large real effect against a null one. Split
+into **story-frame** vs **lexical-habit** collapse — by what each marker *is*, with the original
+union retained beside them — and the frame signal reproduces the hand count. The split was made
+*after* seeing the disagreement; the per-marker control table exists so that can be audited
+rather than trusted.
+
+**Where it still disagrees, and why we believe it.** The register signal says v1 and v3 write in
+the same register (`nearest == tinystories` 0.525 for both, difference 0.000 ± 0.038). We believe
+it: no prior finding actually claimed a register improvement (the hand count counted frame
+phrases, which this metric agrees about); an independent detector — the hand-written lexical
+marker list — says the same thing; and the register signal demonstrably has the dynamic range to
+see a change (per-prompt values span −0.77 to +2.03 nats/word). **v3 stopped writing fairy tales
+but did not stop using fairy-tale words.** That is a narrower win than "9/15 → 1/15" implies, and
+it is the target for the next run.
+
+**It can say "worse."** Verdicts are per-signal against a declared direction, and a difference
+whose 95% interval spans zero is "no change", never a small improvement. Three of nine signals
+moved the wrong way on this pair (repeat rate, longest repeated span, prompt engagement); none
+crosses significance, and the report names them anyway under the verdict. The repetition
+regression is if anything understated — v3's completions are *shorter* (it terminates), so it had
+fewer chances to repeat and still repeated more.
+
+**Power is capped by the prompt set, not the sample count.** Decomposing the paired SEM: for
+story-frame collapse, within-prompt sampling noise is only 0.015 of the observed 0.042, so
+doubling to 64 completions per prompt would buy ~3%. The 15 frozen prompts are the constraint.
+The right way to buy power is a *second* frozen set with new ids, reported separately — never by
+editing this one.
+
+**Mutation-checked, eleven ways.** Reducing the collapse detector to its single most obvious
+marker fails 8 tests; inverting the repeat rate fails 5; making termination check only the last
+token (batched `generate` pads after `</s>`, so that reads 0%) fails 2; pooling completions
+instead of aggregating over prompts fails 6; making the verdict unable to say "worse" fails 4.
+Also verified: normalising the corpus reader's case/punctuation — which would silently disarm two
+markers *and* misreport the detector's own accuracy — fails its test.
+
+Suite: **667 passed, 1 skipped** (600 + 67 before this change, baseline held). CPU-only
+throughout: no ttnn, no ttml, no device, nothing written under `artifacts/`.
