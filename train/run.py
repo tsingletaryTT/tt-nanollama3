@@ -350,6 +350,44 @@ def _warn_if_stochastic_rounding_disabled(yaml_config: Dict[str, Any]) -> None:
         )
 
 
+def ttml_cxx_header_fields(size) -> Dict[str, Any]:
+    """The four header facts that exist only as hardcoded defaults inside ttml's C++.
+
+    These are not in any yaml (``nanollama3.yaml`` never sets them) and — apart from
+    ``intermediate_dim`` — are not recoverable from the checkpoint's own tensors either,
+    so they must be captured at write time or a later converter has to guess.
+    ``weight_tying`` is the dangerous one: because it is on, a checkpoint has no
+    ``llama/tok_emb/weight`` tensor at all (the embedding is tied to ``llama/fc/weight``),
+    and a converter that doesn't know produces a model with a randomly-initialized
+    embedding table while raising no error.
+
+    **Why this is a function and not a dict literal at the call site.** It used to be a
+    literal, with ``"intermediate_dim": 1024`` written out by hand. 1024 is the value
+    ttml *derives* for the 384 model, so the constant was invisibly correct for the only
+    size that had ever been trained — and silently wrong for the first ``--size 1024``
+    run, which built a 2816-wide FFN while its checkpoints claimed 1024. Training did not
+    care (ttml derives the width itself and never reads the header), but
+    ``convert/to_hf.py`` copies the field straight into ``config.json``'s
+    ``intermediate_size``, so the converted model failed to load at all. Deriving it from
+    the size registry — the module that already reproduces ttml's rule and is pinned
+    against the real converted model by ``tests/test_sizes.py`` — makes that class of
+    drift impossible to reintroduce by hand.
+
+    ``size`` is a :class:`train.sizes.ModelSize`.
+    """
+    return {
+        # round_up(4 * embedding_dim * 2/3, 256); llama_block.cpp:15-23, reproduced by
+        # ModelSize.intermediate_dim. Derived, never restated — see above.
+        "intermediate_dim": size.intermediate_dim,
+        # WeightTyingType::Enabled default; models/llama.hpp:35.
+        "weight_tying": True,
+        # RMSNormLayer default; modules/rms_norm_module.hpp:17.
+        "rms_norm_eps": 1e-5,
+        # All 50 model tensors are BFLOAT16 per this run's manifest.
+        "weights_dtype": "bfloat16",
+    }
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--tokens-dir", default=str(ROOT / "artifacts" / "tokens"))
@@ -641,25 +679,12 @@ def main() -> int:
                     seq_len=cfg.seq_len,
                     extra={
                         "transformer_config": transformer_config,
-                        # These four fields exist only as hardcoded defaults in ttml's
-                        # C++ (LlamaConfig / RMSNormLayer) — nanollama3.yaml never sets
-                        # them, so they cannot be recovered later from the yaml, and
-                        # they are not derivable from the checkpoint's own tensors
-                        # either. They must be captured here, at write time, straight
-                        # from the C++ source, or a later converter has to guess.
-                        # weight_tying is the dangerous one to get wrong: because it is
-                        # on, this checkpoint has no `llama/tok_emb/weight` tensor at
-                        # all (the embedding is tied to `llama/fc/weight`) — a converter
-                        # that doesn't know that produces a model with a
-                        # randomly-initialized embedding table and raises no error.
-                        "intermediate_dim": 1024,
-                        # round_up(4 * embedding_dim * 2/3, 256); llama_block.cpp:15-23.
-                        "weight_tying": True,
-                        # WeightTyingType::Enabled default; models/llama.hpp:35.
-                        "rms_norm_eps": 1e-5,
-                        # RMSNormLayer default; modules/rms_norm_module.hpp:17.
-                        "weights_dtype": "bfloat16",
-                        # All 50 model tensors are BFLOAT16 per this run's manifest.
+                        # The ttml C++ defaults that no yaml carries, derived from the
+                        # size registry rather than restated here — see
+                        # ttml_cxx_header_fields for what they are and for the
+                        # hardcoded-1024 bug that motivated pulling them out of this
+                        # literal.
+                        **ttml_cxx_header_fields(size),
                     },
                 ),
                 model_params=model.parameters(), optimizer=optimizer,

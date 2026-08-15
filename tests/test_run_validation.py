@@ -25,7 +25,13 @@ import json
 
 import pytest
 
-from train.run import _warn_if_stochastic_rounding_disabled, run_training_loop
+from train.checkpoint import build_header, validate_header
+from train.run import (
+    _warn_if_stochastic_rounding_disabled,
+    run_training_loop,
+    ttml_cxx_header_fields,
+)
+from train.sizes import SIZES
 
 
 class _FakeCfg:
@@ -262,3 +268,56 @@ def test_resolved_value_is_always_printed(capsys, value):
     captured = capsys.readouterr()
     assert "stochastic_rounding" in captured.out
     assert str(value) in captured.out
+
+
+# --- the ttml C++ header fields ------------------------------------------------------
+#
+# These four values are written into every checkpoint header because they exist nowhere
+# else (see ttml_cxx_header_fields). intermediate_dim used to be a hardcoded 1024 at the
+# call site, which is the value ttml *derives* for the 384 model -- so it was invisibly
+# correct for the only size that had ever been trained, and silently wrong the first time
+# --size 1024 ran. These tests pin the derivation to the registry so the constant cannot
+# come back.
+
+
+def test_ttml_cxx_header_fields_derives_intermediate_dim_per_size():
+    """The bug this function exists to prevent: one size's derived FFN width written as a
+    literal, and therefore wrong for every other size. 384 derives 1024 and 1024 derives
+    2816 -- if these ever come out equal, the value is being restated, not derived."""
+    f384 = ttml_cxx_header_fields(SIZES["384"])
+    f1024 = ttml_cxx_header_fields(SIZES["1024"])
+    assert f384["intermediate_dim"] == 1024
+    assert f1024["intermediate_dim"] == 2816
+    assert f384["intermediate_dim"] != f1024["intermediate_dim"]
+
+
+@pytest.mark.parametrize("name", sorted(SIZES))
+def test_ttml_cxx_header_fields_match_the_registry_for_every_size(name):
+    """Every registered size, not just the two we happen to have trained: the header must
+    agree with ModelSize.intermediate_dim, which tests/test_sizes.py in turn pins against
+    the real converted model's config.json."""
+    size = SIZES[name]
+    assert ttml_cxx_header_fields(size)["intermediate_dim"] == size.intermediate_dim
+
+
+@pytest.mark.parametrize("name", sorted(SIZES))
+def test_ttml_cxx_header_fields_carries_the_non_derived_cxx_defaults(name):
+    """weight_tying is the dangerous one -- a converter that doesn't see it True builds a
+    randomly-initialized embedding table and raises nothing. These three are genuine C++
+    constants (not size-dependent), so they are asserted the same for every size."""
+    fields = ttml_cxx_header_fields(SIZES[name])
+    assert fields["weight_tying"] is True
+    assert fields["rms_norm_eps"] == 1e-5
+    assert fields["weights_dtype"] == "bfloat16"
+
+
+def test_ttml_cxx_header_fields_passes_validate_header():
+    """The fields have to survive build_header's extra= and validate_header, or a
+    checkpoint written with them cannot be loaded back."""
+    header = build_header(
+        step=1000, model_config_path="m.yaml", tokenizer_dir="tok",
+        corpus_tokens=1_000, batch_size=64, seq_len=512,
+        extra={"transformer_config": {}, **ttml_cxx_header_fields(SIZES["1024"])},
+    )
+    validate_header(header)  # must not raise
+    assert header["intermediate_dim"] == 2816
