@@ -1155,3 +1155,90 @@ markers *and* misreport the detector's own accuracy — fails its test.
 
 Suite: **667 passed, 1 skipped** (600 + 67 before this change, baseline held). CPU-only
 throughout: no ttnn, no ttml, no device, nothing written under `artifacts/`.
+
+## A second frozen prompt set, and an honest answer about what it buys (2026-08-14)
+
+**The prompt.** "Build a SECOND frozen evaluation prompt set... power is capped by the PROMPT
+count, not the sample count." The previous section ends by saying the right way to buy power is a
+second frozen set with new ids, reported separately. This is that set:
+`docs/evaluation_prompts_b.json`, 45 prompts, pinned by `tests/test_evaluation_prompts_b.py`.
+`docs/evaluation_prompts.json` (set A) was not touched — its digest is unchanged, and a test in
+set B's suite asserts that, so "set A moved" can never be a silent side effect of a set B edit.
+
+**How the prompts were derived, and what that rules out.** From the corpus design — `train/corpus.py`'s
+per-source rationales and `docs/corpus_blend.md` — and explicitly *not* from any model's observed
+output. Not one prompt was chosen because a checkpoint failed on something like it. An instrument
+reverse-engineered from the last bug is tuned to the last bug and cannot find the next one.
+Two orthogonal axes, both readable off the file: the id prefix names the corpus **register** the
+opening leans toward (`b-spine-*`, `b-proc-*`, `b-weird-*`, `b-folk-*`, `b-child-*`, `b-wiki-*`,
+`b-poem-*`, `b-flav-*`, `b-tiny-*`, `b-null-*`), the `probe` field names the **behaviour** it
+stresses (set A's seven tags plus `default-register`). Registers: spine 6, procedural 7, weird 4,
+folklore 4, gutenberg_children 3, wikipedia_simple 4, poetry 2, flavour 5, tinystories 2, neutral 8.
+Probes: target-voice 7, agentic 7, coherence 7, grounding 5, perpendicular 5, oracular 3, stutter 3,
+default-register 8. `procedural` gets the largest non-neutral block because it is the slice that
+measurably benefits most from long context (+0.130 at 3× SEM), so a context change should show
+there first.
+
+**The neutral block is the part set A could not do.** Eight openings (`b-null-*`) that lean toward
+no slice at all, so the model's *default* register is measurable and not only its steerability.
+Every set A prompt hands the model a register; that is why "v3 stopped writing fairy tales but kept
+using fairy-tale words" took a separate detector to see. Checked rather than asserted: scoring each
+prompt's own text under this repo's nine per-source register models, set B's 45 prompts spread over
+all nine sources with no source above 22%, against set A's 15 which touch six sources with
+tinystories at 33%. The neutral eight land on six different sources — dispersion is what
+slice-neutrality looks like under a weak detector. The check is weak (8–14 words is little
+evidence) and was deliberately **not** used to tune the prompts; tuning against it would be
+overfitting an instrument to another instrument.
+
+**The power it buys, stated conditionally, because the honest answer is conditional.**
+On the same paired-SEM basis as the v1-vs-v3 comparison, story-frame collapse:
+
+| | n | effect | SEM | min. detectable | \|t\| |
+|---|---:|---:|---:|---:|---:|
+| set A, as measured | 15 | −0.0833 | 0.0416 | **0.0814** | 2.01 |
+| set B, if per-prompt effects have set A's spread (sd 0.161) | 45 | −0.0833 | 0.0240 | **0.0470** | 3.47 |
+| set B, if it has the same *live* prompts as set A and 30 dead ones | 45 | −0.0278 | 0.0148 | 0.0290 | 1.88 |
+
+**So the number is 0.047 — conditional on set B's prompts differing between checkpoints as much as
+set A's did.** The third row is the warning, and it is not hypothetical: set A's whole −0.083 comes
+from three prompts, 71% of it from two, and v3 sits at exactly 0.000 frame collapse on 12 of 15.
+Adding prompts on which both models score zero shrinks the effect and the SEM at the same rate, so
+|t| does not move — 45 prompts would settle nothing. What buys power is prompts on which the two
+models *differ*, not prompts. Set B is if anything more register-dispersed than set A, so for this
+one floor-limited signal the third row is a live possibility and the 0.047 should be read as the
+optimistic end. Its own per-prompt table will say which world we are in, and that is the right time
+to find out — a frozen set is frozen *before* it judges anything.
+
+For the signals that are not floor-limited the √3 improvement is unconditional, because every
+prompt varies: termination MDE 0.104 → 0.060, `nearest == tinystories` 0.075 → 0.043, prompt
+engagement 0.069 → 0.040, 4-gram repeat 0.0098 → 0.0057. The general lesson is the one the metric
+keeps teaching: against a model that has already eliminated a behaviour, no prompt count rescues a
+signal at its floor. That needs a signal with headroom — which is what the lexical-habit split and
+the register margin are for.
+
+**The sets are never pooled.** `--prompt-set {a,b}` defaults to `a`, so every existing invocation
+and every committed measurement stays reproducible — verified by re-running the committed v1-vs-v3
+comparison and diffing: all nine paired numbers identical, only the prose that now names the set
+changed. Set B's outputs carry `-setB` in the filename, the JSON records `prompt_set`, and
+`--compare` *refuses* a cross-set pair rather than computing one (tested with two payloads that
+share every prompt id, so the refusal is not an accident of disjoint ids). A JSON with no
+`prompt_set` key is read as set A — a fact about this repo's history, not a guess, since set B did
+not exist when those files were written.
+
+**Mutation-checked, on the file, not in the abstract.** Changing one word of one prompt in
+`docs/evaluation_prompts_b.json` ("measures" → "gauges" in `b-wiki-01`) fails 2 tests
+(`test_prompt_text_is_frozen_not_just_the_ids`, `test_the_digest_does_not_depend_on_file_order`);
+reverted, 19 pass. The digest also detects a prompt dropped, a prompt added, and two prompts' texts
+*swapped* — the last is the case a digest over ids and texts separately would miss.
+
+**One correction carried forward.** The old docstring line "power comes from more samples per
+prompt, never from more prompts" was the design intent and is wrong; it is corrected in place
+rather than left standing, with the decomposition that disproved it.
+
+**No set B scores are reported here, deliberately.** A 2-sample × 24-token run against
+`artifacts/hf-tt-tnt-v3` proved the plumbing end to end (45 prompts, report written, JSON written)
+and its output went to a scratch directory, not to `docs/measurements/`. Interpreting a smoke test
+as a finding is exactly what freezing a set beforehand is meant to prevent.
+
+Suite: **697 passed, 1 skipped** (667 + 30 before this change, baseline held). CPU-only: no ttnn,
+no ttml, no device touched, nothing written under `artifacts/`.

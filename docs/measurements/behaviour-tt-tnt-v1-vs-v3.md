@@ -152,3 +152,14 @@ Doubling the completions per prompt buys 3–13%. The binding constraint is the 
 prompts**, not the samples drawn from them. The prompt set is deliberately frozen for cross-checkpoint
 comparability, so the right way to buy power is a *second* frozen set with new ids, sized for
 this purpose and reported separately — never by editing this one.
+
+**That set now exists**: `docs/evaluation_prompts_b.json` (set B, 45 prompts, digest-pinned by
+`tests/test_evaluation_prompts_b.py`), scored with `scripts/score_behaviour.py --prompt-set b`
+and written to `behaviour-<label>-setB.{md,json}`. The two sets are reported side by side and
+never pooled; `--compare` refuses to pair runs from different sets. On the same paired-SEM basis
+as the table above, 45 prompts take story-frame collapse's minimum detectable effect from 0.081
+to **0.047** — *if* set B's prompts differ between checkpoints as much as set A's did. They may
+not: set A's whole −0.083 comes from three prompts (71% of it from two) and v3 is at exactly
+0.000 on 12 of 15, and adding prompts on which both models score zero shrinks the effect and the
+SEM at the same rate, leaving |t| unmoved. Prompts on which the models *differ* are what buy
+power; prompts alone are not. See the CLAUDE.md entry for the full arithmetic.
