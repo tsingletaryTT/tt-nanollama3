@@ -54,6 +54,7 @@ sys.path.insert(0, str(ROOT))
 
 from train import checkpoint  # noqa: E402
 from train.config import (  # noqa: E402
+    DEFAULT_SEED,
     SEQ_LEN,
     VOCAB_SIZE,
     apply_optimizer_override,
@@ -374,6 +375,13 @@ def main() -> int:
                         f"(default: {DEFAULT_SIZE}, the originally-trained model). "
                         f"Each size has its own vendored ttml config under "
                         f"train/configs/model/.")
+    p.add_argument("--seed", type=int, default=DEFAULT_SEED,
+                   help=f"RNG seed for weight init and batch shuffling (default: "
+                        f"{DEFAULT_SEED}, the value hardcoded through v1-v4, so omitting "
+                        f"this reproduces every committed measurement). Change it only to "
+                        f"vary a run deliberately -- repeating a run under a different seed "
+                        f"is what measures run-to-run variance, the noise floor every "
+                        f"between-run comparison has to be read against.")
     p.add_argument("--arch", default="blackhole", choices=["blackhole", "wormhole_b0"])
     p.add_argument("--tt-metal-home", default=_default_tt_metal_home())
     p.add_argument("--dry-run", action="store_true",
@@ -489,6 +497,7 @@ def main() -> int:
         str(ROOT / "artifacts" / "tokenizer"), str(model_config),
         seq_len=args.seq_len, max_sequence_length=size.max_sequence_length,
         batch_size=args.batch_size, max_steps=args.steps, eval_every=args.eval_every,
+        seed=args.seed,
     )
     if args.config:
         apply_optimizer_override(yaml_config, args.config)
@@ -519,6 +528,12 @@ def main() -> int:
               + (f", held flat for the first {held:.0%} of {args.steps} steps "
                  f"(decay begins ~step {int(held * args.steps)})" if held else
                  f" across all {args.steps} steps"))
+
+    # Read back out of the *resolved* config rather than echoing args.seed, so this line
+    # is evidence that the flag reached what set_seed() will actually be handed.
+    resolved_seed = yaml_config["training_config"]["seed"]
+    print(f"  seed: {resolved_seed}"
+          + ("" if resolved_seed == DEFAULT_SEED else f" (default is {DEFAULT_SEED})"))
 
     print(f"tt-tnt training — steps={cfg.steps} batch={cfg.batch_size} "
           f"seq_len={cfg.seq_len} arch={args.arch}")

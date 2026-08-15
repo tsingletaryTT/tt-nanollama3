@@ -8,6 +8,7 @@ import pytest
 import yaml
 
 from train.config import (
+    DEFAULT_SEED,
     SEQ_LEN,
     VOCAB_SIZE,
     RunConfig,
@@ -93,6 +94,45 @@ def test_emits_optimizer_section():
     assert opt["type"] == "AdamW"
     assert opt["lr"] == 0.0003
     assert opt["weight_decay"] == 0.01
+
+
+def test_seed_defaults_to_the_value_every_committed_run_used():
+    """v1-v4 all ran at 5489, hardcoded. Changing this default would not fail anything
+    loudly -- it would silently make every number in docs/measurements/ irreproducible,
+    so the default is pinned here rather than left to whatever the constant happens to be."""
+    assert DEFAULT_SEED == 5489
+    assert _yaml()["training_config"]["seed"] == 5489
+
+
+def test_seed_can_be_overridden():
+    """The whole point of the flag: the same recipe at a different seed, which is how
+    run-to-run variance (the noise floor for every between-run comparison) gets measured."""
+    assert _yaml(seed=20260815)["training_config"]["seed"] == 20260815
+
+
+def test_seed_override_moves_nothing_else():
+    """A seed-replicate run must differ from its twin in exactly one number."""
+    baseline = _yaml(batch_size=16, max_steps=10764)["training_config"]
+    varied = _yaml(batch_size=16, max_steps=10764, seed=20260815)["training_config"]
+    differing = {k for k in baseline if baseline[k] != varied.get(k)}
+    assert differing == {"seed"}, f"seed override also changed {differing - {'seed'}}"
+
+
+def test_config_file_seed_is_documentation_and_never_overrides_the_real_one():
+    """The trap. ``train/configs/*.yaml`` carries a ``seed:`` key, but
+    ``apply_optimizer_override`` copies the ``optimizer`` block and nothing else, so that
+    key has never had any effect. Anyone who "changes the seed" by editing the yaml is
+    changing a comment. Pinned so the illusion cannot quietly become real either."""
+    cfg = _yaml(seed=20260815)
+    override_path = Path(__file__).resolve().parent.parent / "train" / "configs"
+    override_path = override_path / "nanollama3_bpe_v2.yaml"
+    with override_path.open("r", encoding="utf-8") as f:
+        on_disk = yaml.safe_load(f)
+    # The file really does carry a seed, and it differs from what we passed --
+    # otherwise this test would pass for the wrong reason.
+    assert on_disk["training_config"]["seed"] == 5489
+    apply_optimizer_override(cfg, override_path)
+    assert cfg["training_config"]["seed"] == 20260815
 
 
 def test_stochastic_rounding_defaults_off():

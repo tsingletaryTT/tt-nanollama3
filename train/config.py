@@ -44,6 +44,16 @@ SEQ_LEN = 512
 #: Must equal the tokenizer's vocabulary (Plan 1 pins it at exactly this).
 VOCAB_SIZE = 32000
 
+#: The RNG seed every run used before ``--seed`` existed, and still the default.
+#:
+#: This is ttml's own default (mt19937's canonical default seed), and it was hardcoded
+#: here through v1--v4. It stays the default so that every invocation recorded in
+#: ``docs/measurements/`` reproduces exactly as run: changing it would silently
+#: invalidate the committed baselines rather than fail loudly. Pass ``--seed`` to vary
+#: it deliberately -- which is the only way to measure run-to-run variance, since two
+#: runs at the same seed differ only by nondeterministic device reduction order.
+DEFAULT_SEED = 5489
+
 
 class RunConfig:
     """Every attribute ``ttml.common.trainer.train()`` reads, plus what our loop needs.
@@ -82,6 +92,7 @@ def build_yaml_config(
     gradient_accumulation_steps: int = 1,
     checkpoint_dir: str = "artifacts/checkpoints",
     stochastic_rounding: bool = False,
+    seed: int = DEFAULT_SEED,
 ) -> Dict[str, Any]:
     """Build the config dict ``TransformerModelFactory`` and ``RunConfig`` consume.
 
@@ -128,7 +139,11 @@ def build_yaml_config(
         )
     return {
         "training_config": {
-            "seed": 5489,
+            # The only seed that has any effect. `train/configs/*.yaml` also carries a
+            # `seed:` key, but that file is read solely by `apply_optimizer_override`,
+            # which copies the `optimizer` block and nothing else -- so the yaml's seed
+            # is documentation, not configuration. Vary this one via `--seed`.
+            "seed": seed,
             "seq_len": seq_len,
             "batch_size": batch_size,
             "max_steps": max_steps,
