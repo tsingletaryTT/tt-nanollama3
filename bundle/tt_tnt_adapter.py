@@ -170,6 +170,10 @@ The bug being fixed is silence, so the fix must not introduce a different silenc
 - Every fingerprinted directory gets a ``tt_tnt_cache_source.json`` stamp recording what it
   was built from, so ``ls`` answers the question that cost an afternoon.
 
+A log line that is emitted but not *printed* is not a log line, so the module logger is
+named under ``vllm`` -- see the comment on ``logger`` below. Without that, only the warnings
+above reached the terminal and every confirming INFO line was dropped by the root logger.
+
 weight_cache_path SCOPE AND SAFETY
 ----------------------------------
 - Wraps one method; the returned path is the stock path plus one component, so every
@@ -198,7 +202,20 @@ from pathlib import Path
 
 from models.tt_transformers.tt.model_config import ModelArgs
 
-logger = logging.getLogger(__name__)
+#: Named **under the ``vllm`` logger** on purpose, and this is load-bearing rather than
+#: cosmetic. vLLM configures exactly one logger -- ``vllm`` -- with a stream handler at
+#: ``VLLM_LOGGING_LEVEL`` (INFO by default) and ``propagate: False``
+#: (``vllm/logger.py:41-71``), and leaves the **root** logger at its stock WARNING. A bare
+#: ``getLogger(__name__)`` therefore propagates to a root that drops every INFO record, so
+#: in a real serve only this module's *warnings* were ever visible: the lines that say the
+#: guard is installed, that a cache is being reused, and that weights are being converted
+#: for the first time all vanished. That is half of the "not silent in either direction"
+#: guarantee below silently missing -- the reassuring half, which is the half you read when
+#: deciding whether to trust a measurement. Every vLLM module gets its logging solely by
+#: being named ``vllm.*`` (``init_logger`` is just ``getLogger(name)``, ``logger.py:204``),
+#: so this is the mechanism upstream uses, not a trick played on it. Outside a vLLM process
+#: the name is an ordinary unconfigured logger and behaves exactly as before.
+logger = logging.getLogger(f"vllm.{__name__}")
 
 #: Set once the patch is installed, holding the original unbound method so the
 #: installation is reversible and detectably idempotent.

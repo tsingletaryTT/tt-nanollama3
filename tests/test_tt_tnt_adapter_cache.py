@@ -56,6 +56,12 @@ ADAPTER_PATH = Path(__file__).resolve().parents[1] / "bundle" / "tt_tnt_adapter.
 #: ``tt_tnt_adapter`` that a serving environment might already have imported.
 _MODULE_NAME = "tt_tnt_adapter_under_test"
 
+#: The adapter's logger, which is deliberately a **child of ``vllm``** so that vLLM's
+#: logging configuration governs it (see the ``logger`` comment in the adapter). Derived
+#: here the same way the adapter derives it, rather than hardcoded, so that if the two ever
+#: disagree the log-content gates below fail loudly instead of watching an empty logger.
+_LOGGER_NAME = f"vllm.{_MODULE_NAME}"
+
 #: The fake package tree the adapter's imports resolve against.
 _FAKE_MODULES = (
     "models",
@@ -317,7 +323,7 @@ def test_changed_source_is_a_warning_not_an_ordinary_cache_miss(adapter, tmp_pat
     (old_path / "tok_embeddings.weight_dtype_BFLOAT8_B_layout_TILE.tensorbin").write_bytes(b"x")
 
     caplog.clear()
-    with caplog.at_level(logging.INFO, logger=_MODULE_NAME):
+    with caplog.at_level(logging.INFO, logger=_LOGGER_NAME):
         adapter.ModelArgs(cache, commit_hash="a3c85ec799fe5e35b0cffd754b59b20cdb34866c").weight_cache_path(BFP8)
 
     warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
@@ -329,12 +335,56 @@ def test_changed_source_is_a_warning_not_an_ordinary_cache_miss(adapter, tmp_pat
 
 def test_first_conversion_does_not_cry_wolf(adapter, tmp_path, caplog):
     """A cold cache is normal. Warning here would train people to ignore the warning."""
-    with caplog.at_level(logging.INFO, logger=_MODULE_NAME):
+    with caplog.at_level(logging.INFO, logger=_LOGGER_NAME):
         adapter.ModelArgs(
             tmp_path / "cache", commit_hash="a3c85ec799fe5e35b0cffd754b59b20cdb34866c"
         ).weight_cache_path(BFP8)
 
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+def test_confirming_lines_survive_vllms_real_logging_config(adapter, tmp_path):
+    """The INFO half of the guarantee must reach the terminal in an actual serve.
+
+    Every other log gate in this file opens the logger with ``caplog.at_level(INFO)``,
+    which is precisely why they all passed while the real thing printed nothing: vLLM
+    configures only the ``vllm`` logger (handler at INFO, ``propagate: False``) and leaves
+    root at WARNING, so a bare ``getLogger(__name__)`` had its INFO records discarded. The
+    warnings still showed, so the failure looked like success -- the adapter appeared to be
+    logging, while the lines that say "this cache is being reused" and "converting fresh
+    weights" were exactly the ones being dropped.
+
+    So this gate does not raise any level. It rebuilds vLLM's configuration verbatim and
+    asserts the message arrives through it. Renaming the adapter's logger out of the
+    ``vllm`` hierarchy fails here and nowhere else.
+    """
+    records = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    vllm_logger = logging.getLogger("vllm")
+    handler = _Capture(level=logging.INFO)
+    saved_level, saved_propagate = vllm_logger.level, vllm_logger.propagate
+    vllm_logger.addHandler(handler)
+    vllm_logger.setLevel(logging.INFO)
+    vllm_logger.propagate = False  # as vLLM sets it
+    try:
+        adapter.ModelArgs(
+            tmp_path / "cache", commit_hash="a3c85ec799fe5e35b0cffd754b59b20cdb34866c"
+        ).weight_cache_path(BFP8)
+    finally:
+        vllm_logger.removeHandler(handler)
+        vllm_logger.setLevel(saved_level)
+        vllm_logger.propagate = saved_propagate
+
+    infos = [r.getMessage() for r in records if r.levelno == logging.INFO]
+    assert infos, (
+        "no INFO record reached vLLM's handler -- the adapter's confirming lines are "
+        "invisible in a real serve, which is the state this guard exists to prevent"
+    )
+    assert any("first conversion" in m for m in infos), infos
 
 
 def test_unfingerprinted_leftovers_are_reported(adapter, tmp_path, caplog):
@@ -345,7 +395,7 @@ def test_unfingerprinted_leftovers_are_reported(adapter, tmp_path, caplog):
     legacy = stock / "wo_dtype_BFLOAT8_B_layout_TILE.tensorbin"
     legacy.write_bytes(b"stale")
 
-    with caplog.at_level(logging.INFO, logger=_MODULE_NAME):
+    with caplog.at_level(logging.INFO, logger=_LOGGER_NAME):
         adapter.ModelArgs(cache, commit_hash="a3c85ec799fe5e35b0cffd754b59b20cdb34866c").weight_cache_path(BFP8)
 
     text = "\n".join(r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING)
@@ -357,7 +407,7 @@ def test_missing_fingerprint_degrades_to_the_stock_path_loudly(adapter, tmp_path
     """No sha, no local directory: the guard cannot help, and must not pretend it did."""
     args = adapter.ModelArgs(tmp_path / "cache", ckpt_dir="episod/tt-tnt", commit_hash=None)
 
-    with caplog.at_level(logging.INFO, logger=_MODULE_NAME):
+    with caplog.at_level(logging.INFO, logger=_LOGGER_NAME):
         path = args.weight_cache_path(BFP8)
 
     assert path == tmp_path / "cache" / f"tensor_cache_{BFP8}", "must fall back to stock"
@@ -371,7 +421,7 @@ def test_opting_out_is_not_silent(adapter, tmp_path, caplog, monkeypatch):
     monkeypatch.setenv("TT_TNT_CACHE_FINGERPRINT", "0")
     args = adapter.ModelArgs(tmp_path / "cache", commit_hash="a3c85ec799fe5e35b0cffd754b59b20cdb34866c")
 
-    with caplog.at_level(logging.INFO, logger=_MODULE_NAME):
+    with caplog.at_level(logging.INFO, logger=_LOGGER_NAME):
         path = args.weight_cache_path(BFP8)
 
     assert path == tmp_path / "cache" / f"tensor_cache_{BFP8}"
@@ -399,7 +449,7 @@ def test_cache_directory_says_what_it_was_built_from(adapter, tmp_path):
 def test_declines_to_patch_when_the_method_is_gone(tmp_path, caplog):
     """tt_transformers dropped ``weight_cache_path``: warn, do not crash the serve."""
     cls = make_model_args_cls(with_weight_cache_path=False)
-    with caplog.at_level(logging.INFO, logger=_MODULE_NAME):
+    with caplog.at_level(logging.INFO, logger=_LOGGER_NAME):
         with loaded_adapter(cls) as module:
             assert module._ORIGINAL_WEIGHT_CACHE_PATH is None
             assert not hasattr(cls, "weight_cache_path"), "nothing must be invented"
@@ -411,7 +461,7 @@ def test_declines_to_patch_when_the_method_is_gone(tmp_path, caplog):
 def test_declines_to_patch_when_the_signature_changed(tmp_path, caplog):
     """A renamed second parameter means we can no longer be sure what we are scoping."""
     cls = make_model_args_cls(signature="renamed")
-    with caplog.at_level(logging.INFO, logger=_MODULE_NAME):
+    with caplog.at_level(logging.INFO, logger=_LOGGER_NAME):
         with loaded_adapter(cls) as module:
             assert module._ORIGINAL_WEIGHT_CACHE_PATH is None
             # Stock behaviour, untouched.
