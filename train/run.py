@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 from pathlib import Path
@@ -109,6 +110,90 @@ def evaluate(model, val_ids: np.ndarray, cfg, batches: int = 10) -> float:
     return total / batches
 
 
+#: Schedule shapes accepted by ``--lr-schedule``. ``constant`` is the default and is a true
+#: no-op — see ``lr_at_step`` and ``run_training_loop`` for why that matters.
+LR_SCHEDULES = ("constant", "cosine", "linear")
+
+
+def lr_at_step(
+    base_lr: float,
+    step: float,
+    total_steps: int,
+    *,
+    schedule: str = "constant",
+    min_lr: float = 0.0,
+    decay_start_frac: float = 0.0,
+) -> float:
+    """The learning rate a ``schedule`` prescribes at ``step`` of a ``total_steps`` run.
+
+    Pure arithmetic — no optimizer, no device, no state. That is deliberate: it makes the
+    whole schedule testable on a machine with no board (``tests/test_lr_schedule.py``), and
+    it means the LR is a function of *position in the run* rather than of how many times
+    something happened to be stepped. The latter matters here specifically, because the
+    caller advances in **non-uniform chunks** (see ``run_training_loop``) and a step-counting
+    scheduler object would silently mis-time itself on the short final chunk.
+
+    WHY NOT REUSE ttml's SCHEDULERS. tt-train ships
+    ``~/tt-metal/tt-train/sources/ttml/ttml/common/schedulers.py`` (``CosineAnnealing``,
+    ``Step``, ``Linear``, ``Lambda``, ``Sequential``). They were the first thing checked and
+    they do not fit this loop. Every one of them is a stateful object whose ``step()``
+    advances an internal counter by exactly one and then calls ``optimizer.set_lr()`` —
+    they are built for a loop that owns each individual training step. We do not own the
+    individual steps: ttml's ``train()`` is a black box that runs ``cfg.steps`` steps
+    internally and exposes no per-step hook (verified — ``ttml/common/trainer.py`` has no
+    scheduler or LR callback of any kind). So the only place we can move the LR is *between*
+    chunks, and those chunks are 500 steps here but 264 for the run's remainder. Driving a
+    counter-based scheduler from that would either need one ``step()`` call per training step
+    (500 redundant C++ ``set_lr`` calls per chunk, purely to advance a counter) or would let
+    the counter drift out of correspondence with the real step number. A position function is
+    both simpler and exactly right.
+
+    THE SHAPE. ``decay_start_frac`` holds the LR flat at ``base_lr`` for that fraction of the
+    run, then decays to ``min_lr`` across whatever is left. ``0.0`` (the default) decays over
+    the whole run — the plain reading of "a cosine schedule". A non-zero value is the
+    stable-then-decay ("decay tail") shape, which is what makes a clean A/B against an
+    existing constant-LR run possible: the held portion reproduces that run exactly, so any
+    divergence is attributable to the decay alone.
+
+    ``constant`` ignores ``min_lr``/``decay_start_frac`` entirely and returns ``base_lr``.
+
+    Args:
+        base_lr: The peak/held LR — the optimizer's configured LR, unchanged from the config.
+        step: Position in the run, in steps. Fractional positions are meaningful and
+            expected — ``run_training_loop`` passes chunk *midpoints*. Clamped to
+            ``[0, total_steps]``.
+        total_steps: Length of the run the schedule spans. ``<= 0`` yields ``base_lr``.
+        schedule: One of :data:`LR_SCHEDULES`.
+        min_lr: LR at the end of the decay. Never returned before the run's final step.
+        decay_start_frac: Fraction of the run held at ``base_lr`` before decay begins, in
+            ``[0.0, 1.0]``. ``>= 1.0`` means "never decay" and yields ``base_lr`` throughout.
+
+    Returns:
+        The learning rate, as a float.
+
+    Raises:
+        ValueError: if ``schedule`` is not in :data:`LR_SCHEDULES`.
+    """
+    if schedule not in LR_SCHEDULES:
+        raise ValueError(f"unknown lr schedule {schedule!r}; expected one of {LR_SCHEDULES}")
+    if schedule == "constant" or total_steps <= 0 or decay_start_frac >= 1.0:
+        return base_lr
+
+    progress = min(max(step / total_steps, 0.0), 1.0)
+    if progress <= decay_start_frac:
+        return base_lr
+
+    # Re-normalise the post-hold remainder onto [0, 1] so the decay always lands exactly on
+    # min_lr at the run's final step, whatever fraction was held.
+    t = (progress - decay_start_frac) / (1.0 - decay_start_frac)
+    t = min(max(t, 0.0), 1.0)
+
+    if schedule == "cosine":
+        return min_lr + 0.5 * (base_lr - min_lr) * (1.0 + math.cos(math.pi * t))
+    # linear
+    return base_lr + (min_lr - base_lr) * t
+
+
 def _chunk_size(ran: int, remaining: int, save_every: int, val_every: int) -> int:
     """Steps to run in the next sub-chunk of ``train()``.
 
@@ -156,6 +241,7 @@ def run_training_loop(
     train_fn: Callable[..., Tuple[List[float], Any]],
     evaluate_fn: Callable[..., float],
     save_checkpoint_fn: Optional[Callable[[int], None]] = None,
+    lr_fn: Optional[Callable[[float], float]] = None,
     print_fn: Callable[..., None] = print,
 ) -> Tuple[List[float], List[Dict[str, Any]]]:
     """Run ``cfg.steps`` steps in chunks, checkpointing and validating at independent
@@ -169,20 +255,42 @@ def run_training_loop(
     Mutates ``cfg.steps`` on every sub-chunk, same contract the pre-refactor loop in
     ``main()`` had (``train_fn`` reads ``cfg.steps`` to know how far to run).
 
+    ``lr_fn``, when given, is the learning-rate schedule (in production a partial of
+    :func:`lr_at_step`). It maps a position in the run, in steps, to a learning rate, and is
+    applied by calling ``optimizer.set_lr()`` **once per chunk, before that chunk runs** —
+    the only place the LR can be moved at all, since ttml's ``train()`` runs a whole chunk
+    internally with no per-step hook. The position handed to ``lr_fn`` is the chunk's
+    **midpoint** (``ran + cfg.steps / 2``), not its start or end: the LR is necessarily held
+    constant across the chunk, and evaluating at the midpoint makes that staircase an
+    unbiased approximation of the continuous schedule instead of one that lags (chunk start)
+    or leads (chunk end) it by a chunk. When ``lr_fn`` is ``None`` — the default, and what
+    ``--lr-schedule constant`` resolves to — ``set_lr`` is never called at all, so the
+    optimizer keeps exactly the LR its config gave it and this loop is bit-identical to its
+    pre-schedule behaviour. That is why the default is ``None`` rather than a
+    constant-returning function: every run recorded before schedules existed stays
+    reproducible, and the optimizer is not touched by a feature that isn't in use.
+
     Returns ``(all_losses, val_records)``. ``val_records`` is also the list appended, one
     JSON object per line, to ``val_log_path`` (skipped if ``val_log_path`` is ``None``) —
     each record is ``{"step": absolute_step, "train_loss": ..., "val_loss": ...}``, where
     ``val_loss`` comes from a real call to ``evaluate_fn`` (never copied from
     ``train_loss`` — that copy is exactly the ttml placeholder behaviour this module exists
-    to avoid, see the module docstring).
+    to avoid, see the module docstring). When ``lr_fn`` is given, each record carries an
+    extra ``"lr"`` field recording the rate actually in effect over the chunk that just ran,
+    so the curve says what it was trained at. The field is omitted entirely under the default
+    constant behaviour, keeping those logs identical in shape to every previously-recorded run.
     """
     remaining = cfg.steps
     ran = 0
     step = start_step
+    current_lr: Optional[float] = None
     all_losses: List[float] = []
     val_records: List[Dict[str, Any]] = []
     while remaining > 0:
         cfg.steps = _chunk_size(ran, remaining, save_every, val_every)
+        if lr_fn is not None:
+            current_lr = lr_fn(ran + cfg.steps / 2.0)
+            optimizer.set_lr(current_lr)
         losses, _ = train_fn(cfg, model, optimizer, train_ids, False, False)
         all_losses.extend(losses)
         remaining -= cfg.steps
@@ -195,8 +303,14 @@ def run_training_loop(
         if _at_boundary(ran, remaining, val_every):
             train_loss = losses[-1] if losses else float("nan")
             val_loss = evaluate_fn(model, val_ids, cfg)
-            print_fn(f"  step={step:>7} train_loss={train_loss:.4f} val_loss={val_loss:.4f}")
+            lr_note = "" if current_lr is None else f" lr={current_lr:.3e}"
+            print_fn(
+                f"  step={step:>7} train_loss={train_loss:.4f} "
+                f"val_loss={val_loss:.4f}{lr_note}"
+            )
             record = {"step": step, "train_loss": train_loss, "val_loss": val_loss}
+            if current_lr is not None:
+                record["lr"] = current_lr
             val_records.append(record)
             if val_log_path is not None:
                 val_log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -295,7 +409,33 @@ def main() -> int:
                         "stochastic_rounding gets opted into without a dedicated flag for "
                         "every future optimizer tweak; see "
                         "train.config.apply_optimizer_override.")
+    p.add_argument("--lr-schedule", default="constant", choices=list(LR_SCHEDULES),
+                   help="Learning-rate schedule shape (default: constant — the LR stays at "
+                        "the optimizer's configured value for the whole run and set_lr() is "
+                        "never called, which is exactly what every run before this flag "
+                        "existed did, so those runs stay reproducible by simply not passing "
+                        "it). 'cosine' and 'linear' decay from that same configured LR down "
+                        "to --lr-min. The LR can only move between chunks (ttml's train() "
+                        "has no per-step hook), so the schedule is a staircase evaluated at "
+                        "each chunk's midpoint — with --val-every 500 that is a 500-step "
+                        "step size. See lr_at_step.")
+    p.add_argument("--lr-min", type=float, default=None,
+                   help="Learning rate at the end of the decay (ignored by 'constant'). "
+                        "Defaults to one tenth of the configured LR, the conventional 10x "
+                        "decay. Reported explicitly at startup either way.")
+    p.add_argument("--lr-decay-start-frac", type=float, default=0.0,
+                   help="Fraction of the run to hold at the full LR before decay begins, in "
+                        "[0.0, 1.0) (default: 0.0 — decay across the whole run). A non-zero "
+                        "value gives a 'decay tail': the held portion reproduces a "
+                        "constant-LR run of the same length exactly, so an A/B against one "
+                        "isolates the decay's effect instead of confounding it with a "
+                        "different LR trajectory from step 1.")
     args = p.parse_args()
+
+    if not 0.0 <= args.lr_decay_start_frac < 1.0:
+        print(f"ERROR: --lr-decay-start-frac must be in [0.0, 1.0), got "
+              f"{args.lr_decay_start_frac}", file=sys.stderr)
+        return 1
 
     tokens = Path(args.tokens_dir)
     train_path, val_path = tokens / "train_ids.npy", tokens / "val_ids.npy"
@@ -358,6 +498,27 @@ def main() -> int:
     # longer means silently rerunning the frozen-gamma configuration with zero signal.
     _warn_if_stochastic_rounding_disabled(yaml_config)
     cfg = run_config_from_yaml(yaml_config)
+
+    # Resolve the LR schedule now, before the device is opened, so --dry-run shows it and a
+    # bad combination fails in the first second rather than 95 minutes in. base_lr is read
+    # from the *resolved* optimizer block, so it already reflects --config: the schedule
+    # decays from whatever LR this run is actually configured with, never a hardcoded guess.
+    base_lr = float(yaml_config["training_config"]["optimizer"]["lr"])
+    lr_min = base_lr * 0.1 if args.lr_min is None else args.lr_min
+    lr_fn = None
+    if args.lr_schedule == "constant":
+        print(f"  lr schedule: constant at {base_lr:.3e} (set_lr never called)")
+    else:
+        held = args.lr_decay_start_frac
+        def lr_fn(position: float) -> float:  # noqa: E306 — paired with the branch above
+            """The schedule, bound to this run's shape. Passed to run_training_loop, which
+            calls it once per chunk with that chunk's midpoint."""
+            return lr_at_step(base_lr, position, args.steps, schedule=args.lr_schedule,
+                              min_lr=lr_min, decay_start_frac=held)
+        print(f"  lr schedule: {args.lr_schedule} {base_lr:.3e} -> {lr_min:.3e}"
+              + (f", held flat for the first {held:.0%} of {args.steps} steps "
+                 f"(decay begins ~step {int(held * args.steps)})" if held else
+                 f" across all {args.steps} steps"))
 
     print(f"tt-tnt training — steps={cfg.steps} batch={cfg.batch_size} "
           f"seq_len={cfg.seq_len} arch={args.arch}")
@@ -503,6 +664,7 @@ def main() -> int:
             val_log_path=Path(args.checkpoint_dir) / "val_losses.jsonl",
             train_fn=train, evaluate_fn=evaluate,
             save_checkpoint_fn=_save_checkpoint if args.save_every > 0 else None,
+            lr_fn=lr_fn,
         )
         if val_records:
             print(f"  periodic validation curve ({len(val_records)} entries) written to "
