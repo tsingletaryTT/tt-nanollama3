@@ -1,0 +1,64 @@
+{
+  "schema": "tt-tnt/current-model/1",
+  "_readme": [
+    "The subject of the benchmark. `scripts/evaluate.py --model` defaults to `current.hf_model`,",
+    "so 'evaluate the model' has one unambiguous answer and a comparison always names what it",
+    "is comparing against what.",
+    "",
+    "This file is DATA, not a claim of quality in the abstract. `reason` states what the",
+    "designation rests on, `evidence` says where to check it, and `qualification` states what",
+    "the designation does NOT mean. Change it in a deliberate commit that cites new evidence --",
+    "never as a side effect of a run, and never by a script. Nothing in this repo writes it."
+  ],
+  "current": {
+    "label": "tt-tnt-1024a",
+    "hf_model": "artifacts/hf-tt-tnt-1024a",
+    "checkpoints": "artifacts/checkpoints-tt-tnt-1024a",
+    "training_window": 512,
+    "designated": "2026-08-15",
+    "designated_in_commit": "e0495fa",
+    "reason": "At a MATCHED 512-token window it is the lowest-loss checkpoint this project has: capacity is worth -0.2994 nats on average against the 384s512 control and is negative at 22/22 checkpoints (sign test p ~ 4.8e-7, sd 0.0538), where the seed-only control wanders across sign (8/22 negative, sd 0.1944). Final matched-window validation loss 2.9281 vs 384s512's 3.1938.",
+    "evidence": [
+      "artifacts/checkpoints-tt-tnt-1024a/val_losses.jsonl",
+      "artifacts/checkpoints-tt-tnt-384s512/val_losses.jsonl",
+      "artifacts/checkpoints-tt-tnt-v3/val_losses.jsonl",
+      "artifacts/checkpoints-tt-tnt-v5/val_losses.jsonl",
+      "docs/measurements/behaviour-tt-tnt-v3-vs-tt-tnt-v5-setB.json",
+      "docs/measurements/behaviour-tt-tnt-384s512-vs-tt-tnt-1024a-setB.json"
+    ],
+    "qualification": "\"Best\" here is not unqualified. 1024a is trained at a 512 context while v3/v4/v5 are trained at 2048, so 1024a serves a quarter of the context and its loss advantage is only established AT 512 -- the two are not comparable at v3's own window, and this repo has already published one wrong headline by treating a 512-window loss and a 2048-window loss as commensurable. 1024a is also 123.0M parameters against v3's 22M, so it is the slower model to serve. Its register advantage over v3 was substantially CONTEXT, not capacity: the clean capacity leg (384s512 -> 1024a) moves the tinystories margin only 1.03x the seed floor, which is a null by this project's standing rule.",
+    "supersedes": null
+  },
+  "candidates": [
+    {
+      "label": "tt-tnt-v3",
+      "hf_model": "artifacts/hf-tt-tnt-v3",
+      "training_window": 2048,
+      "note": "The long-context model, and the one the published Hub artifact and the parity gate grew up around. Still the right subject for any question about 2048-token context; not comparable to 1024a on loss."
+    },
+    {
+      "label": "tt-tnt-v4",
+      "hf_model": "artifacts/hf-tt-tnt-v4",
+      "training_window": 2048,
+      "note": "v3 plus an LR decay tail. The decay 'finding' was refuted by the seed-only control; treat v4 as a v3 replicate, not an improvement."
+    },
+    {
+      "label": "tt-tnt-v5",
+      "hf_model": "artifacts/hf-tt-tnt-v5",
+      "training_window": 2048,
+      "note": "The seed-only control for v3. Its whole job is to be the noise floor, so it is never the subject of a benchmark."
+    },
+    {
+      "label": "tt-tnt-384s512",
+      "hf_model": "artifacts/hf-tt-tnt-384s512",
+      "training_window": 512,
+      "note": "v3's capacity at 1024a's context -- the control that separates the two. The correct baseline for any 1024a comparison, because it is the only checkpoint that differs from 1024a in exactly one thing."
+    },
+    {
+      "label": "tt-tnt-1024a",
+      "hf_model": "artifacts/hf-tt-tnt-1024a",
+      "training_window": 512,
+      "note": "Designated current -- see `current` above."
+    }
+  ]
+}
