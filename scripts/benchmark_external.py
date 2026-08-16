@@ -774,7 +774,7 @@ def iter_request_texts(sample: dict) -> Iterable[Tuple[str, str]]:
         f"cannot verify whether this task's prompts fit the model's context window")
 
 
-def analyse_truncation(samples_path: Path, tokenizer, *, task: str, max_length: int,
+def analyse_truncation(samples_paths: Sequence[Path], tokenizer, *, task: str, max_length: int,
                        rolling: bool) -> TruncationReport:
     """Count how many of a task's requests exceeded ``max_length`` tokens.
 
@@ -783,32 +783,38 @@ def analyse_truncation(samples_path: Path, tokenizer, *, task: str, max_length: 
     and what is dropped is the FRONT of the context. A task with any truncated request did
     not get a fair score and is flagged as such in the report.
 
+    Takes **every** per-sample log belonging to the task, not one: a group task like ``mmlu``
+    writes 57 of them, and checking a single subtask's prompts would report the other 56 as
+    fair without having looked at them. See :func:`find_sample_paths`.
+
     Rolling tasks (WikiText) are exempt from the count and get a note instead: their documents
     are split into consecutive ``max_length`` windows with nothing dropped, so "truncation" is
     the wrong word -- the real caveat is that every token sees less context, which is stated
     separately.
     """
-    if not samples_path.is_file():
+    present = [p for p in samples_paths if p.is_file()]
+    if not present:
         return TruncationReport(task=task, n_requests=0, n_truncated=0, max_tokens=0,
                                 max_length=max_length, rolling=rolling,
-                                note=f"no per-sample log at {samples_path}; truncation could "
-                                     f"not be checked (re-run with --log-samples)")
+                                note=f"no per-sample log found for {task}; truncation could "
+                                     f"not be checked (re-run with --log_samples)")
     n_requests = 0
     n_truncated = 0
     max_tokens = 0
-    with samples_path.open(encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
-            if not line:
-                continue
-            for context, continuation in iter_request_texts(json.loads(line)):
-                total = len(tokenizer(context)["input_ids"])
-                if continuation:
-                    total += len(tokenizer(continuation)["input_ids"])
-                n_requests += 1
-                max_tokens = max(max_tokens, total)
-                if total > max_length + 1:
-                    n_truncated += 1
+    for samples_path in present:
+        with samples_path.open(encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                for context, continuation in iter_request_texts(json.loads(line)):
+                    total = len(tokenizer(context)["input_ids"])
+                    if continuation:
+                        total += len(tokenizer(continuation)["input_ids"])
+                    n_requests += 1
+                    max_tokens = max(max_tokens, total)
+                    if total > max_length + 1:
+                        n_truncated += 1
     note = ""
     if rolling:
         note = (f"rolling-loglikelihood task: documents are scored in consecutive "
@@ -820,12 +826,25 @@ def analyse_truncation(samples_path: Path, tokenizer, *, task: str, max_length: 
                             note=note)
 
 
-def find_samples_path(results_json: Path, task: str) -> Optional[Path]:
-    """The ``samples_<task>_<timestamp>.jsonl`` written next to ``results_json``, if any."""
-    candidates = sorted(results_json.parent.glob(f"samples_{task}_*.jsonl"))
-    if not candidates:
-        return None
-    return max(candidates, key=lambda p: p.stat().st_mtime)
+def find_sample_paths(results_json: Path, task: str) -> List[Path]:
+    """Every per-sample log belonging to ``task`` in the run that produced ``results_json``.
+
+    lm-eval names these ``samples_<task>_<timestamp>.jsonl`` -- but a **group** task writes one
+    file per member, not one file: ``mmlu`` is 57 subtasks and produces
+    ``samples_mmlu_anatomy_<timestamp>.jsonl``, ``samples_mmlu_astronomy_<timestamp>.jsonl``
+    and so on. Returning a single file would check 1/57th of MMLU's prompts against the
+    context window and then report the whole task as fair -- precisely the false all-clear
+    this analysis exists to prevent, and precisely the task where a 512-token model is most
+    likely to be truncated.
+
+    The run's timestamp comes from ``results_json``'s own filename, so a run directory holding
+    several runs cannot mix one run's sample logs into another's count.
+    """
+    stem = results_json.stem
+    prefix = "results_"
+    stamp = stem[len(prefix):] if stem.startswith(prefix) else ""
+    pattern = f"samples_{task}*_{stamp}.jsonl" if stamp else f"samples_{task}*.jsonl"
+    return sorted(results_json.parent.glob(pattern))
 
 
 def load_tokenizer(model_dir: Path):
@@ -1574,19 +1593,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print("checking every issued request against the context window ...")
         tokenizer = load_tokenizer(model_dir)
         for spec in specs:
-            samples = find_samples_path(results_json, spec.task)
-            if samples is None:
-                truncation.append(TruncationReport(
-                    task=spec.task, n_requests=0, n_truncated=0, max_tokens=0,
-                    max_length=max_length, rolling=spec.rolling,
-                    note="no per-sample log found for this task; truncation NOT checked"))
-                continue
+            samples = find_sample_paths(results_json, spec.task)
             report = analyse_truncation(samples, tokenizer, task=spec.task,
                                         max_length=max_length, rolling=spec.rolling)
             truncation.append(report)
             flag = "TRUNCATED" if report.truncated else "ok"
-            print(f"    {spec.task:16} {report.n_requests:>7,} requests, "
-                  f"max {report.max_tokens:>5,} tokens  {flag}")
+            print(f"    {spec.task:16} {len(samples):>3} log(s), "
+                  f"{report.n_requests:>7,} requests, max {report.max_tokens:>6,} tokens  "
+                  f"{flag}")
 
     wikitext_identity = ""
     if any(s.task == "wikitext" for s in specs):

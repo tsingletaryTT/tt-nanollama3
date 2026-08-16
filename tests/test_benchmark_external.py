@@ -55,7 +55,7 @@ from scripts.benchmark_external import (  # noqa: E402
     context_window,
     default_label,
     find_results_json,
-    find_samples_path,
+    find_sample_paths,
     headline,
     iter_request_texts,
     lm_eval_command,
@@ -499,7 +499,7 @@ def test_analyse_truncation_counts_requests_over_the_window(tmp_path):
         [("a b c", " d"), ("a b c", " d e")],       # 4 and 5 tokens: fine
         [("a b c d e f", " g"), ("a b", " c")],     # 7 tokens: truncated; 3: fine
     ])
-    report = analyse_truncation(samples, _WhitespaceTokenizer(), task="piqa", max_length=5,
+    report = analyse_truncation([samples], _WhitespaceTokenizer(), task="piqa", max_length=5,
                                 rolling=False)
     assert report.n_requests == 4
     assert report.n_truncated == 1
@@ -512,11 +512,11 @@ def test_analyse_truncation_boundary_is_max_length_plus_one(tmp_path):
     # max_length + 1 tokens still fits and one more does not.
     samples = tmp_path / "samples_piqa_x.jsonl"
     _write_samples(samples, [[(" ".join("abcde"), " f")]])   # 5 + 1 = 6 = max_length + 1
-    fits = analyse_truncation(samples, _WhitespaceTokenizer(), task="piqa", max_length=5,
+    fits = analyse_truncation([samples], _WhitespaceTokenizer(), task="piqa", max_length=5,
                               rolling=False)
     assert fits.n_truncated == 0
     _write_samples(samples, [[(" ".join("abcdef"), " g")]])  # 7 tokens
-    over = analyse_truncation(samples, _WhitespaceTokenizer(), task="piqa", max_length=5,
+    over = analyse_truncation([samples], _WhitespaceTokenizer(), task="piqa", max_length=5,
                               rolling=False)
     assert over.n_truncated == 1
 
@@ -524,7 +524,7 @@ def test_analyse_truncation_boundary_is_max_length_plus_one(tmp_path):
 def test_analyse_truncation_reports_zero_truncation_for_a_rolling_task(tmp_path):
     samples = tmp_path / "samples_wikitext_x.jsonl"
     _write_samples(samples, [[(" ".join(str(i) for i in range(50)), "")]])
-    report = analyse_truncation(samples, _WhitespaceTokenizer(), task="wikitext", max_length=5,
+    report = analyse_truncation([samples], _WhitespaceTokenizer(), task="wikitext", max_length=5,
                                rolling=True)
     assert report.n_truncated == 0
     assert report.max_tokens == 50          # the long document is still recorded honestly
@@ -532,7 +532,7 @@ def test_analyse_truncation_reports_zero_truncation_for_a_rolling_task(tmp_path)
 
 
 def test_analyse_truncation_says_so_when_there_is_no_sample_log(tmp_path):
-    report = analyse_truncation(tmp_path / "absent.jsonl", _WhitespaceTokenizer(), task="piqa",
+    report = analyse_truncation([tmp_path / "absent.jsonl"], _WhitespaceTokenizer(), task="piqa",
                                 max_length=512, rolling=False)
     assert report.n_requests == 0
     assert "truncation could not be checked" in report.note
@@ -711,12 +711,45 @@ def test_find_results_json_raises_on_an_empty_run_directory(tmp_path):
         find_results_json(tmp_path)
 
 
-def test_find_samples_path_matches_the_task(tmp_path):
+def test_find_sample_paths_matches_the_task(tmp_path):
     results = tmp_path / "results_x.json"
     results.write_text("{}")
     (tmp_path / "samples_piqa_x.jsonl").write_text("")
-    assert find_samples_path(results, "piqa") is not None
-    assert find_samples_path(results, "mmlu") is None
+    assert [p.name for p in find_sample_paths(results, "piqa")] == ["samples_piqa_x.jsonl"]
+    assert find_sample_paths(results, "mmlu") == []
+
+
+def test_find_sample_paths_collects_every_subtask_of_a_group(tmp_path):
+    # The MMLU bug: a group task writes one log per subtask, and checking only one of them
+    # would report the other 56 as fair without having looked at them.
+    results = tmp_path / "results_x.json"
+    results.write_text("{}")
+    for subject in ("anatomy", "astronomy", "professional_law"):
+        (tmp_path / f"samples_mmlu_{subject}_x.jsonl").write_text("")
+    found = [p.name for p in find_sample_paths(results, "mmlu")]
+    assert len(found) == 3
+    assert "samples_mmlu_professional_law_x.jsonl" in found
+
+
+def test_find_sample_paths_does_not_mix_two_runs_in_the_same_directory(tmp_path):
+    (tmp_path / "results_run1.json").write_text("{}")
+    (tmp_path / "results_run2.json").write_text("{}")
+    (tmp_path / "samples_mmlu_anatomy_run1.jsonl").write_text("")
+    (tmp_path / "samples_mmlu_anatomy_run2.jsonl").write_text("")
+    found = find_sample_paths(tmp_path / "results_run2.json", "mmlu")
+    assert [p.name for p in found] == ["samples_mmlu_anatomy_run2.jsonl"]
+
+
+def test_analyse_truncation_aggregates_across_a_groups_subtask_logs(tmp_path):
+    a = tmp_path / "samples_mmlu_anatomy_x.jsonl"
+    b = tmp_path / "samples_mmlu_professional_law_x.jsonl"
+    _write_samples(a, [[("a b", " c")]])                       # 3 tokens: fine
+    _write_samples(b, [[("a b c d e f g h", " i")]])           # 9 tokens: truncated
+    report = analyse_truncation([a, b], _WhitespaceTokenizer(), task="mmlu", max_length=5,
+                                rolling=False)
+    assert report.n_requests == 2
+    assert report.n_truncated == 1
+    assert report.max_tokens == 9
 
 
 # ---------------------------------------------------------------------------------------
