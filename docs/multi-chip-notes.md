@@ -127,6 +127,22 @@ made, since it is exactly the instrument that would catch a layout change.
 > The parity-gate-against-a-DDP-checkpoint check this paragraph asks for therefore remains
 > **outstanding** — there is currently no valid DDP checkpoint to run it against.
 
+> **RESOLVED later the same day — the original expectation above was right after all, once the
+> metadata is corrected.** `ttnn.Tensor.update_tensor_topology` is bound in Python, so
+> `train/checkpoint.py:replicated_for_save` re-marks each parameter `Replicate` immediately
+> before the save and restores the original topology immediately after, moving no data. A
+> `--ddp 4` checkpoint is now 737,824,624 bytes — byte-for-byte the `--ddp 1` size — and every
+> tensor in it is bitwise equal (max abs 0.000000e+00) to replica 0 read independently through
+> the very `concat_mesh_to_tensor_composer` this section recommends. `assert_saveable_on_mesh`
+> survives as a narrowed gate that still refuses when tensor parallelism is live or the
+> distribution is not the DDP axis.
+>
+> **The parity gate has now been run against a DDP checkpoint** and passed at max_abs 2.56e-06,
+> tighter than the committed baseline's own 8.3e-6–1.6e-5 — so the "strong expectation" that the
+> converter keeps working is now a verified fact, by exactly the instrument this paragraph
+> nominated. "Produce publishable weights from a `--ddp 1` run" no longer applies. See
+> `.superpowers/ddp-checkpoint-fix.md`.
+
 **3. Auto-resume is broken.** Any run without `--fresh` triggers auto-resume, which injects an
 empty `--resume` and dies in argparse. Use `--fresh` and checkpoint frequently.
 

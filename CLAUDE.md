@@ -1562,6 +1562,79 @@ tensors `(4,1,out,in)` not `(1,1,out,in)`). `Sharding.gather` is *not* the bug �
 honours wrong metadata. `train/checkpoint.py:assert_saveable_on_mesh` now refuses to write such a
 file; produce publishable weights from `--ddp 1`, which costs no fidelity. This also means the
 parity gate against a DDP checkpoint **remains outstanding** — there is no valid one to run.
+*(Fixed the same day — see the next section. The `--ddp 1` advice and the outstanding parity
+gate no longer apply.)*
+
+## DDP checkpointing, fixed (2026-08-16) — `.superpowers/ddp-checkpoint-fix.md`
+
+**Prompt:** make `--ddp 4` write a valid checkpoint, keep the guard meaningful, and prove the
+result end to end — or prove it cannot be fixed from our side.
+
+**It could.** The previous section's conclusion that this needed an upstream change was the one
+thing it got wrong. **`ttnn.Tensor.update_tensor_topology` is bound in Python**
+(`pytensor.cpp:1611`), and `ttnn.TensorTopology` is constructible from Python
+(`distributed_nanobind.cpp:734`) — so the false `Shard(0)` marking can be corrected by any holder
+of the tensor, not only where it was written. `train/checkpoint.py:replicated_for_save` re-marks
+each parameter `Replicate`, saves, and restores the original topology in a `finally`. **No data
+moves**; a `--ddp 4` save now costs what a `--ddp 1` save costs. Result: **737,824,624 bytes**,
+byte-for-byte the single-chip size, every tensor `(1,1,out,in)`.
+
+**Rejected alternatives:** extracting a replica ourselves (would mean reimplementing ttml's
+atomic streaming writer — a second checkpoint writer free to drift); assigning a
+freshly-replicated tensor back into each parameter (maximum data movement, for a problem whose
+own diagnosis says the data is already correct).
+
+**Why the restore, when `Replicate` is the *truthful* marking:** saves happen mid-run at
+`--save-every` boundaries, so a save must leave the training state exactly as it found it.
+Afterwards all 66 params read `Shard(0)` again and training continues normally.
+
+**The guard is narrowed, not deleted.** `assert_saveable_on_mesh` now asks "is this sharding
+*explainable*?" and refuses unless both (1) ttml's parallelism context is **DDP and only DDP** —
+under TP a `Shard` may be the truth, and re-marking would write a quarter of a model — and (2)
+the tensor is distributed over **exactly the DDP axis**. Both fail closed. Deliberately *not*
+gated on the replicas agreeing numerically; see the stochastic-rounding finding below for why
+that obvious check would have been wrong.
+
+**Decisive proof of the writer:** after 50 DDP steps, every tensor in the file is bitwise equal
+(**max abs 0.000000e+00**, 0 shape mismatches) to replica 0 read independently through a
+`concat_mesh_to_tensor_composer`, which does not consult the placements being corrected. True
+both with and without stochastic rounding.
+
+**The strict acceptance test — `--ddp 4` bit-identical to `--ddp 1` — cannot pass, and the reason
+is not checkpointing.** Measured max abs difference at 50 steps: **9.155e-03** (SR off), 3.52e-02
+(SR on); shapes all correct, 0 tensors with a spurious leading axis. Its premise ("the replicas
+are bit-identical, so the extracted weights should be too") conflates *within-run* replica
+identity with *across-run* equality. Three measurements settle it: (i) at **step 1**, identical
+weights and identical data give losses of 10.6094 (`ddp 4`) vs 10.6875 (`ddp 1`) — 1.25 bf16 ulp,
+before any optimizer or checkpoint code runs, because `ddp 1` means over 64 sequences while
+`ddp 4` all-reduces four means over 16; (ii) the step-1 parameter difference is **6.103516e-04 =
+exactly 2 × lr**, the largest a single Adam step can produce, because Adam's update is ±lr
+regardless of gradient magnitude, so a last-bit gradient difference yields a full-sized step of
+opposite sign; (iii) it grows ~15x over 50 steps as an amplified random walk. **Val loss agrees
+where it counts:** 7.0523 vs 7.0875, against the 0.1944-nat seed-noise floor.
+
+**Stochastic rounding breaks DDP's replica-identity invariant** — unexpected, and it corrects the
+previous section. Four steps, identical but for one flag: `stochastic_rounding: false` → **0/66**
+params' replicas differ (0.0); `true` (i.e. `nanollama3_bpe_v2.yaml`, what real runs use) →
+**66/66** differ, max 2.34e-2. Each device rounds from its own RNG, so replicas random-walk apart
+despite identical all-reduced gradients. Consequences: it is why the guard is structural rather
+than numeric (a bit-identity check passes on the default config and refuses on the recommended
+one), and a `--ddp N` checkpoint is *replica 0's* weights — one of four coherent models, not the
+only one. Upstream ask 4.
+
+**End to end:** the `--ddp 4` checkpoint converts to HF, loads as `LlamaForCausalLM`
+(122,962,944 params), and generates. **The parity gate ran against a DDP checkpoint** — the
+verification listed as outstanding — at **max_abs 2.56e-06**, *tighter* than the baseline's own
+8.3e-6–1.6e-5. `tests/test_numpy_parity.py` now takes four optional env overrides
+(`TT_TNT_PARITY_CHECKPOINT_DIR` etc.); **defaults unchanged**, committed gate still 6/6. Two
+baseline-calibrated meta-tests fail under an override and both are information: the norm-swap
+test fails **because the SR checkpoint's gammas are real (0.977–1.031) and the blind spot is
+gone** — the first checkpoint this repo has produced against which that gate is not blind — and
+the not-hollow test still catches the RoPE bug at max_abs 2.93 (~2900x over budget), failing only
+a sharpness constant measured on a 60x-longer-trained model.
+
+Suite: **852 passed, 1 skipped** (845 + 7 new). tt-metal untouched at `620793d898`. Nothing
+deleted; every run checkpointed to a scratch dir outside the repo.
 
 Two new entries in `docs/upstream-tt-metal-asks.md` (descriptor-shape mismatch hangs instead of
 failing — diagnosability only, nothing blocked; and the topology re-marking above — this one

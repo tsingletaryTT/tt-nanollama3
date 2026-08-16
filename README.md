@@ -99,10 +99,14 @@ idle during a run. During the v2 run the working chip drew **82 W at 73 °C** ag
 **61–73 W / 63–68 °C** on the idle three; idle Blackhole holds its clock at 1350 MHz, so the
 power gap is a clearer signal than temperature.
 
-Multi-chip data parallelism is supported by tt-train (`enable_ddp: true` with a `[1, 4]` mesh)
-and is **future work here, not something this repo has demonstrated**. It is not a one-line
-config edit — see [`docs/multi-chip-notes.md`](docs/multi-chip-notes.md) for the three known
-catches and why the step budget and learning rate move with it.
+Multi-chip data parallelism was future work when this model was trained; it is not any more.
+`train/run.py --ddp 4` opens a `[1, 4]` mesh and runs **3.98x faster** at this shape, writing
+checkpoints indistinguishable in form from single-chip ones — see
+[`.superpowers/ddp-bringup.md`](.superpowers/ddp-bringup.md) and
+[`.superpowers/ddp-checkpoint-fix.md`](.superpowers/ddp-checkpoint-fix.md), and
+[`docs/multi-chip-notes.md`](docs/multi-chip-notes.md) for the catches that made it more than a
+one-line config edit. The v2 run described on this page predates all of it and did use a single
+chip.
 
 Validation finishing *above* training loss (4.2203 vs. 3.3125) is the ordinary generalization
 gap for a full epoch, unlike the original 0.43-epoch checkpoint, where the two were a

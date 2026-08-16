@@ -197,6 +197,17 @@ def test_latest_checkpoint_picks_the_higher_step_across_both_naming_schemes(tmp_
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------------------
+# The mesh guard. These run without hardware by standing in for the three ttml/ttnn surfaces
+# train.checkpoint touches: Sharding.from_tensor (is this tensor recorded as sharded?), the
+# parallelism context (which parallelisms are live?), and TensorTopology/update_tensor_topology
+# (the metadata correction itself). Everything they assert was measured on four Blackhole
+# p300c chips first -- see .superpowers/ddp-checkpoint-fix.md.
+# ---------------------------------------------------------------------------------------
+
+DDP_SIZE = 4
+
+
 class _FakeSharding:
     """Stands in for ttml.sharding.Sharding without a device."""
 
@@ -208,54 +219,238 @@ class _FakeSharding:
         return self._replicated
 
 
-def _install_fake_sharding(monkeypatch, verdicts):
-    """Make train.checkpoint's ``from ttml.sharding import Sharding`` resolve to a fake whose
-    verdict per tensor comes from ``verdicts`` (keyed by the tensor object)."""
+class _FakeNamedParameters(dict):
+    """ttml.NamedParameters: the leaf type ttml's own ``_walk`` stops recursing at. A distinct
+    type from ``dict`` on purpose -- the traversal's whole job is telling the two apart."""
+
+
+class _FakeTopology:
+    """A TensorTopology: a distribution shape, one placement per axis, and its coordinates."""
+
+    def __init__(self, dist_shape, placements, coords):
+        self._dist_shape, self._placements, self._coords = dist_shape, placements, coords
+
+    def distribution_shape(self):
+        return list(self._dist_shape)
+
+    def placements(self):
+        return list(self._placements)
+
+    def mesh_coords(self):
+        return list(self._coords)
+
+
+class _FakeValue:
+    """The ttnn tensor behind a parameter: holds the live topology and records every write.
+
+    ``update_tensor_topology`` replaces the topology *and* appends to ``history``, so a test
+    can assert both the final state (restored) and the sequence (re-marked, then restored) --
+    the second is what proves a save does not merely end up looking untouched by accident.
+    """
+
+    def __init__(self, topology):
+        self.topology = topology
+        self.history = []
+
+    def tensor_topology(self):
+        return self.topology
+
+    def update_tensor_topology(self, topology):
+        self.topology = topology
+        self.history.append(topology)
+
+
+class _FakeTensor:
+    """A ttml autograd Tensor: all train.checkpoint wants from one is ``get_value``."""
+
+    def __init__(self, *, sharded, dist_shape=(DDP_SIZE,), coords=(0, 1, 2, 3)):
+        placements = ["Shard(0)" if sharded else "Replicate"]
+        self.sharded = sharded
+        self.value = _FakeValue(_FakeTopology(dist_shape, placements, coords))
+
+    def get_value(self, _precision=None):
+        return self.value
+
+
+def _install_fakes(monkeypatch, *, ddp=DDP_SIZE, tp=0, context=True):
+    """Point train.checkpoint's lazily-imported ttml/ttnn at fakes.
+
+    ``ddp``/``tp`` are the sizes the parallelism context reports; ``context=False`` stands for
+    a single-chip run, where no context has been initialised at all.
+    """
     import sys
     import types
 
-    module = types.ModuleType("ttml.sharding")
-    module.Sharding = type(
-        "Sharding", (), {"from_tensor": staticmethod(lambda t: _FakeSharding(verdicts[t]))}
+    sharding_mod = types.ModuleType("ttml.sharding")
+    sharding_mod.Sharding = type(
+        "Sharding",
+        (),
+        {"from_tensor": staticmethod(lambda t: _FakeSharding(not t.sharded))},
     )
-    ttml_pkg = sys.modules.get("ttml") or types.ModuleType("ttml")
-    monkeypatch.setitem(sys.modules, "ttml", ttml_pkg)
-    monkeypatch.setitem(sys.modules, "ttml.sharding", module)
+
+    pctx = types.SimpleNamespace(
+        is_ddp_enabled=lambda: ddp > 1,
+        is_tp_enabled=lambda: tp > 1,
+        get_ddp_size=lambda: ddp,
+        get_tp_size=lambda: tp,
+    )
+    auto_ctx = types.SimpleNamespace(
+        is_parallelism_context_initialized=lambda: context,
+        get_parallelism_context=lambda: pctx,
+    )
+    ttml_mod = types.ModuleType("ttml")
+    ttml_mod.autograd = types.SimpleNamespace(
+        AutoContext=types.SimpleNamespace(get_instance=lambda: auto_ctx),
+        PreferredPrecision=types.SimpleNamespace(NATIVE="NATIVE"),
+    )
+    ttml_mod.NamedParameters = _FakeNamedParameters
+    ttml_mod.sharding = sharding_mod
+
+    ttnn_mod = types.ModuleType("ttnn")
+    ttnn_mod.MeshShape = list
+    ttnn_mod.PlacementReplicate = lambda: "Replicate"
+    ttnn_mod.TensorTopology = lambda *, distribution_shape, placements, mesh_coords: (
+        _FakeTopology(distribution_shape, placements, mesh_coords)
+    )
+
+    monkeypatch.setitem(sys.modules, "ttml", ttml_mod)
+    monkeypatch.setitem(sys.modules, "ttml.sharding", sharding_mod)
+    monkeypatch.setitem(sys.modules, "ttnn", ttnn_mod)
 
 
 def test_saveable_on_mesh_accepts_fully_replicated_params(monkeypatch):
-    """The single-chip case and the correct DDP case: nothing is recorded as sharded, so the
-    saver may proceed."""
+    """The single-chip case: nothing is recorded as sharded, so the saver may proceed and the
+    parallelism context is never even consulted."""
     from train.checkpoint import assert_saveable_on_mesh
 
-    a, b = object(), object()
-    _install_fake_sharding(monkeypatch, {a: True, b: True})
-    assert_saveable_on_mesh({"w1": a, "w2": b})  # must not raise
+    _install_fakes(monkeypatch, context=False)
+    assert_saveable_on_mesh({"w1": _FakeTensor(sharded=False),
+                             "w2": _FakeTensor(sharded=False)})  # must not raise
 
 
-def test_saveable_on_mesh_refuses_sharded_params(monkeypatch):
-    """The measured DDP defect: after training steps the optimizer re-marks replicated
-    parameters as Shard(0), and ttml's saver would then write every replica concatenated on
-    dim 0 -- a checkpoint several times oversized whose tensors convert/ cannot read. It must
-    fail at write time, not silently."""
-    import pytest
-
+def test_saveable_on_mesh_refuses_sharding_with_no_parallelism_context(monkeypatch):
+    """A tensor recorded as sharded when nothing distributed it is unexplained, and the whole
+    point of the guard is that unexplained sharding is never written past: ttml's saver would
+    concatenate the shards, which is either an oversized file convert/ cannot read or a
+    silently partial model."""
     from train.checkpoint import assert_saveable_on_mesh
 
-    a, b = object(), object()
-    _install_fake_sharding(monkeypatch, {a: True, b: False})
+    _install_fakes(monkeypatch, context=False)
     with pytest.raises(RuntimeError, match="recorded as SHARDED"):
-        assert_saveable_on_mesh({"ok": a, "llama/block0/q_linear/weight": b})
+        assert_saveable_on_mesh({"ok": _FakeTensor(sharded=False),
+                                 "llama/block0/q_linear/weight": _FakeTensor(sharded=True)})
 
 
 def test_saveable_on_mesh_names_an_offender(monkeypatch):
     """The message has to name a parameter, or an operator cannot tell this apart from a
     generic mesh complaint."""
-    import pytest
-
     from train.checkpoint import assert_saveable_on_mesh
 
-    bad = object()
-    _install_fake_sharding(monkeypatch, {bad: False})
+    _install_fakes(monkeypatch, context=False)
     with pytest.raises(RuntimeError, match="llama/block0/q_linear/weight"):
-        assert_saveable_on_mesh({"llama/block0/q_linear/weight": bad})
+        assert_saveable_on_mesh({"llama/block0/q_linear/weight": _FakeTensor(sharded=True)})
+
+
+def test_saveable_on_mesh_admits_the_data_parallel_remark(monkeypatch):
+    """THE NARROWING. Under DDP-and-only-DDP the model is replicated and only the batch is
+    split, so a Shard(0) on a parameter distributed over exactly the DDP axis cannot be true --
+    it is the measured metadata defect, and replicated_for_save corrects it. The gate must let
+    that case through, or --ddp N can never checkpoint."""
+    from train.checkpoint import assert_saveable_on_mesh
+
+    _install_fakes(monkeypatch, ddp=DDP_SIZE)
+    assert_saveable_on_mesh({"llama/fc/weight": _FakeTensor(sharded=True)})  # must not raise
+
+
+def test_saveable_on_mesh_still_refuses_when_tensor_parallel_is_live(monkeypatch):
+    """The case the guard must never stop catching. Tensor parallelism shards parameters for
+    real, so a Shard placement may be the truth and re-marking it Replicate would write one
+    chip's slice as if it were the whole weight -- wrong in a way nothing downstream detects."""
+    from train.checkpoint import assert_saveable_on_mesh
+
+    _install_fakes(monkeypatch, ddp=2, tp=2)
+    with pytest.raises(RuntimeError, match="tensor parallelism is enabled"):
+        assert_saveable_on_mesh({"llama/fc/weight": _FakeTensor(sharded=True)})
+
+
+def test_saveable_on_mesh_refuses_a_distribution_that_is_not_the_ddp_axis(monkeypatch):
+    """Second, independent condition: DDP being the only parallelism is not enough on its own
+    if the tensor is laid out over something wider than the DDP axis. A distribution this code
+    cannot attribute to that axis may describe a real split, and is refused rather than
+    guessed at."""
+    from train.checkpoint import assert_saveable_on_mesh
+
+    _install_fakes(monkeypatch, ddp=DDP_SIZE)
+    wider = _FakeTensor(sharded=True, dist_shape=(2, 4), coords=tuple(range(8)))
+    with pytest.raises(RuntimeError, match="other than the 4-device data-parallel axis"):
+        assert_saveable_on_mesh({"llama/fc/weight": wider})
+
+
+def test_replicated_for_save_remarks_then_restores(monkeypatch):
+    """The save-time correction, and the property that makes it safe to run mid-run.
+
+    Inside the block the tensor must read Replicate, so ttml's composer takes ONE copy instead
+    of concatenating four. After the block it must read exactly what it read before, so a run
+    with --save-every is the same computation as a run without it."""
+    from train.checkpoint import replicated_for_save
+
+    _install_fakes(monkeypatch, ddp=DDP_SIZE)
+    tensor = _FakeTensor(sharded=True)
+    before = tensor.value.topology.placements()
+    assert before == ["Shard(0)"]
+
+    with replicated_for_save({"llama/fc/weight": tensor}) as remarked:
+        assert remarked == 1
+        assert tensor.value.topology.placements() == ["Replicate"]
+
+    assert tensor.value.topology.placements() == before
+    assert len(tensor.value.history) == 2, "expected exactly one re-mark and one restore"
+
+
+def test_replicated_for_save_restores_even_when_the_save_raises(monkeypatch):
+    """A failed write must not leave the run's parameters carrying metadata this code invented.
+    ttml's save is atomic (temp file then rename) precisely so a crash mid-write is survivable;
+    the topology correction has to be equally survivable or the surviving run is corrupted."""
+    from train.checkpoint import replicated_for_save
+
+    _install_fakes(monkeypatch, ddp=DDP_SIZE)
+    tensor = _FakeTensor(sharded=True)
+    with pytest.raises(ValueError):
+        with replicated_for_save({"llama/fc/weight": tensor}):
+            raise ValueError("disk full")
+    assert tensor.value.topology.placements() == ["Shard(0)"]
+
+
+def test_replicated_for_save_leaves_replicated_tensors_alone(monkeypatch):
+    """A single-chip run, and every already-correct tensor in a DDP run: touch nothing."""
+    from train.checkpoint import replicated_for_save
+
+    _install_fakes(monkeypatch, ddp=DDP_SIZE)
+    tensor = _FakeTensor(sharded=False)
+    with replicated_for_save({"llama/fc/weight": tensor}) as remarked:
+        assert remarked == 0
+    assert tensor.value.history == []
+
+
+def test_optimizer_tensors_walks_nested_state(monkeypatch):
+    """save() gates and corrects the optimizer's tensors as well as the model's, because
+    ttml's save_checkpoint gathers both through the same Sharding.gather call. No AdamW moment
+    has ever been observed re-marked (0 of 132 measured), but the guard is not narrowed to only
+    look where the bug has already been seen. Nested dicts matter: composite optimizers
+    (MuonWithAdamW) nest sub-state, and ttml's own _walk recurses through them."""
+    from train.checkpoint import _optimizer_tensors
+
+    _install_fakes(monkeypatch, ddp=DDP_SIZE)
+    exp_avg, nested = _FakeTensor(sharded=False), _FakeTensor(sharded=False)
+    optimizer = type("Opt", (), {
+        "get_state_dict": lambda self: {
+            "exp_avg": _FakeNamedParameters({"llama/fc/weight": exp_avg}),
+            "inner": {"exp_avg_sq": _FakeNamedParameters({"llama/fc/weight": nested})},
+            "step": 42,  # scalars pass through, exactly as ttml's _walk allows
+        }
+    })()
+    found = _optimizer_tensors(optimizer)
+    assert found == {
+        "optimizer/exp_avg/llama/fc/weight": exp_avg,
+        "optimizer/inner/exp_avg_sq/llama/fc/weight": nested,
+    }

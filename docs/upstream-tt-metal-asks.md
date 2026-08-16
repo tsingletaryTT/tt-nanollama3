@@ -227,9 +227,22 @@ rather than failing, a fallback would be the worst possible default.
 
 ## 3. A DDP training step re-marks replicated parameters as `Shard(0)`, so checkpoints save every replica
 
-**Status:** open, and this one **does** block something: checkpointing a `--ddp N` run.
-Guarded in `train/checkpoint.py:assert_saveable_on_mesh` (refuses to write rather than write
-wrongly); the workaround is to produce publishable weights from a `--ddp 1` run.
+**Status:** open upstream, but **no longer blocking here** — corrected 2026-08-16 from this
+repo, in `train/checkpoint.py:replicated_for_save`. See `.superpowers/ddp-checkpoint-fix.md`.
+
+**This entry previously claimed this could not be fixed in our own tree. That was wrong**, and
+the correction is the useful part of this update: `ttnn.Tensor.update_tensor_topology` is bound
+in Python (`ttnn/cpp/ttnn-nanobind/pytensor.cpp:1611`) and `ttnn.TensorTopology` is constructible
+from Python (`ttnn/core/distributed/distributed_nanobind.cpp:734`). The false placement can
+therefore be corrected by *any* holder of the tensor, not only where it is written. This repo now
+re-marks each parameter `Replicate` immediately before a save and restores the original topology
+immediately after, which moves no data at all — a `--ddp 4` save costs exactly what a `--ddp 1`
+save costs, and produces a byte-identical-sized file (737,824,624 bytes, verified equal to the
+`--ddp 1` figure below).
+
+The defect below is still real and still worth fixing at source: every consumer of a DDP-trained
+parameter's topology is currently told something false, and each one has to know to disbelieve
+it. What has changed is only that we are no longer waiting on it.
 
 ### The defect
 
@@ -287,10 +300,72 @@ Failing that, `synchronize_gradients` (which already knows each parameter's plac
 
 ### What we did instead
 
-`train/checkpoint.py:assert_saveable_on_mesh` runs before every save and raises a
-`RuntimeError` naming the offending parameters if any is recorded as sharded, so a silently
-oversized-and-unreadable checkpoint cannot be written. Since DDP is a wall-clock optimisation
-that produces the same trajectory as a single-chip run at the same seed (measured: val-loss
-curves agreeing to within a quarter of this project's seed-noise floor), publishable weights can
-be produced from a `--ddp 1` run without loss of fidelity — DDP is still fully usable for the
-experiment sweeps it was brought up for, which is where the 3.98x actually pays.
+`train/checkpoint.py:replicated_for_save` rewrites each offending parameter's `TensorTopology`
+to an otherwise-identical one whose placements are all `Replicate`, runs ttml's saver, and
+restores the original topology in a `finally`. ttml's `Sharding.gather` then takes a single copy,
+which is what `--ddp 1` writes and what `convert/` expects. Verified on hardware: after 50 DDP
+steps, every tensor in the written file is **bitwise equal (max abs difference 0.000000e+00)** to
+replica 0 read independently through a `concat_mesh_to_tensor_composer`, which does not consult
+the placements being corrected. The restore is what makes this safe to run mid-run at a
+`--save-every` boundary: afterwards all 66 parameters carry the topology they carried before, so
+a run that checkpoints is the same computation as one that does not.
+
+`assert_saveable_on_mesh` remains a real gate, narrowed rather than removed. It refuses unless
+**both** (a) ttml's live parallelism context is DDP and only DDP — under TP a `Shard` placement
+may be the truth, and re-marking it would write a quarter of a model — and (b) the tensor is
+distributed over exactly the DDP axis. Both conditions fail closed; any failure to read the
+parallelism context is a reason to refuse, never permission.
+
+---
+
+## 4. Stochastic rounding under DDP breaks the replica-identity invariant
+
+**Status:** open. Not blocking — a `--ddp N` checkpoint records replica 0, which is a complete
+and coherent model — but it means "the model" a multi-chip run produces is one of N
+non-identical models rather than the single model DDP is supposed to maintain. Measured
+2026-08-16; see `.superpowers/ddp-checkpoint-fix.md` §4.
+
+### The defect
+
+Data parallelism's defining invariant is that every replica holds the *same* parameters: the
+gradient all-reduce exists precisely to guarantee it. `stochastic_rounding: true` breaks it. Each
+device's AdamW chooses its rounding direction from its own RNG, so four replicas that receive a
+bit-identical all-reduced gradient still write four different bfloat16 values, and thereafter
+perform independent random walks about a common trajectory.
+
+Two `--size 1024` DDP runs on a `[1, 4]` mesh, four steps, identical in every respect except one
+optimizer flag:
+
+| `stochastic_rounding` | parameters whose replicas differ | `max |replica0 - replica_i|` |
+|---|---|---|
+| `false` | **0 / 66** | **0.000000e+00** |
+| `true` | **66 / 66** | **2.343750e-02** (`llama/llama_block_5/mlp_norm/gamma`) |
+
+At 50 steps the divergence is 3.125e-02. The RMSNorm gammas are the loudest because they sit at
+1.0, where one bfloat16 ulp (0.0078) is an order of magnitude larger than the ~3e-4 update they
+receive — which is the same arithmetic that made `stochastic_rounding` necessary in the first
+place (see `train/configs/nanollama3_bpe_v2.yaml`). Stochastic rounding is the right fix for
+that; it simply was not made DDP-aware.
+
+### Why it matters
+
+1. **It is silent.** Nothing reports it, the loss curve is unaffected, and the natural
+   verification — "check the replicas are bit-identical" — is the one this breaks. A checkpoint
+   must therefore *choose* a replica, and nothing records which.
+2. **It defeats the obvious form of a save-time guard.** This repo wanted to gate its topology
+   correction on "the replicas agree, so taking one copy is safe". That gate passes under the
+   default config and refuses under the project's recommended one, so the guard had to be built
+   on structural facts about the parallelism context instead.
+
+### The fix
+
+Draw the rounding decisions identically across the DDP axis: seed the stochastic-rounding RNG
+from a value shared along that axis (the ParallelismContext already knows the axis and the
+device's index on it), rather than per-device. A parameter that starts replicated then stays
+replicated exactly, and DDP's invariant survives a feature that is otherwise strictly good.
+
+### What we did instead
+
+Nothing that changes the training: this is reported, not worked around. `replicated_for_save`
+writes replica 0, and `.superpowers/ddp-checkpoint-fix.md` records that this is a choice among N
+rather than a distinction without a difference.

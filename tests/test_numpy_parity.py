@@ -68,6 +68,7 @@ measures a real bug at max_abs ~8.1, correlation ~0.93).
 from __future__ import annotations
 
 import hashlib
+import os
 import pickle
 import tempfile
 from pathlib import Path
@@ -86,16 +87,73 @@ from convert.to_hf import convert_checkpoint
 from convert.ttml_forward import attention, forward, rms_norm, squeeze_leading, swiglu
 
 ROOT = Path(__file__).resolve().parent.parent
-REAL_CHECKPOINT_DIR = ROOT / "artifacts" / "checkpoints"
-TOKENIZER_DIR = ROOT / "artifacts" / "tokenizer"
-HF_DIR = ROOT / "artifacts" / "hf"
-VAL_IDS_PATH = ROOT / "artifacts" / "tokens" / "val_ids.npy"
 
-REAL_CHECKPOINT = (
-    sorted(REAL_CHECKPOINT_DIR.glob("nanollama3_step*.pkl"))[-1]
-    if (REAL_CHECKPOINT_DIR.exists() and list(REAL_CHECKPOINT_DIR.glob("nanollama3_step*.pkl")))
-    else None
+
+def _artifact(env_var: str, default: Path) -> Path:
+    """``default``, unless ``env_var`` names somewhere else.
+
+    THE DEFAULTS ARE THE COMMITTED GATE and do not change: with none of these variables set,
+    this module reads exactly the four artifacts it always read, so the suite's meaning is
+    untouched. The overrides exist because this gate is the only instrument that compares
+    ``convert/``'s interpretation of a checkpoint against an independently-derived NumPy
+    forward pass, and until 2026-08-16 it could only ever be aimed at one checkpoint — the
+    protected 384 baseline. ``.superpowers/ddp-bringup.md`` recorded "run the parity gate
+    against a DDP-produced checkpoint" as outstanding *specifically* because no valid DDP
+    checkpoint existed to aim it at; now one can, and hardcoded paths were the only thing
+    still in the way. Point all four at a matched set:
+
+        TT_TNT_PARITY_CHECKPOINT_DIR=/scratch/ckpt \\
+        TT_TNT_PARITY_HF_DIR=/scratch/hf \\
+        TT_TNT_PARITY_VAL_IDS=artifacts/tokens-v3/val_ids.npy \\
+        python -m pytest tests/test_numpy_parity.py
+
+    They must be *matched*: the HF directory has to be the conversion of that same
+    checkpoint, and the val-ids file the corpus it was trained on, or the gate measures a
+    mismatch rather than the converter.
+
+    **Two tests here are calibrated to the committed baseline and are expected to fail under
+    an override.** Both are assertions about *that checkpoint's* properties rather than about
+    the converter, so a failure from them is information, not a regression:
+
+    * ``test_parity_gate_is_not_hollow_it_fails_when_rope_permutation_is_disabled`` — its
+      three tolerance assertions hold on any checkpoint (measured on a 50-step 1024 DDP
+      checkpoint: max_abs 2.93, i.e. ~2900x over budget, max_rel 2.0, corr 0.9988 against a
+      0.9999 floor, so the gate is demonstrably not hollow there either). What does not
+      transfer is the extra sharpness assertion ``corr < 0.99``, whose 0.934 came from the
+      3000-step 384 model: a barely-trained model's logits are less spread out, so the same
+      layout bug moves the correlation less while moving the absolute logits just as far.
+    * ``test_parity_gate_is_blind_to_a_norm_swap_on_the_real_checkpoint`` — asserts the
+      baseline's blind spot, that its RMSNorm gammas are all exactly 1.0 so swapping two
+      norms' destinations is a byte-identical no-op. Any checkpoint trained with
+      ``stochastic_rounding: true`` has real gammas (measured 0.977-1.031 after 50 steps), the
+      swap stops being a no-op, and this test fails **because the blind spot is gone** — which
+      is the outcome to want. Its failure message says so directly.
+    """
+    override = os.environ.get(env_var)
+    return Path(override) if override else default
+
+
+REAL_CHECKPOINT_DIR = _artifact("TT_TNT_PARITY_CHECKPOINT_DIR", ROOT / "artifacts" / "checkpoints")
+TOKENIZER_DIR = _artifact("TT_TNT_PARITY_TOKENIZER_DIR", ROOT / "artifacts" / "tokenizer")
+HF_DIR = _artifact("TT_TNT_PARITY_HF_DIR", ROOT / "artifacts" / "hf")
+VAL_IDS_PATH = _artifact("TT_TNT_PARITY_VAL_IDS", ROOT / "artifacts" / "tokens" / "val_ids.npy")
+
+#: Both naming schemes: ``nanollama3_step*.pkl`` predates the tt-nanollama3 -> tt-tnt rename
+#: and is what the committed 384 baseline in ``artifacts/checkpoints/`` uses; ``tt_tnt_step*``
+#: is what everything written since uses, and so what an overridden directory will hold.
+#: Sorted by the numeric step after "step" rather than by filename, so the two schemes
+#: interleave by step instead of one prefix always sorting after the other — same rule as
+#: ``train.checkpoint.latest_checkpoint``.
+_CHECKPOINTS = (
+    sorted(
+        list(REAL_CHECKPOINT_DIR.glob("nanollama3_step*.pkl"))
+        + list(REAL_CHECKPOINT_DIR.glob("tt_tnt_step*.pkl")),
+        key=lambda p: int(p.stem.rsplit("step", 1)[-1]),
+    )
+    if REAL_CHECKPOINT_DIR.exists()
+    else []
 )
+REAL_CHECKPOINT = _CHECKPOINTS[-1] if _CHECKPOINTS else None
 
 #: Every test that needs the real trained checkpoint, its tokenizer, the converted
 #: `artifacts/hf/` model, and/or `val_ids.npy` is individually decorated with this -- NOT a

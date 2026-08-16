@@ -51,10 +51,22 @@ full speed and draws a perfectly ordinary loss curve.
 Neither win touched tt-metal. What could not be fixed from our side is written up in
 `docs/upstream-tt-metal-asks.md` with reproductions.
 
-**Known limitation as of this entry:** a DDP run cannot yet write a usable checkpoint — the
-optimizer step re-marks replicated parameters as `Shard(0)` while the data stays replicated, so
-the saver writes all four copies concatenated. `assert_saveable_on_mesh` refuses to write it
-rather than producing a plausible-looking corrupt file. Being fixed next.
+**Known limitation as of this entry — since resolved, same day:** a DDP run could not write a
+usable checkpoint. The optimizer step re-marks replicated parameters as `Shard(0)` while the data
+stays replicated, so the saver wrote all four copies concatenated;
+`assert_saveable_on_mesh` refused rather than produce a plausible-looking corrupt file.
+
+**The fix needed no upstream change after all.** `ttnn.Tensor.update_tensor_topology` is bound in
+Python, so the false marking is correctable by any holder of the tensor: `train/checkpoint.py`
+now re-marks each parameter `Replicate` immediately before a save and restores the original
+topology immediately after, moving no data. A `--ddp 4` checkpoint is 737,824,624 bytes — the
+single-chip size — and every tensor in it is bitwise equal to replica 0. It converts to
+HuggingFace, loads, and generates; the NumPy parity gate ran against it for the first time and
+agreed to 2.56e-06, tighter than the committed baseline. Along the way: **stochastic rounding
+breaks DDP's replica-identity invariant** (each device rounds from its own RNG, so the four
+replicas drift apart despite identical all-reduced gradients) — filed upstream, and the reason
+the save-time guard is built on structural facts rather than a numeric replica comparison. Full
+write-up in `.superpowers/ddp-checkpoint-fix.md`.
 
 ### The model, asked
 
