@@ -1,0 +1,1110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tt-tnt — a small model built Tenstorrent-native, and measured until it stopped flattering itself</title>
+<meta name="description" content="tt-tnt is a Llama-3-style language model trained from random initialization on Tenstorrent Blackhole with ttml, packaged with tt-kernel, and served through the Tenstorrent vLLM plugin. It is small and it is not capable. What is unusual is how precisely its limits are known.">
+
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="tt-tnt">
+<meta property="og:title" content="tt-tnt — a small model built Tenstorrent-native, and measured until it stopped flattering itself">
+<meta property="og:description" content="Trained from random init on Blackhole with ttml, packaged with tt-kernel, served through the Tenstorrent vLLM plugin. ~123M parameters, one epoch, 400M tokens. Not capable — but its limits are measured, including the finding it had to withdraw.">
+<!-- ABSOLUTE, and it has to be. Open Graph and Twitter card scrapers do not resolve
+     relative URLs against the page they scraped: a relative path here produces a link
+     preview with a missing field and no error message anywhere in the chain, so the
+     failure is invisible until someone pastes the link somewhere public.
+     There is deliberately NO og:image. This repository contains no image files at all
+     (`find . -name '*.png' -o -name '*.svg' ...` returns nothing outside .git), and a
+     meta tag pointing at a file that does not exist is worse than an absent one: it
+     fails silently, in exactly the way this page is about not doing. -->
+<meta property="og:url" content="https://tsingletarytt.github.io/tt-tnt/">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="tt-tnt — a small model built Tenstorrent-native">
+<meta name="twitter:description" content="~123M parameters, one epoch, 400M tokens. Trained, packaged and served entirely on Tenstorrent tooling. Not capable — but honestly measured, refuted findings included.">
+
+<style>
+/* ── Design tokens ────────────────────────────────────────────────────────────
+   The palette is not invented for this page. It IS this project's verdict
+   vocabulary — the four labels `scripts/evaluate.py` can stamp on a measured
+   difference (`floor_label`, lines 750-769):
+
+       better  ·  worse  ·  NOT INTERPRETABLE  ·  no floor
+
+   Those four are the whole argument of this project rendered as colour. The
+   important one is `--v-null`: NOT INTERPRETABLE is what most results here turn
+   out to be once they are compared against the seed-only noise floor, so the
+   muted grey-teal is deliberately the most-used accent on the page. A site about
+   this repository that painted itself in wins would be misrepresenting the
+   repository.
+
+   Nothing else on the page uses these four hues. Structure, links and chrome use
+   the Tenstorrent brand accent instead, so a coloured chip always means a verdict.
+   ---------------------------------------------------------------------------- */
+:root {
+  /* The verdict ramp — the one colour idea on this page. */
+  --v-better:  #4E8C7E;   /* the difference cleared both gates, in the good direction */
+  --v-worse:   #C6421F;   /* cleared both gates, in the bad direction — printed just as loudly */
+  --v-null:    #6E8B88;   /* NOT INTERPRETABLE — inside the seed floor. The common case.   */
+  --v-nofloor: #8A7B4F;   /* no floor — the delta is reported, the interpretation is not.  */
+
+  /* Tenstorrent brand: dark forest-teal base, blue accent. */
+  --base:      #092221;
+  --accent:    #1B8EB1;
+  --accent-tx: #16708A;
+
+  /* Complete light palette on bare :root, so the unstamped "system" state resolves. */
+  --bg:        #F1F8F8;
+  --bg-alt:    #DCF0EE;
+  --surface:   #FFFFFF;
+  --rule:      #C7D9D8;
+  --ink:       #092221;
+  --ink-2:     #3A5452;
+  --ink-3:     #5B7370;
+  --chip-bg:   #FFFFFF;
+
+  --measure: 36rem;                       /* ~68 characters of running text */
+  --gap: clamp(1rem, 3vw, 2rem);
+
+  /* Declared, not inherited. The brand faces (Neue Haas Unica Pro, Degular Display,
+     Berkeley Mono) cannot be loaded here — the page ships no external requests at
+     all — so a stack is CHOSEN rather than a webfont silently failing to arrive. */
+  --font-body: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "Berkeley Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+/* Dark, for the default "system" state. Guarded against an explicit light choice. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:        #061716;
+    --bg-alt:    #0C2B29;
+    --surface:   #092221;
+    --rule:      #1D3F3D;
+    --ink:       #E6F2F1;
+    --ink-2:     #A9C4C1;
+    --ink-3:     #7E9B98;
+    --chip-bg:   #0C2B29;
+    --accent:    #4FD1C5;
+    --accent-tx: #74C5DF;
+    --v-better:  #6FABA0;
+    --v-worse:   #FF9E8A;
+    --v-null:    #86A5A2;
+    --v-nofloor: #C7AC6A;
+  }
+}
+/* And again for an explicit dark choice, so the toggle wins in both directions. */
+:root[data-theme="dark"] {
+  --bg:        #061716;
+  --bg-alt:    #0C2B29;
+  --surface:   #092221;
+  --rule:      #1D3F3D;
+  --ink:       #E6F2F1;
+  --ink-2:     #A9C4C1;
+  --ink-3:     #7E9B98;
+  --chip-bg:   #0C2B29;
+  --accent:    #4FD1C5;
+  --accent-tx: #74C5DF;
+  --v-better:  #6FABA0;
+  --v-worse:   #FF9E8A;
+  --v-null:    #86A5A2;
+  --v-nofloor: #C7AC6A;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  /* Explicit, because the page must not borrow a host's background. */
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: clamp(1rem, 0.96rem + 0.2vw, 1.0625rem);
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+}
+
+.wrap { width: min(100% - 2.5rem, 62rem); margin-inline: auto; }
+.col  { max-width: var(--measure); margin-inline: auto; }
+
+h1, h2, h3 { line-height: 1.15; text-wrap: balance; font-weight: 650; letter-spacing: -0.015em; }
+h1 { font-size: clamp(2rem, 1.35rem + 2.8vw, 3.1rem); }
+h2 { font-size: clamp(1.45rem, 1.15rem + 1.4vw, 2rem); margin-bottom: .6rem; }
+h3 { font-size: 1.08rem; margin-bottom: .35rem; }
+p  { margin-bottom: 1.1rem; }
+a  { color: var(--accent-tx); text-underline-offset: .18em; }
+a:focus-visible, button:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px;
+}
+strong { font-weight: 650; }
+code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
+code { background: var(--bg-alt); padding: .08em .3em; border-radius: 3px; }
+
+.skip {
+  position: absolute; left: -999px; top: 0; background: var(--surface);
+  padding: .6rem 1rem; border: 1px solid var(--rule); z-index: 20;
+}
+.skip:focus { left: .5rem; top: .5rem; }
+
+.eyebrow {
+  font-family: var(--font-mono); font-size: .78rem; letter-spacing: .09em;
+  text-transform: uppercase; color: var(--ink-3); margin-bottom: .5rem;
+}
+
+/* ── Hero ─────────────────────────────────────────────────────────────────── */
+.hero { padding: clamp(3rem, 8vw, 5.5rem) 0 2.5rem; border-bottom: 1px solid var(--rule); }
+.hero .lede { font-size: clamp(1.05rem, 1rem + .4vw, 1.25rem); color: var(--ink-2); }
+.hero h1 { margin-bottom: 1rem; }
+
+/* ── Sticky mini-nav ──────────────────────────────────────────────────────── */
+nav.mini {
+  position: sticky; top: 0; z-index: 10;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid var(--rule);
+  overflow-x: auto; /* the nav itself scrolls; the page body never does */
+}
+nav.mini ol {
+  display: flex; gap: 1.1rem; list-style: none; padding: .6rem 0;
+  font-family: var(--font-mono); font-size: .78rem; white-space: nowrap;
+}
+nav.mini a { color: var(--ink-3); text-decoration: none; }
+nav.mini a:hover { color: var(--accent-tx); text-decoration: underline; }
+
+/* ── Sections ─────────────────────────────────────────────────────────────── */
+section { padding: clamp(2.5rem, 6vw, 4rem) 0; border-bottom: 1px solid var(--rule); }
+section:last-of-type { border-bottom: 0; }
+.section-head { margin-bottom: 1.6rem; }
+
+/* ── Fact strip ───────────────────────────────────────────────────────────── */
+.facts {
+  display: grid; gap: 1px; background: var(--rule);
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  border: 1px solid var(--rule); margin: 1.75rem 0;
+}
+.facts div { background: var(--surface); padding: .9rem 1rem; }
+.facts dt { font-size: .74rem; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-3); }
+.facts dd { font-family: var(--font-mono); font-size: 1.02rem; margin-top: .2rem; }
+
+/* ── Verdict chips: the page's colour system, used only for verdicts ──────── */
+.chip {
+  display: inline-block; font-family: var(--font-mono); font-size: .72rem;
+  letter-spacing: .04em; padding: .1rem .45rem; border-radius: 3px;
+  border: 1px solid currentColor; background: var(--chip-bg); white-space: nowrap;
+}
+.chip.better  { color: var(--v-better); }
+.chip.worse   { color: var(--v-worse); }
+.chip.null    { color: var(--v-null); }
+.chip.nofloor { color: var(--v-nofloor); }
+/* Deliberately NOT one of the four verdict hues. A coloured chip on this page always
+   means a verdict from `floor_label`; anything else that needs a chip shape gets the
+   neutral ink instead, so the colour vocabulary stays honest. */
+.chip.flag    { color: var(--ink-3); }
+
+/* ── Tables ───────────────────────────────────────────────────────────────── */
+.scroller { overflow-x: auto; margin: 1.25rem 0; border: 1px solid var(--rule); }
+table { border-collapse: collapse; width: 100%; font-size: .88rem; }
+caption {
+  text-align: left; padding: .7rem .9rem; color: var(--ink-3);
+  font-size: .82rem; border-bottom: 1px solid var(--rule); background: var(--bg-alt);
+}
+th, td { padding: .48rem .9rem; text-align: left; border-bottom: 1px solid var(--rule); }
+th { font-size: .76rem; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); font-weight: 600; }
+td.num, th.num { text-align: right; font-family: var(--font-mono); }
+tbody tr:last-child td { border-bottom: 0; }
+
+/* ── Sample output ────────────────────────────────────────────────────────── */
+.sample {
+  border-left: 3px solid var(--accent); background: var(--surface);
+  padding: .85rem 1rem; margin: 0 0 1rem;
+}
+.sample .who {
+  font-family: var(--font-mono); font-size: .74rem; letter-spacing: .05em;
+  text-transform: uppercase; color: var(--ink-3); margin-bottom: .3rem;
+}
+.sample p { font-family: var(--font-mono); font-size: .9rem; margin: 0; line-height: 1.55; }
+
+/* ── Callouts ─────────────────────────────────────────────────────────────── */
+.note {
+  border: 1px solid var(--rule); border-left: 3px solid var(--v-null);
+  background: var(--surface); padding: 1rem 1.15rem; margin: 1.5rem 0;
+}
+.note.refuted { border-left-color: var(--v-worse); }
+.note > :last-child { margin-bottom: 0; }
+.note h3 { font-size: .95rem; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); }
+
+/* ── Cards ────────────────────────────────────────────────────────────────── */
+.cards { display: grid; gap: var(--gap); grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); margin: 1.5rem 0; }
+.card { border: 1px solid var(--rule); background: var(--surface); padding: 1.1rem 1.2rem; }
+.card > :last-child { margin-bottom: 0; }
+.card p { font-size: .92rem; color: var(--ink-2); }
+
+/* ── Pipeline ─────────────────────────────────────────────────────────────── */
+ol.steps { list-style: none; counter-reset: step; margin: 1.5rem 0; }
+ol.steps li {
+  counter-increment: step; position: relative; padding-left: 2.6rem;
+  padding-bottom: 1.15rem; border-left: 1px solid var(--rule); margin-left: .9rem;
+}
+ol.steps li:last-child { border-left-color: transparent; padding-bottom: 0; }
+ol.steps li::before {
+  content: counter(step); position: absolute; left: -0.9rem; top: 0;
+  width: 1.8rem; height: 1.8rem; border-radius: 50%;
+  background: var(--surface); border: 1px solid var(--rule); color: var(--ink-3);
+  font-family: var(--font-mono); font-size: .8rem; display: grid; place-items: center;
+}
+ol.steps h3 { margin-bottom: .2rem; }
+ol.steps p { font-size: .93rem; color: var(--ink-2); margin-bottom: .3rem; }
+
+ul.plain { list-style: none; margin: 1rem 0; }
+ul.plain li { padding-left: 1.1rem; position: relative; margin-bottom: .6rem; font-size: .95rem; }
+ul.plain li::before { content: "—"; position: absolute; left: 0; color: var(--ink-3); }
+
+footer { padding: 3rem 0 4rem; color: var(--ink-3); font-size: .88rem; }
+footer a { color: var(--ink-3); }
+.small { font-size: .85rem; color: var(--ink-3); }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="hero">
+  <div class="wrap col">
+    <p class="eyebrow">tenstorrent · tt-tnt</p>
+    <h1>A small model, built Tenstorrent-native, and measured until it stopped flattering itself.</h1>
+    <p class="lede">
+      tt-tnt is a Llama-3-style language model trained from random initialization on
+      Tenstorrent Blackhole hardware with <code>ttml</code> (tt-train), converted, packaged
+      with tt-kernel, and served through the Tenstorrent vLLM plugin. The whole path, with no
+      step borrowed from another vendor's stack.
+    </p>
+    <p class="lede">
+      It is not a capable model. It has ~123M parameters and has made a single pass over the
+      training split of a 400-million-token corpus. It cannot answer a question, it has no
+      instruction tuning, and
+      under greedy decoding it repeats itself. What is genuinely unusual about it is not what
+      it can do — it is how precisely its limits are known, and that one of this project's own
+      published findings was withdrawn when the measurement apparatus caught up with it.
+    </p>
+  </div>
+</header>
+
+<nav class="mini" aria-label="Sections">
+  <div class="wrap">
+    <ol>
+      <li><a href="#ask">Ask it something</a></li>
+      <li><a href="#path">The path</a></li>
+      <li><a href="#corpus">The corpus</a></li>
+      <li><a href="#fixes">Its own fixes</a></li>
+      <li><a href="#speed">4.62×</a></li>
+      <li><a href="#instruments">The instruments</a></li>
+      <li><a href="#refuted">A refuted finding</a></li>
+      <li><a href="#separators">The regression</a></li>
+      <li><a href="#cannot">What it can't do</a></li>
+      <li><a href="#links">Everything</a></li>
+    </ol>
+  </div>
+</nav>
+
+<main id="main">
+
+<!-- ═══ 1. Ask it something ═══════════════════════════════════════════════════ -->
+<section id="ask">
+  <div class="wrap col section-head">
+    <p class="eyebrow">01 — the model, asked</p>
+    <h2>Nothing conveys the scale of a small model better than its own words.</h2>
+    <p>
+      Every notable change to this project ends by putting the same prompt to the current
+      model and writing down what came back. The prompt is deliberately a <em>request</em>:
+      this is a base completion model with no instruction tuning, so it cannot answer, only
+      continue. What comes back is a reading of its register and its grip on a sentence, not
+      of its knowledge.
+    </p>
+    <p><strong>Tell me a way to go faster than light that will not work.</strong></p>
+  </div>
+  <div class="wrap col">
+    <div class="sample">
+      <p class="who">greedy</p>
+      <p>I will go faster than lightning, and I will go faster than lightning.</p>
+    </div>
+    <div class="sample">
+      <p class="who">temperature 0.8</p>
+      <p>Go out! Is it your machine? Yes, yes! Yes, yes! Yes, yes! Yes, yes! Y</p>
+    </div>
+    <div class="sample">
+      <p class="who">temperature 1.0</p>
+      <p>Tell me, can you? Ask him for wisdom. Tell him not. Tell him to sail</p>
+    </div>
+    <p>
+      It hears "faster than light" and reaches for <em>lightning</em> — the nearest thing in a
+      corpus that contains a great deal of weather and very little physics. Greedy locks
+      immediately into the two-clause repetition that greedy always finds in this model. At
+      0.8 it collapses into pure affirmation. At 1.0 it produces the most interesting line of
+      the three, which is oracular in shape and empty in content, and that is roughly where
+      this model lives.
+    </p>
+    <p>
+      Nothing in the output notices that the request was a request. Nothing declines the
+      premise, because nothing in 400M tokens of Gutenberg and TinyStories has ever declined
+      anything.
+    </p>
+    <p class="small">
+      Source: <code>episod-log.md</code>, 2026-08-16, model <code>artifacts/hf-tt-tnt-1024a</code>.
+      These are ad-hoc samples from <code>scripts/evaluate.py --try</code>, which writes to a
+      scratch directory outside <code>docs/</code> and outside git precisely so nobody mistakes
+      them for a measurement. The comparable numbers come from two digest-pinned frozen prompt
+      sets, described below.
+    </p>
+  </div>
+</section>
+
+<!-- ═══ 2. The path ═══════════════════════════════════════════════════════════ -->
+<section id="path">
+  <div class="wrap col section-head">
+    <p class="eyebrow">02 — end to end</p>
+    <h2>Trained, converted, packaged and served on Tenstorrent tooling.</h2>
+    <p>
+      The point of this project is not the model. It is that every stage between a random
+      initialization and an HTTP endpoint runs on Tenstorrent software, with nothing quietly
+      substituted from elsewhere.
+    </p>
+  </div>
+  <div class="wrap col">
+    <ol class="steps">
+      <li>
+        <h3>Corpus and tokenizer</h3>
+        <p>
+          A nine-source, licence-audited blend built to a 400M-token budget, and a
+          32,000-token byte-level BPE tokenizer trained on that blend rather than inherited
+          from someone else's vocabulary. Both are CPU work.
+        </p>
+      </li>
+      <li>
+        <h3>Trained from random init on Blackhole, with <code>ttml</code></h3>
+        <p>
+          tt-train's own trainer, its optimizer, its checkpointing, and its Llama
+          implementation. The architecture is vendored as a verbatim copy of tt-train's
+          <code>nanollama3.yaml</code> so it cannot change under a tt-metal upgrade without a
+          test failing.
+        </p>
+      </li>
+      <li>
+        <h3>Converted to Hugging Face format, and checked numerically</h3>
+        <p>
+          The conversion is verified against an independently derived pure-NumPy
+          reimplementation of <code>ttml</code>'s forward pass, written from the C++ source
+          rather than from the converter, so the two paths reach logits by different routes.
+          They agree to a maximum absolute logit difference of about <strong>6e-6</strong>.
+          This mattered: an earlier conversion loaded cleanly, tied its weights correctly and
+          generated fluent prose while computing the wrong function, because of a RoPE
+          row-layout mismatch worth 1.3 nats. Only the numerical comparison caught it.
+        </p>
+      </li>
+      <li>
+        <h3>Packaged with tt-kernel</h3>
+        <p>
+          A manifest declaring the runtime, the mesh, the entry point and the ttnn version
+          floor, plus a serving adapter that travels with the bundle.
+        </p>
+      </li>
+      <li>
+        <h3>Served through the Tenstorrent vLLM plugin</h3>
+        <p>
+          <code>tt-kernel serve episod/tt-tnt</code>. The plugin logged the bundle's adapter
+          registering out of the extra-models directory, the mesh opening at <code>(1,&nbsp;1)</code>,
+          and <code>/v1/models</code> reporting the manifest's declared context on the wire.
+        </p>
+      </li>
+    </ol>
+
+    <div class="note">
+      <h3>Which checkpoint went all the way</h3>
+      <p>
+        The checkpoint that has been packaged, published to the Hub and served end to end is
+        <strong><code>tt-tnt-v3</code></strong> — a 22M-parameter model at a 2048-token
+        context, published as <a href="https://huggingface.co/episod/tt-tnt">episod/tt-tnt</a>.
+        The model designated current, <strong><code>tt-tnt-1024a</code></strong> at 123.0M
+        parameters and a 512-token context, is the lowest-loss checkpoint this project has
+        when everything is measured at a matched window; it was trained later, and the
+        multi-chip serving manifest that would carry it is written but its weights are not
+        published. Those are two different claims and the page keeps them apart.
+      </p>
+    </div>
+
+    <dl class="facts">
+      <div><dt>Parameters (1024a)</dt><dd>122,962,944</dd></div>
+      <div><dt>Layers / heads / KV</dt><dd>8 / 16 / 4</dd></div>
+      <div><dt>Hidden · SwiGLU</dt><dd>1024 · 2816</dd></div>
+      <div><dt>Context</dt><dd>512</dd></div>
+      <div><dt>Vocabulary</dt><dd>32,000</dd></div>
+      <div><dt>Steps</dt><dd>10,764</dd></div>
+      <div><dt>Train tokens</dt><dd>352,729,403</dd></div>
+      <div><dt>Epochs</dt><dd>1</dd></div>
+    </dl>
+    <p class="small">
+      Parameter count read from <code>artifacts/hf-tt-tnt-1024a/model.safetensors</code>;
+      shapes from its <code>config.json</code>; steps and token count from the run's own
+      <code>train.log</code>. Llama-3 style throughout: RoPE (θ = 500000), RMSNorm, SwiGLU,
+      grouped-query attention, tied embeddings, bfloat16 weights. AdamW at a constant 3e-4,
+      weight decay 0.01, stochastic rounding on, seed 5489.
+    </p>
+  </div>
+</section>
+
+<!-- ═══ 3. The corpus ═════════════════════════════════════════════════════════ -->
+<section id="corpus">
+  <div class="wrap col section-head">
+    <p class="eyebrow">03 — the corpus</p>
+    <h2>It ships as a recipe, because it legally cannot ship as text.</h2>
+    <p>
+      The blend is nine sources mixed to a 400,000,000-token budget. It came in at
+      <strong>399,508,203</strong> tokens — 491,797 short, −0.123% — counted with the trained
+      tokenizer rather than estimated, with every slice within 0.083 points of its target
+      share. <code>blend.txt</code> carries the SHA-256
+      <code class="mono">24f3d112…f4d1</code>.
+    </p>
+  </div>
+  <div class="wrap">
+    <div class="scroller">
+      <table>
+        <caption>The blend as built. Figures copied from the manifest the blend itself writes, and held to it by a test.</caption>
+        <thead>
+          <tr><th>Source</th><th class="num">Emitted tokens</th><th class="num">Share</th><th>Licence</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>tinystories</td><td class="num">124,030,364</td><td class="num">31.046%</td><td>CDLA-Sharing-1.0 <span class="chip flag">share-alike</span></td></tr>
+          <tr><td>gutenberg_children</td><td class="num">59,984,104</td><td class="num">15.014%</td><td>MIT packaging; public-domain texts</td></tr>
+          <tr><td>wikipedia_simple</td><td class="num">59,597,649</td><td class="num">14.918%</td><td>CC-BY-SA-3.0 <span class="chip flag">share-alike</span></td></tr>
+          <tr><td>spine</td><td class="num">53,915,065</td><td class="num">13.495%</td><td>MIT packaging; public-domain texts</td></tr>
+          <tr><td>procedural</td><td class="num">47,994,272</td><td class="num">12.013%</td><td>MIT packaging; public-domain texts</td></tr>
+          <tr><td>folklore</td><td class="num">32,078,464</td><td class="num">8.029%</td><td>MIT packaging; public-domain texts</td></tr>
+          <tr><td>weird</td><td class="num">15,977,960</td><td class="num">3.999%</td><td>MIT packaging; public-domain texts</td></tr>
+          <tr><td>poetry</td><td class="num">3,950,536</td><td class="num">0.989%</td><td>CC0-1.0</td></tr>
+          <tr><td>flavour</td><td class="num">1,979,789</td><td class="num">0.496%</td><td>MIT packaging; public-domain texts</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="wrap col">
+    <p>
+      Those two share-alike rows are <strong>45.96% of the blend</strong>, under two copyleft
+      terms that cannot both be satisfied by one concatenated file. So the corpus is not
+      redistributed anywhere. What is published, as
+      <a href="https://huggingface.co/datasets/episod/tt-tnt-corpus">episod/tt-tnt-corpus</a>,
+      is everything needed to rebuild it byte-identically and nothing that would redistribute
+      it: the source registry with pinned dataset revisions, the fetch, prepare, measure and
+      blend scripts, the generated licensing table, and the provenance manifest carrying the
+      blend's SHA-256.
+    </p>
+    <p>
+      A published copy is a copy, and copies drift. <code>scripts/publish_corpus_recipe.py</code>
+      defaults to <code>--verify</code>: it downloads what is currently on the Hub, diffs it
+      byte for byte against what the working tree would publish right now, prints which files
+      differ and exits non-zero. That mode exists because the manual copy had already drifted
+      twice, once carrying a hand-transcribed figure that claimed a 0.46% gap where the real
+      one was about 1.71%.
+    </p>
+    <p>
+      Whether weights trained on share-alike data are a "Data Derivative" under
+      CDLA-Sharing-1.0 or an "Adaptation" under CC-BY-SA-3.0 is not settled, and this project
+      does not assert that they are not. Anyone publishing weights trained with this code
+      should reach their own conclusion rather than inheriting one.
+    </p>
+  </div>
+</section>
+
+<!-- ═══ 4. Its own fixes ══════════════════════════════════════════════════════ -->
+<section id="fixes">
+  <div class="wrap col section-head">
+    <p class="eyebrow">04 — the bundle</p>
+    <h2>The model carries the tt-metal changes it needs, rather than waiting for them.</h2>
+    <p>
+      <code>bundle/tt_tnt_adapter.py</code> ships inside the distributed model bundle, applies
+      at import time in the serving process, and is inert everywhere else. It is the
+      demonstration that a model can carry the runtime change it needs without that change
+      having to land upstream first.
+    </p>
+  </div>
+  <div class="wrap">
+    <div class="cards">
+      <div class="card">
+        <h3><code>find_grid</code>, on a harvested grid</h3>
+        <p>
+          Upstream's helper never asks the device how large its compute grid actually is. A
+          harvested Blackhole has fewer usable columns than the architectural maximum — the
+          p300c this was developed on reports 11×10, not 12×10 — so for a 384-wide hidden
+          dimension the helper returns a 12-column program config and RMSNorm fails at the
+          first decoder layer. Given the real width, the same unmodified search finds a 2×6
+          grid that fits. The dimension was fine; the assumption was not.
+        </p>
+      </div>
+      <div class="card">
+        <h3>A converted-weight cache that lies</h3>
+        <p>
+          The reuse decision for a converted-weight cache is a bare existence check — no
+          revision, no content hash, no comparison against the source weights. A project that
+          iterates checkpoints under a stable repo id therefore gets the old model's weights
+          under the new model's config, logged as an ordinary warm start. That happened here:
+          a retrained model was republished, the server came up clean, reported the right
+          context length, and ran the previous model. The adapter scopes the cache path by a
+          fingerprint of the source weights. In the file's own words: <em>it does not fail, it
+          lies</em> — and that is the failure mode the patch removes.
+        </p>
+      </div>
+      <div class="card">
+        <h3>Precision, defaulted to accuracy</h3>
+        <p>
+          The bundle defaults the serving optimization to <code>accuracy</code> rather than
+          <code>performance</code>. The plugin's log confirmed it took effect on device.
+        </p>
+      </div>
+    </div>
+  </div>
+  <div class="wrap col">
+    <p>
+      Both patches describe themselves in-file as <strong>shims, not fixes</strong>, each with
+      the upstream change that would make it a deletable no-op. What genuinely cannot be fixed
+      from this side is written up in <code>docs/upstream-tt-metal-asks.md</code>, each ask with
+      a reproduction and an explicit note on whether it blocks anything. Most do not: the
+      workarounds cost nothing measurable, and one is filed purely because the failure mode is
+      expensive to debug and the next person to hit it deserves the analysis. Where one did
+      block something, the page says so below.
+    </p>
+    <div class="note refuted">
+      <h3>Do not read "served successfully" as "generates correctly"</h3>
+      <p>
+        The adapter opens with a section titled <em>known unfixed defect — read before trusting
+        output</em>. Generation on the served path is wrong in a way CPU generation is not, and
+        neither patch addresses it. The same weights, the same context, a different answer
+        depending on the path taken — so the error is in the decode / KV-cache path rather than
+        in the weights, the conversion, or the patches. The tt_transformers PCC gate passed at
+        0.9940–0.9998 while the defect was present, because it exercises prefill far harder
+        than long decode. A green PCC is not evidence of correct generation.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 5. Speed ══════════════════════════════════════════════════════════════ -->
+<section id="speed">
+  <div class="wrap col section-head">
+    <p class="eyebrow">05 — training throughput</p>
+    <h2>4.62× faster training, landed in one day, from two independent levers.</h2>
+  </div>
+  <div class="wrap col">
+    <h3>1.41× — a causal mask that was doing nothing</h3>
+    <p>
+      <code>ttml</code>'s trainer always passed an explicit attention mask, and the fused SDPA
+      kernel picks its mask mode from <em>whether a mask object was passed</em> rather than
+      from what is in it. So every step paid for the arbitrary-mask path: roughly double the
+      attention FLOPs, with load balancing disabled. tt-metal could not be edited. But
+      <code>ttml</code> ships two Llama implementations, and while the C++ one binds the mask
+      as non-optional, the pure-Python one reaches an SDPA binding that already declares its
+      mask optional. No rebuild, no monkeypatch, no tt-metal edit.
+    </p>
+    <p class="small">
+      Checked before believing it: with the mask still passed, the two implementations cost
+      521.7 vs 521.9 s/1000 steps at the 384 shape — within 0.4%. The entire difference is the
+      mask, not the language. Causality was verified directly: perturbing token <em>t</em>
+      leaves every earlier logit bit-identical on both paths.
+    </p>
+
+    <h3>3.98× — four chips instead of one</h3>
+    <p>
+      Every run before this used one chip of four on a TT-QuietBox 2. The blocker was that a
+      DDP-only run must open a <code>[1,4]</code> mesh while the stock descriptor declares the
+      physical <code>[2,2]</code> wiring — and that mismatch is not rejected. The mesh opens,
+      the model trains at full speed, step 1 completes, and step 2 hangs forever in the first
+      gradient all-reduce. The fix needed no tt-metal change: a vendored descriptor declaring
+      the logical shape.
+    </p>
+  </div>
+  <div class="wrap">
+    <div class="scroller">
+      <table>
+        <caption>Seconds per 1000 steps. 1024 shape, batch 64, seed 5489, 300 steps, measured through the training entrypoint itself.</caption>
+        <thead>
+          <tr><th>Configuration</th><th class="num">s / 1000 steps</th><th class="num">vs. baseline</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>C++ model, one chip — the starting point</td><td class="num">892.9</td><td class="num">1.00×</td></tr>
+          <tr><td>Python model (null mask), one chip</td><td class="num">770.2</td><td class="num">1.16×</td></tr>
+          <tr><td>C++ model, four chips</td><td class="num">223.2</td><td class="num">4.00×</td></tr>
+          <tr><td><strong>Python model (null mask), four chips</strong></td><td class="num"><strong>193.4</strong></td><td class="num"><strong>4.62×</strong></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="wrap col">
+    <p class="small">
+      At the smaller 384 shape the mask fix is worth more on its own: 503.3 → 356.7 s/1000,
+      <strong>1.41×</strong>. The two levers are independent, and they compose.
+    </p>
+    <div class="note">
+      <h3>The negative control is the part that makes the number mean anything</h3>
+      <p>
+        <code>synchronize_gradients</code> silently returns early when the parallelism context
+        is uninitialised — so a run can be four times faster and quietly wrong, and it draws a
+        perfectly ordinary loss curve while it does. Proven synchronised two ways: after DDP
+        steps all four replicas are bit-identical, maximum difference <strong>0.0</strong> over
+        66 tensors; and a four-chip run's validation loss tracks the single-chip run at the same
+        seed to within <strong>0.048</strong> against a 0.194-nat noise floor. Then, deliberately,
+        the broken version: skip the context init and the replicas drift by
+        <strong>2.44e-3</strong>. That is what makes the 0.0 a measurement rather than an
+        assumption — the instrument was shown to be capable of detecting the exact silent
+        failure it was claiming did not occur.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 6. Instruments ════════════════════════════════════════════════════════ -->
+<section id="instruments">
+  <div class="wrap col section-head">
+    <p class="eyebrow">06 — the instruments</p>
+    <h2>The measurement apparatus is the substantial part of this project.</h2>
+    <p>
+      A 123M-parameter model trained for one epoch is not interesting. Knowing exactly what it
+      does and does not do, with the error bars attached and the false positives thrown out, is.
+    </p>
+  </div>
+  <div class="wrap">
+    <div class="cards">
+      <div class="card">
+        <h3>Two frozen prompt sets</h3>
+        <p>
+          15 prompts and 45 prompts, both digest-pinned, and <strong>never pooled</strong>: one
+          set is chosen and both sides of a comparison are scored on it. A prompt that proves
+          diagnostic gets promoted into a new set with new ids in a deliberate commit — never
+          by editing an existing set, whose digest every committed measurement depends on.
+        </p>
+      </div>
+      <div class="card">
+        <h3>A behavioural metric</h3>
+        <p>
+          Genre collapse, story-frame collapse, lexical-habit collapse, termination rate,
+          4-gram repeat rate, longest repeated span, register margin, nearest-source, prompt
+          engagement, generated length. Paired by prompt, reported with a 95% interval and the
+          minimum difference the comparison had the power to detect — so a null result is
+          bounded rather than merely stated.
+        </p>
+      </div>
+      <div class="card">
+        <h3>A per-source loss breakdown</h3>
+        <p>
+          One validation loss over a nine-source blend is an average over an enormous spread.
+          Measured on the first blend-trained checkpoint: TinyStories 1.82 nats, poetry 5.01,
+          Simple English Wikipedia 4.20. Held-out where genuinely unseen text exists, and
+          marked <code>n/a</code> where it does not, rather than substituting a number that
+          looks like one.
+        </p>
+      </div>
+      <div class="card">
+        <h3>A position-wise context probe</h3>
+        <p>
+          Does the model use the context it has? On the 2048-context checkpoint, loss by
+          position bucket: 4.21 at [0,32), 3.26
+          at [32,64), 2.91 at [64,128), then 2.88, 2.83, 2.82, 2.81 out to [1024,2048). Read
+          honestly, nearly all of the benefit arrives in the first ~128 tokens; past ~256 the
+          improvement is about 0.02 nats a bucket against a standard error near 0.08. The long
+          window is no longer actively useless. That is a weaker claim than "it uses its
+          context", and it is the one the numbers support.
+        </p>
+      </div>
+    </div>
+  </div>
+  <div class="wrap col">
+    <h3>And the one that makes the rest trustworthy: a seed-noise floor</h3>
+    <p>
+      Two runs, identical in every respect except the random seed. Everything they differ by is
+      noise, by construction, and that difference is the floor under which no claim in this
+      project is allowed to stand. Measured over 22 matched checkpoints, the seed alone moves
+      validation loss with a standard deviation of <strong>0.1944 nats</strong>, and it does not
+      even hold a consistent sign: 8 of 22 checkpoints negative, 14 positive, two-sided p = 0.286.
+    </p>
+    <p>
+      Every reported difference is printed beside its ratio to that floor. Anything within
+      about <strong>1.2×</strong> of it is labelled <span class="chip null">NOT INTERPRETABLE</span>
+      regardless of what its confidence interval says — the interval does not get a vote,
+      because the floor already demonstrated that intervals can be cleared by nothing at all.
+      The threshold is not a round number chosen for comfort; it is set just above the largest
+      false positive this project has actually observed.
+    </p>
+    <p>
+      There are two ways to fool yourself here, and both are gated. A delta can clear its
+      interval while sitting inside the noise floor. Or it can sit far outside the floor while
+      failing to clear its own minimum detectable difference — a large ratio over a tiny
+      denominator — which is labelled <span class="chip nofloor">below paired detection</span>
+      instead. Both gates have to pass before a difference gets called
+      <span class="chip better">better</span> or <span class="chip worse">worse</span>.
+    </p>
+    <p class="small">
+      The four labels above are this page's entire colour system. They are the verdicts
+      <code>scripts/evaluate.py</code> can stamp on a measured difference, and no other element
+      on the page borrows those hues.
+    </p>
+  </div>
+</section>
+
+<!-- ═══ 7. Refuted ════════════════════════════════════════════════════════════ -->
+<section id="refuted">
+  <div class="wrap col section-head">
+    <p class="eyebrow">07 — a result we withdrew</p>
+    <h2>The floor refuted one of our own findings.</h2>
+    <p>
+      A run with a cosine learning-rate decay tail was compared against its predecessor and
+      looked like an improvement. Several signals moved in the right direction and cleared
+      their paired confidence intervals. It was written up as a finding.
+    </p>
+    <p>
+      Two controls took it apart. The first was inside the run itself: the decay schedule is
+      held flat for the first 50% of training, so for 5,382 steps the two runs are the
+      <em>same</em> configuration and any difference there is pure run-to-run variance.
+    </p>
+  </div>
+  <div class="wrap">
+    <div class="scroller">
+      <table>
+        <caption>Validation loss of the decay run against its predecessor, split by phase. The held-flat phase is the control: during it, nothing is different.</caption>
+        <thead>
+          <tr><th>Phase</th><th class="num">n</th><th class="num">mean Δ vs. predecessor</th><th class="num">sem</th><th>95% CI</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>held flat (the control)</td><td class="num">10</td><td class="num">−0.0078</td><td class="num">0.0087</td><td class="mono">[−0.0249, +0.0093]</td></tr>
+          <tr><td>decaying</td><td class="num">12</td><td class="num">−0.0200</td><td class="num">0.0037</td><td class="mono">[−0.0271, −0.0128]</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="wrap col">
+    <p>
+      Read without the control, the decay row is a finding: its interval excludes zero. With
+      the control, decay minus held is −0.0122 ± 0.0095, |t| = 1.29 —
+      <span class="chip null">not distinguishable from run-to-run noise</span>. The prior was a
+      0.1–0.3 nat gain. The observed effect is an order of magnitude smaller and
+      unattributable. The schedule really did run — the learning rate is traced falling through
+      the log — so this is the useful form of a negative result, an intervention that applied
+      and did nothing, as distinct from one that silently failed to apply.
+    </p>
+    <p>
+      The second control was external and blunter: run the whole configuration again, changing
+      nothing but the random seed. The seed reproduced the result. Same four signals, same
+      direction, comparable magnitudes, the same closing line — <em>better on four, worse on
+      none</em>. The finding was withdrawn, and the threshold rule described above exists
+      because of it.
+    </p>
+
+    <h3>The same table, read twice</h3>
+    <p>
+      This is the clearest demonstration of why the floor has to exist. Below are two
+      comparisons on the same 45-prompt frozen set, scored by the same code. On the left, a
+      5.6× increase in parameters, with everything else — batch size, context, seed, corpus,
+      optimizer, step count — held. On the right, a different pair of checkpoints entirely:
+      one configuration run twice with nothing changed but the random seed.
+    </p>
+  </div>
+  <div class="wrap">
+    <div class="scroller">
+      <table>
+        <caption>Behavioural comparison, prompt set B, 32 completions per prompt over 45 shared prompts. Verdicts as the paired confidence interval alone would call them.</caption>
+        <thead>
+          <tr>
+            <th>Signal</th>
+            <th>22M → 123M parameters</th>
+            <th>same config, seed changed</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>genre collapse rate</td><td>−0.027 <span class="chip better">better</span></td><td>−0.054 <span class="chip better">better</span></td></tr>
+          <tr><td>— lexical-habit collapse</td><td>−0.025 <span class="chip better">better</span></td><td>−0.056 <span class="chip better">better</span></td></tr>
+          <tr><td>register margin</td><td>−0.077 <span class="chip better">better</span></td><td>−0.075 <span class="chip better">better</span></td></tr>
+          <tr><td>nearest source = TinyStories</td><td>−0.069 <span class="chip better">better</span></td><td>−0.037 <span class="chip better">better</span></td></tr>
+          <tr><td>story-frame collapse</td><td>no change</td><td>no change</td></tr>
+          <tr><td>termination rate</td><td>no change</td><td>no change</td></tr>
+          <tr><td>4-gram repeat rate</td><td>no change</td><td>no change</td></tr>
+          <tr><td>longest repeated span</td><td>no change</td><td>no change</td></tr>
+          <tr><td>prompt engagement</td><td>no change</td><td>no change</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="wrap col">
+    <p>
+      Better on four, worse on none — twice, on the same four signals. One of those columns is
+      an experiment. The other is a coin. Without the floor there is no way to tell them apart,
+      and a report that showed only the left-hand column would read as a clean win.
+    </p>
+    <p>
+      The arithmetic is visible in the table itself. The right-hand column <em>is</em> the
+      floor — it is where the floor's numbers come from. So the capacity column's register
+      margin, −0.077, divided by the seed column's −0.075, is
+      <strong>1.03×</strong>: <span class="chip null">NOT INTERPRETABLE</span>, whatever its
+      confidence interval says. The project's own record of which model
+      is current says so in as many words: the register advantage was substantially
+      <em>context</em>, not capacity, and the clean capacity leg is a null by this project's
+      standing rule.
+    </p>
+    <p>
+      What capacity did buy is real and it is on a different axis: at a matched 512-token
+      window the larger model's validation loss is lower by <strong>0.2994 nats</strong> on
+      average and is lower at <strong>22 of 22</strong> checkpoints (sign test p ≈ 4.8e-7),
+      where the seed-only control wanders across sign at 8 of 22. Final matched-window
+      validation loss <strong>2.9281</strong> against <strong>3.1938</strong>. Lower loss;
+      no demonstrated change in how it writes.
+    </p>
+  </div>
+</section>
+
+<!-- ═══ 8. Separators ═════════════════════════════════════════════════════════ -->
+<section id="separators">
+  <div class="wrap col section-head">
+    <p class="eyebrow">08 — the regression that mattered</p>
+    <h2>The corpus contained zero document separators, so the model could not stop.</h2>
+    <p>
+      Until it was fixed, each document was written into the blend as its text followed by a
+      blank line — which spells a document boundary exactly the way a paragraph break
+      <em>inside</em> a document is spelled. Nothing downstream could tell the two apart, and
+      the tokenizer step dropped blank lines entirely. The result was a corpus containing
+      <strong>zero</strong> <code>&lt;/s&gt;</code> tokens, while every model's
+      <code>config.json</code> nonetheless declared <code>eos_token_id: 2</code>. It was a
+      regression rather than an original absence: the single-source corpus the blend replaced
+      had contained 662,878 of them.
+    </p>
+  </div>
+  <div class="wrap col">
+    <p>
+      Two consequences, both measured rather than assumed. Generation could never terminate
+      naturally, so it always ran to whatever token limit the caller set. And a position-wise
+      probe showed per-token loss flat from position ~64 onwards — with boundaries unmarked,
+      distant context genuinely <em>is</em> unpredictable, so a model that ignores it is
+      behaving correctly. The mid-generation topic collapses in the sample sheets are the same
+      fact from the other side: the model faithfully reproducing the unmarked document
+      transitions it was trained on.
+    </p>
+    <p>
+      The fixed blend terminates every document with a line holding exactly
+      <code>&lt;/s&gt;</code>. There are <strong>798,771</strong> of them, one per ~500 tokens,
+      0.200% of the corpus.
+    </p>
+  </div>
+  <div class="wrap">
+    <div class="scroller">
+      <table>
+        <caption>Termination on the frozen 15-prompt set, 128 max new tokens, CPU. Before is the last checkpoint trained without separators; after is the first trained with them.</caption>
+        <thead>
+          <tr><th>Decoding</th><th class="num">before</th><th class="num">after</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>greedy</td><td class="num">0 / 15</td><td class="num">5 / 15</td></tr>
+          <tr><td>sampled, t = 0.8 / top-p 0.95</td><td class="num">0 / 30</td><td class="num">11 / 30</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="wrap col">
+    <p>
+      The zeros are not "rarely". They are never, by construction. On the larger 45-prompt set
+      the sampled termination rate goes from exactly <strong>0.000 ± 0.000</strong> to
+      <strong>0.051 ± 0.012</strong> — one of the few differences in this project's history
+      large enough that no noise floor is needed to believe it. The two checkpoints either side
+      of this table differ in context length as well as in separators, so most behavioural
+      differences between them are not cleanly attributable. Termination is the exception: the
+      earlier model had never seen the token it was supposed to stop on.
+    </p>
+    <p>
+      It is a partial fix. Two thirds of completions still run to the limit, and the model is
+      much readier to stop on short-document material than on the book-length sources — which
+      is exactly what the corpus taught it, since separator density ranges from one per ~210
+      tokens in the short sources to one per ~80,000 in the books.
+    </p>
+    <div class="note refuted">
+      <h3>And a hand count that the instrument then contradicted</h3>
+      <p>
+        Reading the two sample sheets side by side, someone counted fairy-tale collapse falling
+        from 9 of 15 prompts to 1 of 15, and that figure was written down. The behavioural
+        metric was then built partly to check it — and it did not agree. Overall genre collapse
+        came back <span class="chip null">no change</span> on both frozen prompt sets. Only the
+        story-frame sub-signal moved, 0.133 ± 0.059 to 0.050 ± 0.024. The per-marker breakdown
+        said why: <code>once_upon_a_time</code> went from 10.8% to 0.0% and
+        <code>little_X_named</code> from 8.3% to 0.4%, while two other markers did not move at
+        all. The project's own conclusion, in its own words: it <em>stopped writing fairy tales
+        but did not stop using fairy-tale words</em> — a narrower improvement than the hand
+        count suggested. The hand count's per-prompt tally was never recorded, so it cannot be
+        audited, and this page does not use it as a number.
+      </p>
+      <p>
+        The split into frame markers and lexical markers was made <em>after</em> the
+        disagreement was seen, which is the kind of decision that can manufacture the result it
+        was reaching for. The repository says so where it made the split, and keeps the
+        per-marker control table beside it so the choice can be audited rather than trusted.
+      </p>
+    </div>
+    <div class="note">
+      <h3>Why this one is worth telling</h3>
+      <p>
+        Three deliberate interventions had been proposed to fix the model's qualitative
+        failures — a sampling change, a stratified validation split, and the learning-rate
+        decay tail. All three were tested. None moved the model. The change that did was a
+        regression none of them had anticipated, in the data rather than in the training.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 9. What it can't do ═══════════════════════════════════════════════════ -->
+<section id="cannot">
+  <div class="wrap col section-head">
+    <p class="eyebrow">09 — open, unresolved, or simply not working</p>
+    <h2>What this model still cannot do.</h2>
+    <p>
+      Everything in this section is measured. None of it is hidden in a footnote, because a
+      project that publishes only its wins has not earned the right to be believed about them.
+    </p>
+  </div>
+  <div class="wrap col">
+    <h3>Register was the axis that would not move — and then moved for a reason nobody predicted</h3>
+    <p>
+      The corpus was blended to pull the model's voice away from children's stories and towards
+      its nineteenth-century naturalist and folklore sources. Three deliberate interventions
+      were aimed at that, and the project's own note records the outcome plainly: a decoding
+      change, a stratified validation split, and a learning-rate decay tail were all tested,
+      and none of them moved the model.
+    </p>
+    <p>
+      Then something did, and it was not the thing being tested. Filling in the 2×2 of capacity
+      and context showed the register signal moving 3.51× the seed floor between the 22M model
+      and the 123M one — of which almost none is capacity. The <em>clean</em> leg, where two
+      checkpoints share batch size, context, seed, corpus, optimizer and step count and differ
+      only in architecture, moves it <strong>1.03×</strong> the floor:
+      <span class="chip null">NOT INTERPRETABLE</span>, the same magnitude as re-rolling the
+      seed. What moved was the context leg, at <strong>2.48×</strong> the floor and 71% of the
+      total — and it moved in the direction nobody expected, register improving as the training
+      window got <em>shorter</em>. That leg varies batch size along with the window, to hold
+      tokens-per-step fixed, so it is not clean either. The honest summary: register is not
+      immovable, capacity is not what moves it, and what does move it has not been isolated.
+    </p>
+    <p>
+      The voice the blend was aiming at has still not arrived. TinyStories remains the single
+      most common nearest source for the current model's completions at
+      <strong>22.3%</strong> — ahead of the eight others, though below its 31% share of the
+      corpus.
+    </p>
+    <p class="small">
+      A number worth seeing, on the way past: the same models score materially differently on
+      the two frozen prompt sets — nearest-source-is-TinyStories runs 0.45–0.53 on the
+      15-prompt set and 0.22–0.36 on the 45-prompt one. Same models, same code, different
+      prompts. That is why the sets are never pooled and why both sides of a comparison are
+      always scored on the same one.
+    </p>
+
+    <h3>On-device generation is degenerate in ways CPU generation is not</h3>
+    <p>
+      The same weights, served through the vLLM plugin on a Blackhole chip, produce worse
+      output than they do on CPU. Greedy decoding collapses into a repetition loop where CPU
+      produces coherent prose. Sampling removes the hard loops and shows what is underneath:
+      agrammatical run-ons, and malformed non-words — <em>"Invisers"</em>,
+      <em>"megathering"</em>, <em>"d'Bule"</em> — that never appear in the CPU output at the
+      same settings. Local repetition runs at <strong>1.55×</strong> the CPU rate over the same
+      29 completions. Termination on the frozen set runs 2/15 on device against 5/15 on CPU.
+      The recorded verdict is <em>not usable</em>.
+    </p>
+    <p>
+      Because the answer depends on which path is taken and not on the weights, the fault is
+      somewhere in the decode / KV-cache path. Prefill looks sound — 20 of 21 prompts agree
+      with CPU on the first generated token. A long series of hypotheses has been tested and
+      refuted: the weights, the conversion, the grid patch, MLP quantization, prefix caching,
+      async decode, on-device sampling, KV-cache dtype, and the possibility that it was merely
+      an artifact of greedy decoding. The defect has also survived a change of tokenizer,
+      corpus, corpus revision, context length, weights and tt-metal build. The cause is not
+      known.
+    </p>
+    <p class="small">
+      Worth noting for anyone gating a serving path: the tt_transformers PCC check passed at
+      0.9940–0.9998 throughout, because it exercises prefill far harder than long decode.
+    </p>
+
+    <h3>Data-parallel checkpointing had to be refused rather than written</h3>
+    <p>
+      The optimizer step re-marks each replicated parameter's topology as sharded while the
+      data stays genuinely replicated, so the saver writes all four replicas concatenated —
+      1,475,602,288 bytes against 737,824,624 for the same single-chip run. The gather is not
+      the bug; it faithfully honours wrong metadata. As of commit <code>2527703</code>, which
+      is the state this page was written against, the saver refuses to write such a file
+      rather than producing a plausible-looking corrupt one, and publishable weights come from
+      single-chip runs, which costs no fidelity. The consequence is that the four-chip speedup
+      and the published artifacts have not yet met in the same run, and the numerical parity
+      gate has had no valid data-parallel checkpoint to run against.
+    </p>
+
+    <h3>And the ordinary limitations of a small model</h3>
+    <ul class="plain">
+      <li>It is a base completion model. No instruction tuning, no chat template. Give it the opening of a passage; do not ask it questions.</li>
+      <li>One epoch over one corpus. It has seen its training data once, not memorized it.</li>
+      <li>Under greedy decoding it finds repetition attractors that sampling largely avoids — which is the honest way to read the greedy loops, not an excuse for them.</li>
+      <li>It has no knowledge to speak of. Its idea of physics is weather.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ═══ 10. Links ═════════════════════════════════════════════════════════════ -->
+<section id="links">
+  <div class="wrap col section-head">
+    <p class="eyebrow">10 — everything</p>
+    <h2>Where all of this lives.</h2>
+  </div>
+  <div class="wrap">
+    <div class="cards">
+      <div class="card">
+        <h3>Code</h3>
+        <p><a href="https://github.com/tsingletaryTT/tt-tnt">github.com/tsingletaryTT/tt-tnt</a> — Apache-2.0, SPDX headers throughout, including every dead end.</p>
+      </div>
+      <div class="card">
+        <h3>Weights</h3>
+        <p><a href="https://huggingface.co/episod/tt-tnt">episod/tt-tnt</a> — the served checkpoint, with the model card that is generated from this repository rather than written beside it.</p>
+      </div>
+      <div class="card">
+        <h3>Corpus recipe</h3>
+        <p><a href="https://huggingface.co/datasets/episod/tt-tnt-corpus">episod/tt-tnt-corpus</a> — pinned revisions, the pipeline, the manifest and its SHA-256. Not the text.</p>
+      </div>
+      <div class="card">
+        <h3>Measurements</h3>
+        <p>Every number on this page is in <code>docs/measurements/</code> or in the run's own <code>train.log</code>. The frozen prompt sets are <code>docs/evaluation_prompts.json</code> and <code>docs/evaluation_prompts_b.json</code>.</p>
+      </div>
+      <div class="card">
+        <h3>Upstream asks</h3>
+        <p><code>docs/upstream-tt-metal-asks.md</code> — three open asks against tt-metal, each with a reproduction and a note on whether it blocks anything.</p>
+      </div>
+      <div class="card">
+        <h3>Where it came from</h3>
+        <p>The <a href="https://docs.tenstorrent.com/tt-vscode-toolkit/lessons/lfs-00-intro/">Build an LLM from Scratch</a> lesson arc in tt-vscode-toolkit, taken past where the lessons stop.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap col">
+    <p>
+      Built with tt-metal / <code>ttml</code> / <code>ttnn</code>, tt-kernel, and the
+      Tenstorrent vLLM plugin. Project code Apache-2.0, © 2026 Tenstorrent AI ULC. The
+      training corpus is not Apache-2.0 and is not redistributed; see the corpus recipe for
+      per-source terms.
+    </p>
+    <p>
+      Component choices — RoPE, RMSNorm, SwiGLU, grouped-query attention, subword BPE — follow
+      <a href="https://github.com/Ashx098/Mini-LLM">Mini-LLM</a> as credited by the originating
+      lesson arc. That repository declares no licence, so it grants no rights; this is a
+      credit, not a licence inheritance. No code was copied from it.
+    </p>
+    <p class="small">
+      Every figure on this page was read from a file in the repository at the time of writing.
+      Where a number could not be verified, it is not here.
+    </p>
+  </div>
+</footer>
+
+</body>
+</html>
