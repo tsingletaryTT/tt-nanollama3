@@ -1514,3 +1514,58 @@ and the end-to-end `run.py` curves at both shapes deviate by at most 0.119 nats 
 Suite: **831 passed, 1 skipped** (808 baseline + 23 new in `tests/test_model.py`, all host-only).
 tt-metal left untouched at `620793d898`. Nothing deleted; nothing written under `artifacts/`
 (timing runs checkpointed to a scratch directory outside the repo).
+
+## Four-chip DDP — a 3.98x wall-clock win, and the descriptor that silently hid it (2026-08-16)
+
+Prompt: bring up multi-chip data-parallel training and produce a real 4-chip benchmark, with an
+explicit warning that `synchronize_gradients` silently early-returns when the parallelism
+context is uninitialised, so a run can be 4x faster and silently wrong. Full report and every
+measurement: `.superpowers/ddp-bringup.md`.
+
+**Result.** `--size 1024`, batch 64, seed 5489, 300 steps, s/1000: `[1,1]` **770.2** →
+`[1,4]` **193.4** (**3.98x**) with the Python model; 892.9 → 223.2 (**4.00x**) with cpp. Both
+`[1,1]` figures reproduce the recorded baselines (776.7 / 890.0) to under 1%. **`--model-impl`
+and `--ddp` are independent levers** — 892.9 → 193.4 is 4.62x over this morning's start.
+
+**The blocker was the mesh graph descriptor's *shape*, and it fails silently.** tt-metal's
+`p300_x2_mesh_graph_descriptor.textproto` correctly declares the physical `[2,2]` wiring, but a
+DDP-only run must open `[1,4]` (`ParallelismContext` TT_FATALs on a 2-D mesh unless two
+parallelisms are enabled). That mismatch is **not rejected**: the mesh opens, the model trains at
+full speed, step 1 completes, and step 2 hangs forever in the first gradient all-reduce.
+`.superpowers/seqlen-ddp-investigation.md` predicted this conflict as the likely first failure
+but expected a rejection — the reality is worse. Fix needs no tt-metal change: vendored
+`train/configs/mesh/mesh-1x{2,4}.textproto` declaring the *logical* shape, exported via
+`TT_MESH_GRAPH_DESC_PATH`. **Rule: `device_topology.dims` must equal the `MeshShape` opened.**
+
+**Gradients provably synchronise — two independent proofs plus a negative control.** (1) After
+DDP steps all four replicas are **bit-identical** (max `|replica0 - replica_i|` = **0.0** over
+66 tensors); deliberately skipping the context init gives **2.44e-3** — so the instrument
+detects the exact silent failure, and that divergent run produced a perfectly ordinary loss
+curve. (2) `[1,4]` vs `[1,1]` val-loss at the same seed differs by at most **0.048** against the
+**0.194**-nat noise floor, tracking at every point.
+
+**Two traps worth not rediscovering:**
+- **A TT hang stalls at the first *blocking read after* the fault, not the fault.** Ops are
+  enqueued asynchronously, so `synchronize_gradients` returned fine and the host wedged one
+  phase and one step later in `loss.to_numpy()`. Instrument with an explicit
+  `ttnn.synchronize_device()` before believing any phase attribution.
+- **The mesh-width rule does not apply to DDP.** `ModelSize.servable_mesh_widths` mirrors
+  `tt_transformers`' *tensor-parallel serving* assertion; DDP replicates the model and shards
+  only the batch, so head counts are irrelevant. The only divisibility DDP needs is
+  `batch_size % N == 0`. `--size 384` is **not** excluded from 4-chip DDP.
+
+**The one thing that does not work: saving a checkpoint under DDP** — and the repo's own note
+saying it "appears already fixed" was refuted by hardware. The optimizer step re-marks each
+parameter's topology from `Replicate` to `Shard(0)` while the data stays genuinely replicated,
+so ttml's saver writes every replica concatenated on dim 0 (1,475,602,288 bytes vs 737,824,624;
+tensors `(4,1,out,in)` not `(1,1,out,in)`). `Sharding.gather` is *not* the bug — it faithfully
+honours wrong metadata. `train/checkpoint.py:assert_saveable_on_mesh` now refuses to write such a
+file; produce publishable weights from `--ddp 1`, which costs no fidelity. This also means the
+parity gate against a DDP checkpoint **remains outstanding** — there is no valid one to run.
+
+Two new entries in `docs/upstream-tt-metal-asks.md` (descriptor-shape mismatch hangs instead of
+failing — diagnosability only, nothing blocked; and the topology re-marking above — this one
+does block DDP checkpointing).
+
+Suite: **845 passed, 1 skipped** (831 baseline + 14 new). tt-metal left untouched at
+`620793d898`. Nothing deleted; all benchmark runs checkpointed to a scratch dir outside the repo.

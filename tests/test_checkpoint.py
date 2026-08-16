@@ -190,3 +190,72 @@ def test_latest_checkpoint_picks_the_higher_step_across_both_naming_schemes(tmp_
     new_low = checkpoint_path(tmp_path2, 100)
     new_low.touch()
     assert latest_checkpoint(tmp_path2) == old_high
+
+
+# ---------------------------------------------------------------------------
+# The DDP checkpoint guard
+# ---------------------------------------------------------------------------
+
+
+class _FakeSharding:
+    """Stands in for ttml.sharding.Sharding without a device."""
+
+    def __init__(self, replicated):
+        self._replicated = replicated
+
+    @property
+    def is_fully_replicated(self):
+        return self._replicated
+
+
+def _install_fake_sharding(monkeypatch, verdicts):
+    """Make train.checkpoint's ``from ttml.sharding import Sharding`` resolve to a fake whose
+    verdict per tensor comes from ``verdicts`` (keyed by the tensor object)."""
+    import sys
+    import types
+
+    module = types.ModuleType("ttml.sharding")
+    module.Sharding = type(
+        "Sharding", (), {"from_tensor": staticmethod(lambda t: _FakeSharding(verdicts[t]))}
+    )
+    ttml_pkg = sys.modules.get("ttml") or types.ModuleType("ttml")
+    monkeypatch.setitem(sys.modules, "ttml", ttml_pkg)
+    monkeypatch.setitem(sys.modules, "ttml.sharding", module)
+
+
+def test_saveable_on_mesh_accepts_fully_replicated_params(monkeypatch):
+    """The single-chip case and the correct DDP case: nothing is recorded as sharded, so the
+    saver may proceed."""
+    from train.checkpoint import assert_saveable_on_mesh
+
+    a, b = object(), object()
+    _install_fake_sharding(monkeypatch, {a: True, b: True})
+    assert_saveable_on_mesh({"w1": a, "w2": b})  # must not raise
+
+
+def test_saveable_on_mesh_refuses_sharded_params(monkeypatch):
+    """The measured DDP defect: after training steps the optimizer re-marks replicated
+    parameters as Shard(0), and ttml's saver would then write every replica concatenated on
+    dim 0 -- a checkpoint several times oversized whose tensors convert/ cannot read. It must
+    fail at write time, not silently."""
+    import pytest
+
+    from train.checkpoint import assert_saveable_on_mesh
+
+    a, b = object(), object()
+    _install_fake_sharding(monkeypatch, {a: True, b: False})
+    with pytest.raises(RuntimeError, match="recorded as SHARDED"):
+        assert_saveable_on_mesh({"ok": a, "llama/block0/q_linear/weight": b})
+
+
+def test_saveable_on_mesh_names_an_offender(monkeypatch):
+    """The message has to name a parameter, or an operator cannot tell this apart from a
+    generic mesh complaint."""
+    import pytest
+
+    from train.checkpoint import assert_saveable_on_mesh
+
+    bad = object()
+    _install_fake_sharding(monkeypatch, {bad: False})
+    with pytest.raises(RuntimeError, match="llama/block0/q_linear/weight"):
+        assert_saveable_on_mesh({"llama/block0/q_linear/weight": bad})

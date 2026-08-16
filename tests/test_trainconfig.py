@@ -232,3 +232,44 @@ def test_v2_config_file_is_loadable_via_apply_optimizer_override():
     cfg = _yaml()
     apply_optimizer_override(cfg, v2_path)
     assert cfg["training_config"]["optimizer"]["stochastic_rounding"] is True
+
+
+# ---------------------------------------------------------------------------
+# device_config / --ddp
+# ---------------------------------------------------------------------------
+
+
+def test_device_config_defaults_to_a_unit_mesh():
+    """The default must stay byte-identical to the pre-DDP block: every measurement in
+    docs/measurements/ was taken with exactly this device_config, and a changed default
+    would silently re-scope all of them."""
+    assert _yaml()["device_config"] == {
+        "mesh_shape": [1, 1],
+        "enable_ddp": False,
+        "enable_tp": False,
+    }
+
+
+def test_ddp_emits_a_line_mesh_and_enables_ddp():
+    """[1, N], never [N, 1] and never [2, 2]: ParallelismContext TT_FATALs on a 2-D mesh
+    unless two parallelisms are enabled, and DDP is the only one this project wants."""
+    assert _yaml(ddp=4)["device_config"] == {
+        "mesh_shape": [1, 4],
+        "enable_ddp": True,
+        "enable_tp": False,
+    }
+
+
+def test_ddp_never_enables_tensor_parallelism():
+    """TP shards the weights; convert/checkpoint_reader.py and convert/hf_mapping.py assume
+    whole tensors. No value of --ddp may turn it on."""
+    for n in (1, 2, 4):
+        assert _yaml(ddp=n)["device_config"]["enable_tp"] is False
+
+
+def test_ddp_does_not_touch_batch_size():
+    """batch_size is the TOTAL batch under ttml's DDP -- sharded on dim 0, with gradients
+    all-reduced and divided by the axis size. It must NOT be scaled by the device count
+    here; doing so would quadruple the effective batch and invalidate the step budget and
+    learning rate this project's runs are tuned at."""
+    assert _yaml(ddp=4, batch_size=64)["training_config"]["batch_size"] == 64

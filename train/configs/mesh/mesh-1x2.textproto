@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
+#
+# Mesh graph descriptor for a [1, 2] DDP run on a TT-QuietBox 2 (two dual-chip p300 cards,
+# four Blackhole chips wired as a 2x2 ring).
+#
+# WHY THIS FILE EXISTS rather than pointing at tt-metal's shipped descriptors:
+# `device_topology.dims` must MATCH THE LOGICAL MESH `train/run.py` opens, not merely
+# describe the same set of chips. tt-metal's `p300_mesh_graph_descriptor.textproto` happens
+# to declare [1, 2] and does work for the two-chip case -- but it is a *p300* (one card)
+# descriptor being used on a p300_x2 box, which is a coincidence rather than a contract, and
+# the four-chip case has no shipped descriptor that works at all. Keeping both shapes here,
+# under this repo's own control and next to the code that selects them, means the two cases
+# are configured the same way and neither depends on which upstream file happens to fit.
+# See `train/run.py`'s `_mesh_graph_descriptor_path` and `.superpowers/ddp-bringup.md`.
+#
+# Identical in content to tt-metal's p300_mesh_graph_descriptor.textproto.
+
+mesh_descriptors {
+  name: "M0"
+  arch: BLACKHOLE
+  device_topology { dims: [ 1, 2 ] }
+  host_topology   { dims: [ 1, 1 ] }
+  channels { count: 2 policy: RELAXED }
+}
+
+top_level_instance { mesh { mesh_descriptor: "M0" mesh_id: 0 } }

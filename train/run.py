@@ -86,7 +86,121 @@ def _prepare_env(tt_metal_home: str, arch: str) -> None:
     sys.path.append(f"{tt_metal_home}/tt-train/sources/ttml")
 
 
-def evaluate(model, val_ids: np.ndarray, cfg, batches: int = 10) -> float:
+#: Mesh graph descriptors this repo ships, keyed by the device count they describe. See
+#: :func:`_mesh_graph_descriptor_path` for why they are vendored rather than referenced.
+MESH_DESCRIPTORS = {2: "mesh-1x2.textproto", 4: "mesh-1x4.textproto"}
+
+
+def _mesh_graph_descriptor_path(devices: int) -> Optional[Path]:
+    """The mesh-graph descriptor a ``devices``-chip DDP run needs, or ``None`` if unneeded.
+
+    TWO SEPARATE THINGS GO WRONG WITHOUT THIS, and only the first was anticipated.
+
+    **1. There is no descriptor at all for 4 devices.**
+    ``ttml.core.distributed.enable_fabric`` ships defaults for **8 and 32 devices only**
+    (``ttnn_fixed/distributed/tt_metal.cpp:80-88``); any other count returns ``std::nullopt``
+    and falls back to a bare ``FABRIC_2D``. Measured on this box, that hangs before the mesh
+    even opens — killed at 600s with no output at all.
+
+    **2. The descriptor's declared shape must MATCH THE LOGICAL MESH, not the cabling.**
+    This is the part that cost the most to find, because it fails silently. tt-metal's
+    ``p300_x2_mesh_graph_descriptor.textproto`` declares ``device_topology { dims: [2, 2] }``,
+    which correctly describes a TT-QuietBox 2 (two dual-chip p300 cards, four Blackhole chips
+    in a 2x2 ring). Pointing at it makes the ``[1, 4]`` mesh **open successfully** and the
+    model train at full speed — and then the run stops dead the first time a gradient
+    all-reduce crosses the mesh axis. It is not an error, a warning, or a diagnosable
+    mismatch; it is a hang. Supplying a descriptor that declares ``[1, 4]`` instead — the
+    logical shape ``--ddp 4`` opens — makes the identical run work, with every replica's
+    parameters bit-identical afterwards.
+
+    So the descriptors are vendored under ``train/configs/mesh/`` rather than selected from
+    tt-metal's directory: the file this project needs is chosen by the mesh *it* opens, and
+    no shipped descriptor names that shape. See ``.superpowers/ddp-bringup.md`` for the full
+    experiment, including the no-sync control that proves the difference is real.
+
+    An operator who has already exported ``TT_MESH_GRAPH_DESC_PATH`` keeps their value: this
+    returns ``None`` in that case so the caller leaves the environment alone. ``devices <= 1``
+    also returns ``None`` — a single-chip run arms no fabric and needs no descriptor, which
+    is why every measurement recorded before 2026-08-16 never met this.
+
+    Raises:
+        ValueError: if ``devices`` has no vendored descriptor. Better than falling back to a
+            shape that hangs.
+    """
+    if devices <= 1 or os.environ.get("TT_MESH_GRAPH_DESC_PATH"):
+        return None
+    if devices not in MESH_DESCRIPTORS:
+        raise ValueError(
+            f"no mesh graph descriptor for {devices} devices; this repo ships "
+            f"{sorted(MESH_DESCRIPTORS)} (train/configs/mesh/). A descriptor whose declared "
+            f"dims do not match the [1, {devices}] mesh opened will HANG in the first "
+            f"gradient all-reduce rather than fail, so falling back to one is not safe."
+        )
+    return ROOT / "train" / "configs" / "mesh" / MESH_DESCRIPTORS[devices]
+
+
+def _init_parallelism_context(ddp: int, print_fn: Callable[..., None] = print) -> None:
+    """Initialise ttml's parallelism context for a ``[1, ddp]`` DDP mesh, and *prove* it took.
+
+    THIS FUNCTION IS THE CORRECTNESS GUARD, not a setup step. ttml's gradient
+    synchronization begins (``core/distributed/distributed.cpp:56-59``)::
+
+        void synchronize_gradients(const serialization::NamedParameters& parameters) {
+            if (!autograd::ctx().is_parallelism_context_initialized()) {
+                return;                                  // <-- silent early return
+
+    So a run that opens a ``[1, 4]`` mesh and passes ``use_ddp=True`` to ``train()`` — which
+    is otherwise a complete-looking DDP setup — but never reaches this function gets **four
+    replicas that diverge from step one**: each chip trains on its own quarter of the batch,
+    no gradient is ever reduced, nothing raises, the loss curve looks entirely plausible, and
+    the checkpoint keeps replica 0. It would also be roughly 4x faster, which is precisely
+    what makes it dangerous.
+
+    Nothing upstream will tell us if this goes wrong, so the post-conditions are checked here
+    and a mismatch is raised rather than logged. ``ParallelismContext``'s constructor assigns
+    the DDP axis by *inspecting the open mesh*
+    (``autograd/auto_context.cpp:157-218``) rather than taking it as an argument, so
+    ``get_ddp_size()`` is a genuine read-back of what the hardware mesh turned out to be, not
+    an echo of the ``ddp`` we passed in. Asserting it equals ``ddp`` therefore catches an
+    opened mesh that is not the mesh we asked for, as well as a context that failed to
+    register DDP at all.
+
+    Called only when ``ddp > 1``: on a unit mesh there is no axis to reduce over, and
+    ``ParallelismContext`` would reject the configuration anyway (a ``[1, 1]`` mesh is a line
+    topology whose only axis has size 1, so no parallelism could be assigned to it).
+    """
+    import ttml
+
+    ctx = ttml.autograd.AutoContext.get_instance()
+    ctx.initialize_parallelism_context(
+        ttml.autograd.DistributedConfig(enable_ddp=True, enable_tp=False)
+    )
+
+    if not ctx.is_parallelism_context_initialized():
+        raise RuntimeError(
+            "initialize_parallelism_context returned without initialising the context; "
+            "synchronize_gradients would silently early-return and the replicas would "
+            "diverge from step 1"
+        )
+    pctx = ctx.get_parallelism_context()
+    if not pctx.is_ddp_enabled():
+        raise RuntimeError(
+            "parallelism context is initialised but DDP is not enabled on it; gradients "
+            "would not be reduced"
+        )
+    if pctx.get_ddp_size() != ddp:
+        raise RuntimeError(
+            f"parallelism context reports a DDP axis of {pctx.get_ddp_size()} devices, but "
+            f"--ddp asked for {ddp}; the mesh that opened is not the mesh requested"
+        )
+    print_fn(
+        f"  parallelism context: DDP over {pctx.get_ddp_size()} devices on mesh axis "
+        f"{pctx.get_ddp_axis()} (gradients will be all-reduced and divided by "
+        f"{pctx.get_ddp_size()})"
+    )
+
+
+def evaluate(model, val_ids: np.ndarray, cfg, batches: int = 10, use_ddp: bool = False) -> float:
     """Real validation loss over ``batches`` sampled windows.
 
     ttml's train() does not compute this — it appends the last training loss and labels it
@@ -97,11 +211,34 @@ def evaluate(model, val_ids: np.ndarray, cfg, batches: int = 10) -> float:
     full autograd graph that gets thrown away, wasting memory and compute and OOMing first
     at larger ``validation_batch_size``. ``no_grad`` also lives in ``ttml.common.utils``,
     alongside ``build_causal_mask``, so one import covers both.
+
+    UNDER DDP (``use_ddp=True``) two things change, and both are required rather than
+    optional:
+
+    1. The validation batch is sharded across the mesh, exactly as the training batch is —
+       ``get_batch_ttml``'s own ``use_ddp`` argument (``ttml/common/trainer.py:30-38``)
+       selects ``shard_tensor_to_mesh_mapper(device, 0)``. Without it the host array is
+       *replicated*, so every chip evaluates the same ``validation_batch_size`` windows and
+       the "held-out sample" is a quarter the size it claims to be.
+    2. ``loss.to_numpy()`` needs a composer. The loss is one scalar **per device**, i.e. a
+       tensor distributed over the mesh, and reading it back without a composer raises
+       ``Can't get a single buffer from host storage distributed over mesh``. Composing on
+       dim 0 concatenates the four per-device scalars, and ``.mean()`` over them is the mean
+       over the whole (sharded) batch because every shard has the same number of rows.
+
+    Neither the mask nor the model needs mesh handling: DDP *replicates* weights, and a
+    ``from_numpy`` with no mapper on a mesh device replicates too — which is exactly what
+    ``ttml.common.trainer.train()`` relies on for its own causal mask.
     """
     import ttml
     import ttnn
     from ttml.common.trainer import get_batch_ttml
     from ttml.common.utils import build_causal_mask, no_grad
+
+    composer = None
+    if use_ddp:
+        device = ttml.autograd.AutoContext.get_instance().get_device()
+        composer = ttml.core.distributed.concat_mesh_to_tensor_composer(device, 0)
 
     mask = ttml.autograd.Tensor.from_numpy(
         build_causal_mask(cfg.seq_len), ttnn.Layout.TILE, ttnn.DataType.BFLOAT16
@@ -110,10 +247,10 @@ def evaluate(model, val_ids: np.ndarray, cfg, batches: int = 10) -> float:
     total = 0.0
     with no_grad():
         for _ in range(batches):
-            x, y = get_batch_ttml(val_ids, cfg.seq_len, cfg.validation_batch_size, False)
+            x, y = get_batch_ttml(val_ids, cfg.seq_len, cfg.validation_batch_size, use_ddp)
             logits = model(x, mask)
             loss = ttml.ops.loss.cross_entropy_loss(logits, y, ttml.ops.ReduceType.MEAN)
-            total += float(loss.to_numpy().mean())
+            total += float(loss.to_numpy(composer=composer).mean())
             ttml.autograd.AutoContext.get_instance().reset_graph()
     model.train()
     return total / batches
@@ -251,6 +388,7 @@ def run_training_loop(
     evaluate_fn: Callable[..., float],
     save_checkpoint_fn: Optional[Callable[[int], None]] = None,
     lr_fn: Optional[Callable[[float], float]] = None,
+    use_ddp: bool = False,
     print_fn: Callable[..., None] = print,
 ) -> Tuple[List[float], List[Dict[str, Any]]]:
     """Run ``cfg.steps`` steps in chunks, checkpointing and validating at independent
@@ -279,6 +417,15 @@ def run_training_loop(
     constant-returning function: every run recorded before schedules existed stays
     reproducible, and the optimizer is not touched by a feature that isn't in use.
 
+    ``use_ddp`` is forwarded verbatim to both ``train_fn`` and ``evaluate_fn``. It is a
+    single flag rather than two because they must never disagree: ``train_fn`` reads it to
+    decide whether to shard the batch **and whether to call ``synchronize_gradients``**
+    (``ttml/common/trainer.py``), and ``evaluate_fn`` reads it to decide whether to shard the
+    validation batch and compose the loss back. Passing it to one and not the other produces
+    either a crash (uncomposed loss on a mesh) or a quietly wrong number (a validation set a
+    quarter the intended size), depending on which way round the mistake goes. The caller in
+    ``main()`` derives it from a single ``--ddp`` value, so there is one source of truth.
+
     Returns ``(all_losses, val_records)``. ``val_records`` is also the list appended, one
     JSON object per line, to ``val_log_path`` (skipped if ``val_log_path`` is ``None``) —
     each record is ``{"step": absolute_step, "train_loss": ..., "val_loss": ...}``, where
@@ -300,7 +447,9 @@ def run_training_loop(
         if lr_fn is not None:
             current_lr = lr_fn(ran + cfg.steps / 2.0)
             optimizer.set_lr(current_lr)
-        losses, _ = train_fn(cfg, model, optimizer, train_ids, False, False)
+        # (cfg, model, optim, train_ids, use_ddp, use_tp). use_tp stays False: tensor
+        # parallelism shards the weights, which convert/ assumes are whole tensors.
+        losses, _ = train_fn(cfg, model, optimizer, train_ids, use_ddp, False)
         all_losses.extend(losses)
         remaining -= cfg.steps
         ran += cfg.steps
@@ -311,7 +460,7 @@ def run_training_loop(
 
         if _at_boundary(ran, remaining, val_every):
             train_loss = losses[-1] if losses else float("nan")
-            val_loss = evaluate_fn(model, val_ids, cfg)
+            val_loss = evaluate_fn(model, val_ids, cfg, use_ddp=use_ddp)
             lr_note = "" if current_lr is None else f" lr={current_lr:.3e}"
             print_fn(
                 f"  step={step:>7} train_loss={train_loss:.4f} "
@@ -442,6 +591,21 @@ def main() -> int:
                         "2026-08-16; its nanobind binding cannot accept a null mask, so it "
                         "always pays for the arbitrary-mask kernel. Kept as an A/B lever and "
                         "an escape hatch -- see train/model.py for the whole story.")
+    p.add_argument("--ddp", type=int, default=1,
+                   help="Number of chips to run data-parallel over, i.e. the width of the "
+                        "[1, N] mesh this run opens (default: 1, single chip -- byte for "
+                        "byte the behaviour of every run recorded before 2026-08-16). "
+                        "batch_size is the TOTAL batch and is sharded across the mesh on "
+                        "dim 0, and gradients are all-reduced AND divided by N, so --ddp 4 "
+                        "at an unchanged --batch-size trains exactly the same effective "
+                        "batch as --ddp 1 does: the step budget and the learning rate do "
+                        "NOT move, only wall-clock does. --batch-size must be divisible by "
+                        "N. The mesh is always [1, N] and never [2, 2] -- a 2-D mesh is a "
+                        "hard TT_FATAL unless two parallelisms are enabled "
+                        "(autograd/auto_context.cpp:198-204), and DDP is the only one this "
+                        "project wants. N > 1 also initialises ttml's parallelism context, "
+                        "without which gradient synchronization silently does nothing; see "
+                        "_init_parallelism_context.")
     p.add_argument("--dry-run", action="store_true",
                    help="Print the resolved config and exit without opening a device.")
     p.add_argument("--save-every", type=int, default=0,
@@ -569,11 +733,29 @@ def main() -> int:
             return 1
     print(f"  checkpoints: {args.checkpoint_dir}")
 
+    # --ddp validation, before anything expensive. The only constraint that is really about
+    # the *model* is batch divisibility: DDP replicates the weights and shards the batch, so
+    # unlike tensor-parallel serving it imposes nothing on num_heads or num_groups (see
+    # ModelSize.servable_mesh_widths, which is a TP/serving rule and does not apply here).
+    if args.ddp < 1:
+        print(f"ERROR: --ddp must be at least 1, got {args.ddp}", file=sys.stderr)
+        return 1
+    if args.batch_size % args.ddp:
+        print(f"ERROR: --batch-size {args.batch_size} is not divisible by --ddp "
+              f"{args.ddp}; batch_size is the TOTAL batch and is sharded across the mesh "
+              f"on dim 0, so it must split evenly", file=sys.stderr)
+        return 1
+    use_ddp = args.ddp > 1
+    if use_ddp:
+        print(f"  ddp: {args.ddp} chips, mesh [1, {args.ddp}], "
+              f"{args.batch_size // args.ddp} sequences/chip "
+              f"(effective batch stays {args.batch_size}; step budget and LR unchanged)")
+
     yaml_config = build_yaml_config(
         str(ROOT / "artifacts" / "tokenizer"), str(model_config),
         seq_len=args.seq_len, max_sequence_length=size.max_sequence_length,
         batch_size=args.batch_size, max_steps=args.steps, eval_every=args.eval_every,
-        seed=args.seed,
+        seed=args.seed, ddp=args.ddp,
     )
     if args.config:
         apply_optimizer_override(yaml_config, args.config)
@@ -618,6 +800,23 @@ def main() -> int:
         return 0
 
     _prepare_env(args.tt_metal_home, args.arch)
+
+    # Must be set before ttml is imported and the fabric is armed -- enable_fabric() reads
+    # TT_MESH_GRAPH_DESC_PATH at the moment it is called. See _mesh_graph_descriptor_path
+    # for why a 4-chip run needs this named explicitly and an 8- or 32-chip one does not.
+    try:
+        mgd = _mesh_graph_descriptor_path(args.ddp)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    if mgd is not None:
+        if not mgd.is_file():
+            print(f"ERROR: mesh graph descriptor not found at {mgd}; a --ddp {args.ddp} run "
+                  f"needs one (enable_fabric ships defaults for 8 and 32 devices only) and "
+                  f"hangs in fabric router sync without it", file=sys.stderr)
+            return 1
+        os.environ["TT_MESH_GRAPH_DESC_PATH"] = str(mgd)
+        print(f"  mesh graph descriptor: {mgd}")
 
     import ttml  # noqa: E402
     from ttml.common.model_factory import TransformerModelFactory  # noqa: E402
@@ -667,6 +866,14 @@ def main() -> int:
     # must still be closed in the finally below, or teardown aborts in
     # MetalContext::destroy_all_instances.
     try:
+        # Immediately after the mesh opens and BEFORE the model is built. The context is
+        # what makes synchronize_gradients do anything at all (see the function's docstring
+        # for the silent early return it exists to prevent), and it reads the live mesh, so
+        # it cannot be initialised before open_device. It raises if the mesh that opened is
+        # not the [1, --ddp] one asked for, which is why nothing downstream re-checks.
+        if use_ddp:
+            _init_parallelism_context(args.ddp)
+
         # Two implementations of the same architecture; see --model-impl's help and the
         # module docstring of train/model.py. They produce the same parameter names, the
         # same parameter count, and interchangeable checkpoints -- the Python one is
@@ -749,13 +956,13 @@ def main() -> int:
             val_log_path=Path(args.checkpoint_dir) / "val_losses.jsonl",
             train_fn=train, evaluate_fn=evaluate,
             save_checkpoint_fn=_save_checkpoint if args.save_every > 0 else None,
-            lr_fn=lr_fn,
+            lr_fn=lr_fn, use_ddp=use_ddp,
         )
         if val_records:
             print(f"  periodic validation curve ({len(val_records)} entries) written to "
                   f"{Path(args.checkpoint_dir) / 'val_losses.jsonl'}")
         train_losses = all_losses
-        val_loss = evaluate(model, val_ids, cfg)
+        val_loss = evaluate(model, val_ids, cfg, use_ddp=use_ddp)
         if train_losses:
             print(f"\nfirst train loss : {train_losses[0]:.4f}")
             print(f"last  train loss : {train_losses[-1]:.4f}")

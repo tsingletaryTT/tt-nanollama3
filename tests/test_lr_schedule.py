@@ -56,7 +56,9 @@ def _fake_train_fn(chunks):
     return train_fn
 
 
-def _fake_evaluate_fn(model, val_ids, cfg, batches=10):
+def _fake_evaluate_fn(model, val_ids, cfg, batches=10, use_ddp=False):
+    """``use_ddp`` is accepted but ignored: these tests are about the LR schedule, and the
+    real ``evaluate()`` takes it to shard its batch and compose the loss off the mesh."""
     return 0.5
 
 

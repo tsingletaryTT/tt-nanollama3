@@ -93,6 +93,7 @@ def build_yaml_config(
     checkpoint_dir: str = "artifacts/checkpoints",
     stochastic_rounding: bool = False,
     seed: int = DEFAULT_SEED,
+    ddp: int = 1,
 ) -> Dict[str, Any]:
     """Build the config dict ``TransformerModelFactory`` and ``RunConfig`` consume.
 
@@ -150,6 +151,25 @@ def build_yaml_config(
     and ``convert/to_hf.py`` derives ``max_position_embeddings`` from that header field
     rather than from the size's declared context -- so a short-window run converts to an
     HF model that honestly declares the context it was trained at.
+
+    ``ddp`` is the number of data-parallel replicas, i.e. the width of the ``[1, ddp]`` mesh
+    the run opens. ``1`` (the default) reproduces the single-chip ``device_config`` every run
+    before 2026-08-16 used, byte for byte. Greater than 1 emits ``mesh_shape: [1, ddp]`` and
+    ``enable_ddp: True``.
+
+    **The mesh must be a line, and this is not a style choice.** ``ParallelismContext``'s
+    constructor (``autograd/auto_context.cpp:157-218``) branches on
+    ``MeshShape::is_line_topology()``: a line mesh requires *exactly one* enabled parallelism,
+    while a 2-D mesh requires the number of enabled parallelisms to *equal* the number of mesh
+    dimensions. So ``[2, 2]`` with DDP alone is a hard ``TT_FATAL`` -- it would demand two of
+    {ddp, cp, tp}, and this project has no use for tensor or context parallelism (TP would
+    also shard the weights, which ``convert/checkpoint_reader.py`` and ``convert/hf_mapping.py``
+    assume are whole). ``[1, 4]`` is therefore the only shape that runs four chips here, even
+    though the hardware is physically a 2x2 ring.
+
+    ``batch_size`` must be divisible by ``ddp``: it is the **total** batch, sharded across the
+    mesh on dim 0 by ``ttml/common/trainer.py:30-38``. That is checked in ``train/run.py``
+    rather than here, alongside the rest of the CLI validation.
     """
     if seq_len % 32 != 0:
         raise ValueError(
@@ -206,7 +226,18 @@ def build_yaml_config(
                 "stochastic_rounding": stochastic_rounding,
             },
         },
-        "device_config": {"mesh_shape": [1, 1], "enable_ddp": False, "enable_tp": False},
+        # mesh_shape is the ONLY key ttml.common.utils.initialize_device reads
+        # (ttml/common/utils.py:108-119) -- enable_ddp/enable_tp here are read by
+        # ttml.common.model_factory for vocab padding and by train.model.create_model as a
+        # TP guard, but they do NOT initialise the parallelism context. That is a separate,
+        # explicit call which train/run.py makes; see its _init_parallelism_context and the
+        # silent-early-return in core/distributed/distributed.cpp:56-59 that makes skipping
+        # it a correctness bug rather than a no-op.
+        "device_config": {
+            "mesh_shape": [1, int(ddp)],
+            "enable_ddp": int(ddp) > 1,
+            "enable_tp": False,
+        },
     }
 
 

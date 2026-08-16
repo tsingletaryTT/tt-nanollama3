@@ -133,3 +133,164 @@ parameters to the C++ scheme so checkpoints, HF conversion and `--resume` are un
 
 **Once the binding is fixed upstream, `train/model.py`'s renaming layer can go away and
 `--model-impl cpp` becomes as fast as `python`.**
+
+---
+
+## 2. A mesh graph descriptor whose declared dims disagree with the opened `MeshShape` hangs instead of failing
+
+**Status:** open. Worked around in this repo by shipping matching descriptors
+(`train/configs/mesh/mesh-1x2.textproto`, `mesh-1x4.textproto`); see
+`.superpowers/ddp-bringup.md` for the full experiment and every measurement.
+
+**Nothing we need is blocked on this** — the workaround is complete and costs nothing at
+runtime. This is a diagnosability ask, filed because the failure mode is expensive to debug and
+will be hit again by anyone bringing up multi-chip training on a box whose physical topology is
+not a line.
+
+### The defect
+
+`tt::tt_fabric` accepts a mesh graph descriptor whose `device_topology.dims` differ from the
+`MeshShape` the process actually opens, and gives no indication that anything is wrong. Device
+open succeeds, the parallelism context initialises and self-reports correctly, the model builds,
+the batch shards, and forward/backward/optimizer all run at full speed. The run then **hangs
+forever** the first time a CCL collective traverses the mesh axis.
+
+Concretely, on a TT-QuietBox 2 (four Blackhole p300c, physically a 2x2 ring), with tt-metal's
+own `tt_metal/fabric/mesh_graph_descriptors/p300_x2_mesh_graph_descriptor.textproto` — which
+declares `device_topology { dims: [ 2, 2 ] }` and is the correct descriptor for the hardware —
+and a process opening `MeshShape([1, 4])`:
+
+```
+step 1: batch / forward / backward / loss=10.60938 / SYNC OK / optim.step  (0.3s)
+step 2: batch / forward / backward
+                                     <- never returns
+```
+
+`[1, 4]` is not an exotic request here: `ttml::autograd::ParallelismContext`'s constructor
+*requires* a line topology for a DDP-only run — a 2-D mesh `TT_FATAL`s unless the number of
+enabled parallelisms equals the number of mesh dimensions
+(`tt-train/sources/ttml/autograd/auto_context.cpp:198-204`) — so any DDP-only training job on
+this class of hardware must open `[1, N]` while the shipped descriptor declares `[2, 2]`.
+
+Two things make this particularly costly to diagnose:
+
+1. **The host does not block in the collective.** tt-metal enqueues asynchronously, so
+   `synchronize_gradients` returns having only queued work and the host stalls at its next
+   blocking read — `loss.to_numpy()` in the *following* step. The stack points at the loss read,
+   one phase and one iteration away from the actual fault.
+2. **Everything that could have reported the mismatch reports success.** `open_device` returns a
+   `MeshDevice` of shape `[1, 4]`; `ParallelismContext` inspects that mesh and correctly reports
+   a DDP axis of 4 devices. There is no point at which the two shapes are compared.
+
+### The measurement
+
+Four Blackhole p300c, `--size 1024` (123M params), batch 64, seq 512, four training steps,
+identical in every respect except the descriptor's declared dims:
+
+| descriptor `device_topology.dims` | opened `MeshShape` | result |
+|---|---|---|
+| *(none — `enable_fabric` has no default for 4 devices)* | `[1, 4]` | hang before device open; killed at 600 s, no output |
+| `[ 2, 2 ]` (tt-metal's `p300_x2`) | `[1, 4]` | opens, trains step 1, **hangs in step 2 forever** |
+| `[ 1, 4 ]` (ours) | `[1, 4]` | **works**; 300 steps at 193.4 s/1000, all four replicas bit-identical |
+| `[ 1, 2 ]` (tt-metal's `p300`) | `[1, 2]` | works; replicas bit-identical |
+| `[ 2, 2 ]` (tt-metal's `p300_x2`) | `[1, 2]` | fails **cleanly** in 10 s: `Fabric Router Sync: Timeout ... on Device 2` |
+
+The last row is the useful contrast: when the descriptor declares *more devices* than are
+opened, the failure is caught and the message is accurate. It is only the *shape* disagreement,
+at equal device count, that goes undetected.
+
+### The fix
+
+A single equality check where the mesh device is created against the fabric's active mesh
+descriptor: if the descriptor's `device_topology.dims` do not match the requested `MeshShape`,
+`TT_FATAL` with both shapes named. The error text should say which file is in force (the
+descriptor path is already known — `get_mgd_path` sets `TT_MESH_GRAPH_DESC_PATH` when it picks a
+default) and that the descriptor must declare the logical mesh being opened, not the physical
+cabling.
+
+A second, smaller ask in the same area: `ttml::ttnn_fixed::distributed::enable_fabric` has no
+default descriptor for 4 devices (`tt-train/sources/ttml/ttnn_fixed/distributed/tt_metal.cpp:80-88`
+handles 8 and 32 only) and silently falls back to a bare `FABRIC_2D` that hangs. Either ship a
+4-device default or make the `std::nullopt` path refuse rather than proceed — a fallback that
+reliably hangs is worse than an error.
+
+### What we did instead
+
+`train/configs/mesh/mesh-1x2.textproto` and `mesh-1x4.textproto` are vendored in this repo and
+selected by device count in `train/run.py`'s `_mesh_graph_descriptor_path`, which exports
+`TT_MESH_GRAPH_DESC_PATH` before ttml is imported. `tests/test_run_validation.py` asserts each
+file declares the `[1, N]` shape its device count opens, and that an unsupported device count
+raises rather than falling back to a mismatched descriptor — because a wrong descriptor hangs
+rather than failing, a fallback would be the worst possible default.
+
+---
+
+## 3. A DDP training step re-marks replicated parameters as `Shard(0)`, so checkpoints save every replica
+
+**Status:** open, and this one **does** block something: checkpointing a `--ddp N` run.
+Guarded in `train/checkpoint.py:assert_saveable_on_mesh` (refuses to write rather than write
+wrongly); the workaround is to produce publishable weights from a `--ddp 1` run.
+
+### The defect
+
+Under DDP the weights are replicated and **stay** replicated — verified directly, not assumed:
+after training steps on a `[1, 4]` mesh, every chip's copy of every one of the 66 parameter
+tensors is bit-identical (`max |replica0 - replica_i| = 0.000000e+00`). The *data* is correct.
+
+The tensor's **topology metadata** is not. Probed on the same parameter
+(`llama/llama_block_0/attention/q_linear/weight`, logical shape `[1, 1, 1024, 1024]`) before
+and after two DDP training steps:
+
+| when | `Sharding.placements` | `dist_shape` | `is_fully_replicated` | `gather()` returns |
+|---|---|---|---|---|
+| freshly built model | `[PlacementReplicate()]` | `[4]` | `True` | `(1, 1, 1024, 1024)` |
+| after 2 DDP steps | `[PlacementShard(0)]` | `[4]` | `False` | `(4, 1, 1024, 1024)` |
+
+Something in the step — the gradient all-reduce in
+`core/distributed/distributed.cpp`, or the output tensor of the fused AdamW kernel — writes back
+a parameter whose recorded placement is `Shard(0)` on the DDP axis, even though the value it
+wrote is identical on every device.
+
+`ttml.checkpointing.save_checkpoint` then does exactly what the metadata says
+(`ttml/checkpointing.py:169`, `Sharding.from_tensor(tensor).gather(tensor)`): a `Shard` axis is
+concatenated along its sharded dim. Every saved tensor gains a leading dimension of 4 holding
+four identical copies. Measured on this project's 1024 size (123M params), same run, same step
+count, differing only in `--ddp`:
+
+| run | checkpoint size |
+|---|---|
+| `--ddp 1` | 737,824,624 bytes |
+| `--ddp 4` | 1,475,602,288 bytes |
+
+`Sharding.gather` is **not** the bug — given `Replicate` it correctly takes a single copy, which
+is what the "freshly built model" row shows. It is faithfully honouring wrong metadata.
+
+### Why this matters beyond file size
+
+The resulting checkpoint is wrong in a way that reads as plausible. Every parameter name is
+correct and every value is correct; only the shape has an extra leading axis. This project's
+`convert/checkpoint_reader.py`, `convert/hf_mapping.py` and `convert/ttml_forward.py` all match
+on literal parameter names and assume whole `[1, 1, out, in]` tensors, so the error surfaces (if
+at all) far from its cause, during HF conversion or parity checking.
+
+### The fix
+
+Preserve the placement when writing an updated parameter value back. A parameter that was
+`Replicate` on a mesh axis before the optimizer step is still `Replicate` after it — the
+all-reduce exists precisely to guarantee that. Wherever the post-step tensor is constructed, it
+should inherit the parameter's existing `tensor_topology()` rather than defaulting to a sharded
+placement.
+
+Failing that, `synchronize_gradients` (which already knows each parameter's placement — it calls
+`is_sharded_on_axis` to decide which axes to reduce over,
+`core/distributed/distributed.cpp:43-52`) is a natural place to restore it.
+
+### What we did instead
+
+`train/checkpoint.py:assert_saveable_on_mesh` runs before every save and raises a
+`RuntimeError` naming the offending parameters if any is recorded as sharded, so a silently
+oversized-and-unreadable checkpoint cannot be written. Since DDP is a wall-clock optimisation
+that produces the same trajectory as a single-chip run at the same seed (measured: val-loss
+curves agreeing to within a quarter of this project's seed-noise floor), publishable weights can
+be produced from a `--ddp 1` run without loss of fidelity — DDP is still fully usable for the
+experiment sweeps it was brought up for, which is where the 3.98x actually pays.

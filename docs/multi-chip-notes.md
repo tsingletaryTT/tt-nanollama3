@@ -3,13 +3,30 @@
 
 # Multi-chip training notes
 
-**Status: not done here.** Every run in this repo is single-chip. This file records what a
-multi-chip run would require, so that work starts from known ground instead of rediscovering
-it. Nothing below has been measured *by this repo* — the measurements cited are from the
-`ct5`/`ct8` lessons in
+> **STATUS CHANGED 2026-08-16: four-chip DDP works and is measured.** `train/run.py --ddp 4`
+> runs the 1024 size on all four chips at **193.4 s/1000 steps against 770.2 single-chip — a
+> 3.98x wall-clock win** — with gradients verifiably synchronised (all four replicas
+> bit-identical, plus a loss trajectory matching the single-chip run to within a quarter of
+> the seed-noise floor). **The measured results and the whole bring-up live in
+> [`.superpowers/ddp-bringup.md`](../.superpowers/ddp-bringup.md); read that first.**
+>
+> This file is kept because its *analysis* is still the best statement of why DDP is the
+> right parallelism here and what the arithmetic is. Two things in it are now known to be
+> wrong, and are corrected inline below: **catch #1** (setting `TT_MESH_GRAPH_DESC_PATH` is
+> necessary but not sufficient — the descriptor's declared *shape* is the load-bearing part,
+> and a shape mismatch hangs rather than fails) and the closing section's claim that this
+> "should be its own plan" (it was; this is it).
+
+**Original status, retained for context: not done here.** Every run in this repo is
+single-chip. This file records what a multi-chip run would require, so that work starts from
+known ground instead of rediscovering it. Nothing below has been measured *by this repo* — the
+measurements cited are from the `ct5`/`ct8` lessons in
 [tt-vscode-toolkit](https://github.com/tenstorrent/tt-vscode-toolkit), which verified
 four-chip DDP on the same class of hardware. Treat them as well-sourced expectations, not as
 our results.
+
+(The `ct5` expectation of "~3.98x on 4 chips" turned out to be almost exactly right: we
+measured **3.98x**.)
 
 ## The hardware, stated correctly
 
@@ -72,6 +89,18 @@ All three come from `ct8`'s troubleshooting section, recorded there from real fo
 `Fabric Router Sync: Timeout` unless `TT_MESH_GRAPH_DESC_PATH` is set. This is the
 single most likely first failure.
 
+> **CORRECTED 2026-08-16 — right that the variable must be set, wrong about what to set it
+> to, and the failure is worse than a timeout.** Setting it to *this box's own* descriptor
+> (`p300_x2_mesh_graph_descriptor.textproto`) is **not** sufficient: that file declares
+> `device_topology { dims: [2, 2] }`, and a DDP-only run must open `[1, 4]` (a 2-D mesh is a
+> hard `TT_FATAL` unless two parallelisms are enabled). With that mismatch the mesh **opens
+> successfully**, step 1 trains, and step 2 hangs forever in the first gradient all-reduce —
+> no timeout, no error. `device_topology.dims` must equal the `MeshShape` opened. This repo
+> now ships matching descriptors under `train/configs/mesh/`, selected automatically by
+> `--ddp`. A genuine `Fabric Router Sync: Timeout` does occur, but for the *other* case —
+> a descriptor declaring more devices than you open (e.g. `--ddp 2` against the 4-device
+> `p300_x2`), which fails cleanly in 10 s. Full evidence in `.superpowers/ddp-bringup.md`.
+
 **2. Checkpoint saving throws under DDP.** The stock saver fails with
 `Can't get a single buffer from host storage distributed over mesh`. Weights are *replicated*
 across chips, so the fix is to pull them through
@@ -82,6 +111,21 @@ than shards, so once the first replica is extracted the checkpoint contains the 
 tensors it does today. That is a strong expectation, **not a verified fact** — the parity gate
 (`tests/test_numpy_parity.py`) should be run against a DDP checkpoint before any claim is
 made, since it is exactly the instrument that would catch a layout change.
+
+> **CORRECTED 2026-08-16 — the caution above was right, and the expectation was wrong.** This
+> is the one part of DDP that does **not** work. The replicas really are bit-identical (max
+> `|replica0 - replica_i| = 0.0`), so the *data* is exactly as this section predicts — but the
+> optimizer step re-marks each parameter's topology from `Replicate` to `Shard(0)`, and ttml's
+> saver faithfully honours that metadata and writes every replica concatenated on dim 0. A
+> `--ddp 4` checkpoint is 1,475,602,288 bytes against 737,824,624 for the same `--ddp 1` run,
+> with every tensor `(4, 1, out, in)` instead of `(1, 1, out, in)`.
+>
+> `train/checkpoint.py:assert_saveable_on_mesh` now **refuses to write** such a checkpoint
+> rather than let a plausible-looking but unreadable file reach `convert/`. Filed as
+> `docs/upstream-tt-metal-asks.md` entry 3. Produce publishable weights from a `--ddp 1` run;
+> that costs no fidelity, because DDP is a wall-clock optimisation over the same trajectory.
+> The parity-gate-against-a-DDP-checkpoint check this paragraph asks for therefore remains
+> **outstanding** — there is currently no valid DDP checkpoint to run it against.
 
 **3. Auto-resume is broken.** Any run without `--fresh` triggers auto-resume, which injects an
 empty `--resume` and dies in argparse. Use `--fresh` and checkpoint frequently.
@@ -121,6 +165,16 @@ Whether that holds for a model this small is untested; at 0.134 s/step the per-s
 gradient-synchronization overhead may claim a meaningful share.
 
 ## Why DDP is not enabled on this run — a silent-failure trap, not an oversight
+
+> **RESOLVED 2026-08-16.** This section's analysis was correct in every particular, and the
+> three coordinated changes it names are exactly the three that were made: `use_ddp` is now
+> passed to both `train()` and `evaluate()` from a single `--ddp`-derived value,
+> `_init_parallelism_context` initialises the parallelism context after `initialize_device`
+> **and verifies it took**, and `evaluate()` shards its batch and composes its loss. The trap
+> it warns about was also reproduced deliberately as a negative control: with the context left
+> uninitialised, four chips train happily at full speed over a perfectly ordinary descending
+> loss curve while the replicas' weights drift apart (max 2.44e-3 after four steps). It is
+> exactly as invisible as this section says. See `.superpowers/ddp-bringup.md`.
 
 Turning on `enable_ddp: True` in `train/config.py`'s `device_config` today would change
 **nothing** — `ttml.common.utils.initialize_device` only ever reads `mesh_shape`

@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
+#
+# Mesh graph descriptor for a [1, 4] DDP run on a TT-QuietBox 2 (two dual-chip p300 cards,
+# four Blackhole chips wired as a 2x2 ring).
+#
+# THIS FILE IS THE FOUR-CHIP FIX, and it is worth stating exactly what it fixes.
+#
+# tt-metal ships `p300_x2_mesh_graph_descriptor.textproto` for this box, declaring
+# `device_topology { dims: [2, 2] }` -- which correctly describes the physical wiring. But
+# `ParallelismContext` requires a LINE mesh for a DDP-only run (a 2-D mesh demands two enabled
+# parallelisms, `autograd/auto_context.cpp:198-204`), so `train/run.py` opens `[1, 4]`. With
+# the [2,2] descriptor in force that combination is **a silent hang, not an error**: the mesh
+# opens, the model builds, forward/backward/optimizer all run at full speed, and the run stops
+# dead the first time a gradient all-reduce has to cross the mesh axis. Measured: step 1
+# completes, step 2 never returns, and because tt-metal enqueues asynchronously the host does
+# not block inside `synchronize_gradients` at all -- it blocks at the next `to_numpy`, one
+# phase later, which is why the hang looks like it is in the loss read.
+#
+# Declaring the descriptor as [1, 4] -- matching the logical mesh rather than the physical
+# wiring -- makes the same run work: four chips, gradients all-reduced, and every replica's
+# parameters bit-identical (max |replica0 - replica_i| = 0.0 across all 66 tensors).
+#
+# The rule, stated generally: `device_topology.dims` must match the MeshShape the process
+# opens. It is not a description of the cabling that tt-metal reconciles against a differently
+# shaped request; a mismatch is not diagnosed. Full evidence in `.superpowers/ddp-bringup.md`.
+
+mesh_descriptors {
+  name: "M0"
+  arch: BLACKHOLE
+  device_topology { dims: [ 1, 4 ] }
+  host_topology   { dims: [ 1, 1 ] }
+  channels { count: 2 policy: RELAXED }
+}
+
+top_level_instance { mesh { mesh_descriptor: "M0" mesh_id: 0 } }

@@ -161,11 +161,78 @@ def latest_checkpoint(checkpoint_dir: Path) -> Optional[Path]:
     return max(paths, key=lambda p: int(p.stem.rsplit("step", 1)[-1]))
 
 
+def assert_saveable_on_mesh(model_params) -> None:
+    """Refuse to write a checkpoint whose parameters are *recorded* as sharded on a mesh.
+
+    THE DEFECT THIS CATCHES (measured 2026-08-16, see ``.superpowers/ddp-bringup.md``). Under
+    ``--ddp N`` the weights are replicated, and they genuinely stay replicated: after training
+    steps, every chip's copy of every parameter is **bit-identical** (max
+    ``|replica0 - replica_i| = 0.0`` over all 66 tensors — that is the same measurement that
+    proves gradient synchronization works). But the tensor's *topology metadata* does not stay
+    replicated. Probed directly on a ``[1, 4]`` mesh:
+
+    ===========================  ==========================  ====================
+    when                         ``Sharding.placements``     ``gather()`` returns
+    ===========================  ==========================  ====================
+    freshly built model          ``[PlacementReplicate()]``  ``(1, 1, 1024, 1024)``
+    after two DDP training steps ``[PlacementShard(0)]``     ``(4, 1, 1024, 1024)``
+    ===========================  ==========================  ====================
+
+    Something in the step (the all-reduce, or AdamW's output tensor) re-marks the parameter as
+    **Shard(0)** while leaving the data replicated. ``ttml.checkpointing.save_checkpoint``
+    then does exactly what that metadata tells it to — ``Sharding.from_tensor(t).gather(t)``
+    concatenates the four "shards" — and writes a checkpoint in which every tensor carries four
+    identical copies stacked on dim 0. Measured: a ``--ddp 4`` checkpoint is 1,475,602,288
+    bytes against 737,824,624 for the identical ``--ddp 1`` run.
+
+    That file is not merely large, it is **wrong in a way that reads as plausible**:
+    ``convert/checkpoint_reader.py``, ``convert/hf_mapping.py`` and ``convert/ttml_forward.py``
+    all match on literal parameter names and assume whole ``[1, 1, out, in]`` tensors. So the
+    failure is refused here, at the moment of writing, rather than left to surface as a shape
+    error during conversion — or worse, not at all.
+
+    This corrects ``docs/multi-chip-notes.md`` catch #2 and item 7 of the DDP task brief, both
+    of which recorded checkpoint saving under DDP as "appears already fixed, source-verified,
+    hardware-unverified". The source reading was right about ``Sharding.gather``'s intent and
+    wrong about the metadata it would be given; hardware settled it.
+
+    Single-chip runs never reach the raising branch: with no mesh, ``Sharding.from_tensor``
+    reports no topology at all and ``is_fully_replicated`` is ``True`` by definition.
+
+    Raises:
+        RuntimeError: if any parameter is recorded as sharded.
+    """
+    from ttml.sharding import Sharding
+
+    offenders = [name for name, tensor in model_params.items()
+                 if not Sharding.from_tensor(tensor).is_fully_replicated]
+    if not offenders:
+        return
+    raise RuntimeError(
+        f"refusing to write a checkpoint: {len(offenders)} of {len(model_params)} parameters "
+        f"are recorded as SHARDED on the mesh (e.g. {offenders[0]}), so ttml's saver would "
+        f"gather each one as a concatenation of every replica rather than a single copy — "
+        f"producing an oversized checkpoint whose tensors carry an extra leading dimension "
+        f"(one entry per replica) that convert/ cannot read. The data itself is fine (the "
+        f"replicas are bit-identical); it is the topology metadata that the optimizer step "
+        f"re-marks from Replicate to Shard(0). Until that is fixed upstream (see "
+        f"docs/upstream-tt-metal-asks.md entry 3), checkpoint from a --ddp 1 run: DDP is a "
+        f"wall-clock optimisation and produces the same trajectory, so a --ddp 1 run at the "
+        f"same seed is a faithful substitute for producing publishable weights."
+    )
+
+
 def save(path: Path, *, header: Dict[str, Any], model_params, optimizer,
          display_progress: bool = False) -> None:
-    """Write a checkpoint. Pass-through to ttml, which handles atomicity and streaming."""
+    """Write a checkpoint. Pass-through to ttml, which handles atomicity and streaming.
+
+    The one thing this does not simply pass through is the mesh check — see
+    :func:`assert_saveable_on_mesh` for the DDP defect it refuses to write past. It runs
+    before ``validate_header`` so the cheaper, more specific failure comes first.
+    """
     from ttml.checkpointing import save_checkpoint
 
+    assert_saveable_on_mesh(model_params)
     validate_header(header)
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     save_checkpoint(str(path), header=header, model_params=model_params,

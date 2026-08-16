@@ -235,13 +235,47 @@ def _is_plain_causal(mask) -> bool:
 
     The tensor is pulled to host to compare, which is why :class:`TtTntLlama` caches the verdict
     by object identity and does this once per distinct mask rather than once per step.
+
+    ON A MESH (``--ddp N``) that host read needs a composer, and this is what made the Python
+    model's 1.41x mask win and 4-chip DDP fail to compose on first attempt. ``mask.to_numpy()``
+    with no composer raises ``TT_FATAL ... Can't get a single buffer from host storage
+    distributed over mesh shape MeshShape([1, 4])``: ``ttml.common.trainer.train()`` builds the
+    causal mask with a plain ``from_numpy`` and no mapper, which on a mesh device **replicates**
+    it, so the tensor genuinely lives on four chips and there is no single buffer to hand back.
+    The composer concatenates the replicas along dim 0 and we compare replica 0 — every replica
+    is the same array by construction, and taking one copy is the same thing
+    ``ttml.checkpointing``'s ``Sharding.gather`` does for replicated parameters.
+
+    How many replicas there are is read off the tensor's own live topology via ttml's
+    ``Sharding`` (``ttml/sharding.py``) rather than from the mesh device or a ``--ddp`` value
+    threaded down here: ``Sharding.from_tensor`` already handles the unit-mesh and
+    no-topology cases by returning ``dist_shape is None``, so the single-chip path stays
+    exactly what it was — ``to_numpy()`` with no composer — and this function needs no
+    argument it did not need before.
+
+    Note the shape check runs first and on ``mask.shape()``, which is the **logical** (per-device)
+    shape, not the composed one — so the ``[1, 1, T, T]`` test means the same thing on one chip
+    and on four.
     """
     import numpy as np
+    import ttml
+    from ttml.sharding import Sharding
 
     shape = tuple(mask.shape())
     if len(shape) != 4 or shape[0] != 1 or shape[1] != 1 or shape[2] != shape[3]:
         return False
-    values = np.asarray(mask.to_numpy(), dtype=np.float32)
+
+    dist_shape = Sharding.from_tensor(mask).dist_shape
+    replicas = 1 if dist_shape is None else int(np.prod(dist_shape))
+    composer = None
+    if replicas > 1:
+        device = ttml.autograd.AutoContext.get_instance().get_device()
+        composer = ttml.core.distributed.concat_mesh_to_tensor_composer(device, 0)
+
+    values = np.asarray(mask.to_numpy(composer=composer), dtype=np.float32)
+    if composer is not None:
+        # [replicas, 1, T, T] -> replica 0. shape[0] is 1 for every mask this can accept.
+        values = values[: shape[0]]
     return bool(np.array_equal(values, np.tril(np.ones(shape, dtype=np.float32))))
 
 

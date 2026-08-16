@@ -27,6 +27,7 @@ import pytest
 
 from train.checkpoint import build_header, validate_header
 from train.run import (
+    _mesh_graph_descriptor_path,
     _warn_if_stochastic_rounding_disabled,
     run_training_loop,
     ttml_cxx_header_fields,
@@ -42,13 +43,18 @@ class _FakeCfg:
         self.seq_len = 8  # unused by the fakes below, but present like the real RunConfig
 
 
-def _fake_train_fn(losses_log):
+def _fake_train_fn(losses_log, ddp_log=None):
     """Returns a train_fn that hands back one descending "loss" per requested step and
-    records how many steps it was asked to run, so tests can check chunk sizing."""
+    records how many steps it was asked to run, so tests can check chunk sizing.
+
+    ``ddp_log``, when given, records the ``use_ddp`` argument of every call — the flag that
+    decides whether ttml's real ``train()`` shards the batch and reduces the gradients."""
 
     def train_fn(cfg, model, optimizer, train_ids, use_ddp, use_tp):
         n = cfg.steps
         losses_log.append(n)
+        if ddp_log is not None:
+            ddp_log.append((use_ddp, use_tp))
         # Values deliberately land far below the fake evaluate_fn's range (900s) so an
         # accidental "val_loss = train_loss" bug is unmistakable in any assertion below.
         return [10.0 - 0.001 * i for i in range(n)], None
@@ -56,12 +62,18 @@ def _fake_train_fn(losses_log):
     return train_fn
 
 
-def _fake_evaluate_fn(eval_calls):
+def _fake_evaluate_fn(eval_calls, ddp_log=None):
     """Returns an evaluate_fn that records how many times it fired and returns a value
-    from a numeric range disjoint from the fake train losses above."""
+    from a numeric range disjoint from the fake train losses above.
 
-    def evaluate_fn(model, val_ids, cfg, batches=10):
+    ``use_ddp`` is accepted (and optionally recorded in ``ddp_log``) because the real
+    ``evaluate()`` needs it to shard the validation batch and compose the loss back off the
+    mesh — see its docstring."""
+
+    def evaluate_fn(model, val_ids, cfg, batches=10, use_ddp=False):
         eval_calls.append(cfg.steps)  # cfg.steps at call time, just to prove cfg flows through
+        if ddp_log is not None:
+            ddp_log.append(use_ddp)
         return 900.0 + len(eval_calls)
 
     return evaluate_fn
@@ -321,3 +333,98 @@ def test_ttml_cxx_header_fields_passes_validate_header():
     )
     validate_header(header)  # must not raise
     assert header["intermediate_dim"] == 2816
+
+
+# ---------------------------------------------------------------------------
+# DDP: use_ddp must reach BOTH train_fn and evaluate_fn, or not reach either
+# ---------------------------------------------------------------------------
+
+
+def test_use_ddp_defaults_off_and_reaches_neither(tmp_path):
+    """The pre-2026-08-16 behaviour, pinned: with no ``use_ddp`` argument the loop calls
+    ``train_fn(..., False, False)`` and ``evaluate_fn(use_ddp=False)``, so every measurement
+    recorded before DDP existed still reproduces exactly."""
+    cfg = _FakeCfg(steps=100)
+    train_ddp, eval_ddp = [], []
+
+    run_training_loop(
+        cfg, model=None, optimizer=None, train_ids=None, val_ids=None,
+        save_every=0, val_every=50, start_step=0,
+        val_log_path=tmp_path / "val_losses.jsonl",
+        train_fn=_fake_train_fn([], train_ddp),
+        evaluate_fn=_fake_evaluate_fn([], eval_ddp),
+        save_checkpoint_fn=None, print_fn=lambda *a, **k: None,
+    )
+
+    assert train_ddp == [(False, False), (False, False)]
+    assert eval_ddp == [False, False]
+
+
+def test_use_ddp_reaches_both_train_and_evaluate(tmp_path):
+    """The guard against the silent-failure mode this whole feature is shaped around.
+
+    ``use_ddp`` decides three separate things at once: whether ttml's ``train()`` shards the
+    batch across the mesh, whether it calls ``synchronize_gradients`` at all, and whether
+    ``evaluate()`` shards its own batch and composes the loss back. If the flag reached the
+    trainer but not the evaluator the validation number would be silently computed over a
+    quarter of the intended windows; if it reached neither while a ``[1,4]`` mesh was open,
+    the run would be four replicas of a single-chip run. So the assertion is not "it was
+    passed" but "it was passed to *both*"."""
+    cfg = _FakeCfg(steps=100)
+    train_ddp, eval_ddp = [], []
+
+    run_training_loop(
+        cfg, model=None, optimizer=None, train_ids=None, val_ids=None,
+        save_every=0, val_every=50, start_step=0,
+        val_log_path=tmp_path / "val_losses.jsonl",
+        train_fn=_fake_train_fn([], train_ddp),
+        evaluate_fn=_fake_evaluate_fn([], eval_ddp),
+        save_checkpoint_fn=None, use_ddp=True, print_fn=lambda *a, **k: None,
+    )
+
+    # use_tp stays False in every case: TP shards the weights, which convert/ cannot read.
+    assert train_ddp == [(True, False), (True, False)]
+    assert eval_ddp == [True, True]
+
+
+# ---------------------------------------------------------------------------
+# Mesh graph descriptor selection
+# ---------------------------------------------------------------------------
+
+
+def test_no_descriptor_for_a_single_chip_run():
+    """--ddp 1 arms no fabric, so it must not set TT_MESH_GRAPH_DESC_PATH at all. This is
+    what keeps every pre-2026-08-16 measurement reproducible."""
+    assert _mesh_graph_descriptor_path(1) is None
+    assert _mesh_graph_descriptor_path(0) is None
+
+
+@pytest.mark.parametrize("devices", [2, 4])
+def test_vendored_descriptor_exists_and_declares_the_matching_shape(devices):
+    """The descriptor's declared dims must equal the [1, N] mesh --ddp N opens.
+
+    This is the assertion that matters: a descriptor describing the same *chips* in a
+    different *shape* (tt-metal's p300_x2 declares [2, 2] for this box) does not fail -- the
+    mesh opens, training runs, and the first gradient all-reduce hangs forever. There is no
+    error to catch at runtime, so the shape is pinned here instead."""
+    path = _mesh_graph_descriptor_path(devices)
+    assert path is not None and path.is_file(), f"missing descriptor for {devices} devices"
+    text = path.read_text(encoding="utf-8")
+    assert f"dims: [ 1, {devices} ]" in text, (
+        f"{path} must declare device_topology dims [1, {devices}] to match the mesh "
+        f"--ddp {devices} opens"
+    )
+
+
+def test_unsupported_device_count_raises_rather_than_falling_back():
+    """3 chips has no descriptor. Falling back to a mismatched one would hang, so the only
+    safe behaviour is to refuse."""
+    with pytest.raises(ValueError, match="no mesh graph descriptor"):
+        _mesh_graph_descriptor_path(3)
+
+
+def test_operator_supplied_descriptor_is_not_overridden(monkeypatch):
+    """An explicitly exported TT_MESH_GRAPH_DESC_PATH wins; returning None tells the caller
+    to leave the environment alone."""
+    monkeypatch.setenv("TT_MESH_GRAPH_DESC_PATH", "/somewhere/custom.textproto")
+    assert _mesh_graph_descriptor_path(4) is None
