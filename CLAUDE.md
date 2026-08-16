@@ -1451,3 +1451,66 @@ lease held. Nothing deleted; nothing written under `artifacts/`; neither frozen 
 modified. Smoke runs (2 samples × 16 tokens, 4 windows) went to `scratch/`, not
 `docs/measurements/` — and reproduced the committed capacity result end to end: endpoint
 −0.2656 at 1.37x the floor, sign 22/22, matched-window pooled loss delta −0.2913.
+
+## `perf/attention-mask` (2026-08-16) — a 1.41x training speedup for free
+
+**The prompt:** land a measured ~1.4x training speedup, from an opportunity that had already
+been identified and verified: `ttml.common.trainer.train()` always passes an explicit causal
+mask, which forces `AttentionMaskType::Arbitrary` in the SDPA program factory — roughly 2x the
+attention FLOPs, with load balancing disabled. Mid-task the constraint changed: **tt-metal may
+not be edited**, which took the obvious fix (two lines of nanobind) off the table.
+
+**The result:** 503.3 → **356.7 s/1000 steps** at the 384 shape (**1.41x**) and 890.0 → **776.7**
+at 1024 (**1.15x**), measured through `train/run.py` itself. Full report, with all five
+correctness checks, in `.superpowers/attention-mask-fix.md`; the upstream ask is tracked at
+`docs/upstream-tt-metal-asks.md`.
+
+**What made it possible without touching tt-metal:** ttml ships *two* Llamas. The C++
+`CppLlama` cannot be handed a null mask from Python — `nb_models.cpp:330-337` binds the mask
+as a non-optional `TensorPtr`, so `model(x, None)` is a `TypeError`, and there is no back door
+(`ModuleBase`'s three `operator()` overloads all throw in the base, and only the two
+non-optional ones are bound). But `ttml.models.llama.Llama` is a pure-Python implementation of
+the same architecture, and its `forward` reaches
+`ttml.ops.attention.scaled_dot_product_attention`, whose binding *is* declared
+`nb::arg("mask") = std::nullopt`. `train/model.py` wraps it; `--model-impl {python,cpp}`
+selects.
+
+**The thing that had to be checked before believing any of it:** that the Python model is not a
+slow reference implementation. It is not — with the mask still passed, C++ and Python cost
+521.7 vs 521.9 s/1000 at 384 and 896.9 vs 893.6 at 1024, i.e. within 0.4%. The entire
+difference is the mask, not the language. A 1.4x win paid for with a slower model would have
+been no win, and this was measured rather than assumed.
+
+**Three traps worth not rediscovering:**
+
+- **`weight_tying` defaults *oppositely* in the two configs.** C++ `LlamaConfig`
+  (`models/llama.hpp:35`) defaults to `Enabled`; Python `LlamaConfig` defaults to `Disabled`.
+  Our YAMLs set no key, so every checkpoint this project has written is tied. Built with Python
+  defaults the model silently gains 12.3M parameters at the 384 shape while `run.py`'s header
+  keeps stamping `weight_tying: True` — a `config.json` claiming `tie_word_embeddings: true`
+  over untied weights. Caught by the parameter count not matching (34,313,088 vs 22,025,088).
+- **The two implementations name parameters differently, in exactly two path segments.** Root
+  (`Llama/…` — the Python base names itself after its class — vs `llama/…`) and block
+  (`blocks/0/…` from a `ModuleList` attribute + index vs `llama_block_0/…`). Everything below
+  the block is already identical. Because *every* consumer here goes through
+  `model.parameters()`, fixing it there (plus one `create_name("llama")`) keeps checkpoints, HF
+  conversion, `convert/ttml_forward.py`, and `--resume` working with **no change anywhere
+  else** — verified by loading `checkpoints-tt-tnt-v5` (model + optimizer) into the Python model
+  and by converting a freshly-written one all the way to a HuggingFace directory.
+- **The mask is dropped only when *verified* causal**, not whenever one is passed. It is pulled
+  to host once and compared against `np.tril(np.ones(...))`, verdict cached by object identity
+  (two slots, so a stale mask is not pinned on the device). The KV-cache path never drops it:
+  there the mask is not square and `forward_kv` reads `mask.shape()[-1]` to size its cache
+  slice.
+
+**Correctness, five ways** (the speedup is meaningless without it): perturbing token *t* leaves
+every logit before *t* bit-identical on both paths and changes positions ≥ *t* identically
+(strictly causal, no leak); held-out cross-entropy on trained weights moves 4.1e-4 nats; against
+the fp32 NumPy reference the unmasked path's mean error is *lower* than the masked path's
+(0.015445 vs 0.015610); a 300-step same-init trajectory differs by at most one to two bf16 ULP;
+and the end-to-end `run.py` curves at both shapes deviate by at most 0.119 nats against a
+0.194-nat seed-noise floor.
+
+Suite: **831 passed, 1 skipped** (808 baseline + 23 new in `tests/test_model.py`, all host-only).
+tt-metal left untouched at `620793d898`. Nothing deleted; nothing written under `artifacts/`
+(timing runs checkpointed to a scratch directory outside the repo).

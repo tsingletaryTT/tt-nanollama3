@@ -136,8 +136,20 @@ against current tt-metal. `examples/python/transformers/training.py` imports a `
 module that is not on its path, calls `train()` with a `val_ids` argument the signature does
 not accept, and depends on a `TrainingConfig` that never defines the `seq_len` `train()`
 requires. Its data loader also hardcodes `shakespeare.txt`, ignoring any configured path. We
-reuse everything ttml genuinely provides — `TransformerModelFactory`, `create_optimizer`,
-`train()`, `checkpointing` — and replace only what is broken or hardcoded.
+reuse everything ttml genuinely provides — `create_optimizer`, `train()`, `checkpointing`,
+and both of its Llama implementations — and replace only what is broken or hardcoded.
+
+**Which Llama, and why it matters for speed.** ttml ships two: a C++ `CppLlama` (reached
+through its `TransformerModelFactory`) and a pure-Python `ttml.models.llama.Llama`. They are
+the same architecture over the same fused ops and cost the same per step — but only the
+Python one can be handed a null attention mask, and a null mask is what puts the fused SDPA
+kernel on its causal path instead of its arbitrary-mask path, roughly halving the attention
+work. `train/model.py` wraps the Python model so its parameter names, checkpoints, and HF
+conversion are byte-for-byte what they always were, and `train/run.py --model-impl` selects
+between the two. Measured: **1.41x** faster per training step at `--size 384`, **1.15x** at
+`--size 1024`, with the loss trajectory unchanged. `train/model.py`'s module docstring carries
+the reasoning and the numbers; [`docs/upstream-tt-metal-asks.md`](docs/upstream-tt-metal-asks.md)
+carries the two-line tt-metal fix that would make this workaround unnecessary.
 
 ## Lineage: from nanollama3 to tt-tnt
 

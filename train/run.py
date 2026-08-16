@@ -9,11 +9,18 @@ that is not on its path, calls ``train()`` with an extra ``val_ids`` argument th
 does not accept, and relies on a ``TrainingConfig`` that lacks the ``seq_len`` ``train()``
 requires. Its data loader also hardcodes ``$TT_METAL_HOME/tt-train/data/shakespeare.txt``.
 
-What we reuse from ttml (never reimplemented): ``TransformerModelFactory``,
+What we reuse from ttml (never reimplemented): both of its Llama implementations,
 ``create_optimizer``, ``initialize_device``, ``set_seed``, and the ``train()`` loop itself.
 What we supply: our corpus, our tokenizer, ``seq_len``, and a **real** validation loss —
 ttml's ``train()`` fills ``val_losses`` with a copy of the training loss under a comment
 calling it placeholder behavior, so a val number from it means nothing.
+
+*Which* Llama is chosen by ``--model-impl``. The default (``python``) is ttml's Python
+``Llama`` wrapped by ``train.model``, which drops the redundant causal mask and so runs SDPA
+on its causal path — 1.41x faster per step at ``--size 384``, 1.15x at ``--size 1024``.
+``cpp`` is ttml's ``TransformerModelFactory``/``CppLlama``, what this entrypoint used before
+2026-08-16, kept as an A/B lever. Checkpoints from the two are interchangeable; see
+``train/model.py`` for why the two exist and what the wrapper has to reconcile.
 
 ttml's ``train()`` has no checkpoint hook of its own, so periodic checkpointing is done by
 calling it repeatedly in chunks of ``--save-every`` steps and saving between chunks (see
@@ -53,6 +60,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from train import checkpoint  # noqa: E402
+from train import model as tt_tnt_model  # noqa: E402
 from train.config import (  # noqa: E402
     DEFAULT_SEED,
     SEQ_LEN,
@@ -423,6 +431,17 @@ def main() -> int:
                         f"between-run comparison has to be read against.")
     p.add_argument("--arch", default="blackhole", choices=["blackhole", "wormhole_b0"])
     p.add_argument("--tt-metal-home", default=_default_tt_metal_home())
+    p.add_argument("--model-impl", default="python", choices=["python", "cpp"],
+                   help="Which of ttml's two Llama implementations to train. 'python' (the "
+                        "default) is ttml.models.llama.Llama wrapped by train.model, which "
+                        "drops the redundant causal mask and so runs SDPA in causal rather "
+                        "than arbitrary-mask mode -- measured 1.41x faster per step at --size "
+                        "384 and 1.15x at --size 1024, with identical parameter names and "
+                        "checkpoints. 'cpp' is ttml's CppLlama via its own "
+                        "TransformerModelFactory, which is what this project trained before "
+                        "2026-08-16; its nanobind binding cannot accept a null mask, so it "
+                        "always pays for the arbitrary-mask kernel. Kept as an A/B lever and "
+                        "an escape hatch -- see train/model.py for the whole story.")
     p.add_argument("--dry-run", action="store_true",
                    help="Print the resolved config and exit without opening a device.")
     p.add_argument("--save-every", type=int, default=0,
@@ -510,6 +529,14 @@ def main() -> int:
               file=sys.stderr)
         return 1
     print(f"  model size: {size.name} ({model_config.name})")
+    # Which implementation of that architecture, and therefore which SDPA mask mode. Two
+    # runs of the same size are not comparable on time without this line: 'python' drops
+    # the redundant causal mask and runs SDPA in causal rather than arbitrary-mask mode,
+    # worth ~1.41x on the whole step at --size 384. See train/model.py.
+    print(f"  model impl: {args.model_impl}"
+          + (" (ttml's Python Llama via train.model; SDPA causal, mask dropped)"
+             if args.model_impl == "python"
+             else " (ttml's CppLlama via TransformerModelFactory; SDPA arbitrary-mask)"))
 
     # --seq-len defaults to the size's own declared context. A fixed default here could
     # only ever be right for whichever sizes happened to share it -- and 384 moving to
@@ -640,7 +667,14 @@ def main() -> int:
     # must still be closed in the finally below, or teardown aborts in
     # MetalContext::destroy_all_instances.
     try:
-        model = TransformerModelFactory(yaml_config).create_model()
+        # Two implementations of the same architecture; see --model-impl's help and the
+        # module docstring of train/model.py. They produce the same parameter names, the
+        # same parameter count, and interchangeable checkpoints -- the Python one is
+        # simply able to take the null mask that puts SDPA on its causal path.
+        if args.model_impl == "python":
+            model = tt_tnt_model.create_model(yaml_config, transformer_config)
+        else:
+            model = TransformerModelFactory(yaml_config).create_model()
         optimizer = create_optimizer(model, yaml_config)
 
         # ttml's train() sets the progress bar's val_loss to a copy of train_loss whenever
