@@ -260,6 +260,49 @@ written one source at a time rather than sample it.
 
 Run the tests with `python -m pytest`. They need no hardware.
 
+## Evaluating a checkpoint
+
+`scripts/evaluate.py` is the single entry point. It does not measure anything itself — it
+runs the existing instruments (`score_behaviour.py`, `probe_context_use.py`,
+`eval_per_source.py`) as one benchmark and **joins their numbers correctly**, which is the
+step every significant error in this project came from. All three modes are CPU-only.
+
+```bash
+# 1. Evaluate one model. Defaults to the model designated in docs/current_model.json.
+python scripts/evaluate.py --model artifacts/hf-tt-tnt-1024a
+
+# 2. Compare two, with the seed-only noise floor applied automatically.
+python scripts/evaluate.py --model artifacts/hf-tt-tnt-1024a \
+    --against artifacts/hf-tt-tnt-384s512
+
+# 3. Try an arbitrary prompt. Scratch output; never a measurement.
+python scripts/evaluate.py --try "The lighthouse keeper wrote in the log:"
+```
+
+Three things it will not let you do:
+
+- **Compare losses measured at different windows.** `evaluate()` windows at `cfg.seq_len`,
+  so window size rides along with the model unless something stops it. Mode 2 refuses, names
+  both windows, and exits non-zero — the eval window is a fixed constant, never the model's
+  own `max_position_embeddings`.
+- **Read a delta without its noise floor.** Every delta is printed beside its ratio to the
+  **seed-only control** (`tt-tnt-v3` vs `tt-tnt-v5`, derived at runtime, never hardcoded).
+  Anything within ~1.2× of that floor is labelled `NOT INTERPRETABLE` regardless of its
+  confidence interval — the rule that would have caught a published −0.041 register finding
+  sitting at 1.03× the floor, which a later seed-only control refuted. For loss trajectories
+  it prefers the **sign test** (capacity: negative at 22/22 checkpoints; the seed floor
+  changes sign at 8/22) and reports the endpoint and the trajectory average separately,
+  saying which is the headline.
+- **Slip an ad-hoc sample into the measurement namespace.** `--try` writes to `scratch/`,
+  outside `docs/` and outside git, banner-marked, and refuses any other destination. A
+  prompt that proves genuinely diagnostic gets promoted into a **new** frozen set with new
+  ids in a deliberate commit — never by editing an existing set, whose digest every
+  committed measurement depends on.
+
+The current model is designated in [`docs/current_model.json`](docs/current_model.json),
+with its reason, its evidence, and — since `tt-tnt-1024a` is trained at a 512 context while
+`tt-tnt-v3` is at 2048 — the qualification that "best" is not unqualified.
+
 ## Contributing
 
 This repository follows the plan-then-execute workflow in

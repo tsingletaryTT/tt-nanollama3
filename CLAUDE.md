@@ -1310,3 +1310,144 @@ tested with.
 Suite: **735 passed, 1 skipped** (729 + 6 header-derivation regression tests, parametrized over
 every registered size). Nothing deleted; nothing written under the protected v3/v4/v5, tokenizer,
 tokens, or corpus paths. Not pushed.
+
+---
+
+## One evaluation entry point, and a designated current model (2026-08-15)
+
+**Prompt.** "Build a single evaluation entry point... this is not a convenience wrapper, it is
+an error-prevention tool. The project has excellent instruments but no way to run them as one
+benchmark. Every comparison so far has been hand-assembled, and **every significant error made
+in this project came from the joining, not the measuring**." The brief named the three: a
+512-window loss compared against a 2048-window loss; a trajectory *average* reported where the
+*endpoint* was the number, inflating an effect 9.7x; and deltas quoted against SAMPLING error
+when RUN-TO-RUN error was the floor, which produced the "LR decay improves register" finding a
+seed-only control later refuted.
+
+`scripts/evaluate.py` is that entry point. It measures nothing itself — it invokes
+`score_behaviour.py` / `probe_context_use.py` / `eval_per_source.py` as **subprocesses** and
+joins their JSON. Subprocess rather than import on purpose: the argv *is* the provenance
+record, so every report states the exact command that produced each number.
+
+### The two guards, and why they are where they are
+
+**The window guard.** The eval window defaults to a **constant** (`DEFAULT_WINDOW = 512`), never
+to the model's own `max_position_embeddings` — that is the exact mechanism that made the window
+ride along with the model. For training-time trajectories the window is *read*, not assumed:
+`convert/to_hf.py` sets `max_position_embeddings = int(header["seq_len"])` and verifies it, and
+`evaluate()` windows validation at that same `seq_len`, so the converted config's field IS the
+units of `val_losses.jsonl`. `require_matched_window()` refuses a mismatch, names each model
+beside its own window, and the CLI exits **2 before loading any model** — the refusal has to be
+cheap to hit. `--skip-trajectory` is the only way past it, and the report records the refusal
+and its reason rather than leaving a blank.
+
+**The floor labelling.** `FLOOR_RATIO_MIN = 1.2`, and a delta at or below it is
+`NOT INTERPRETABLE` *whatever its confidence interval says*. The threshold is not a round number
+chosen for comfort — it is where this project's own history puts it: the refuted LR-decay
+register delta sat at **1.03x**, and the 1024 run's two collapse signals came back "better" from
+the paired test at **1.01x** and **1.05x**. The mirror-image error has its own label:
+`below paired detection`, for a large ratio over a tiny denominator that cannot clear its own
+minimum-detectable difference (the 1024 run's engagement, 2.99x but +0.0198 against a 0.0275
+MDE). **Both gates must pass.**
+
+### The floor is derived, and refuses to be invented
+
+Derived at runtime the way `render_licensing.py` derives its table from the registry:
+per-signal behavioural floors from `docs/measurements/behaviour-tt-tnt-v3-vs-tt-tnt-v5-setB.json`
+(committed), and the loss floor from `artifacts/checkpoints-tt-tnt-{v3,v5}/val_losses.jsonl`.
+Reproduced exactly: **sd 0.1944**, mean 0.0413, **8/22 negative**; behavioural
+`tinystories_margin` 0.0745, `register_tinystories_share` 0.0368.
+
+⚠️ **`artifacts/` is not committed** (`artifacts/.gitignore` is `*`), so a fresh clone has no
+loss floor. Hence `--refresh-floor`, which renders the committable
+`docs/measurements/seed-noise-floor.json` from the raw sources. Runs prefer live derivation,
+fall back to the snapshot, and record which they used. With neither, **no ratios are printed at
+all** and the report says why — including no "no verdict" summary quoting the threshold, because
+that would put a number in a report that nothing in it was measured against.
+
+**The loss floor is the sd, not the mean.** The seed control's *mean* paired delta is +0.041 and
+its sign wanders (8/22), so the spread is what a candidate has to beat. The report prints the
+floor's own sign split beside the candidate's, which is what makes 22/22 legible.
+
+### The sign test, preferred and not exclusive
+
+For trajectories the report leads with the exact two-sided sign test (`math.comb`, no new deps):
+capacity is 22/22 negative, p = 4.8e-7, against a floor that changes sign at 8/22. It also
+prints mean-vs-sd, and says why both: the sign test says *how consistently* the difference
+pointed one way, mean-vs-sd *how large* it was. And it prints the **endpoint** and the
+**trajectory average** as separate rows, labelling the endpoint the headline — the 9.7x mistake
+in one table row.
+
+⚠️ One caveat kept in view rather than hidden: the seed floor was measured at a **2048** window
+and is applied to **512**-window deltas. That is the same floor the committed 384s512 analysis
+used, so the ratio is still printed — with a ⚠️ note saying it is a floor borrowed across
+windows.
+
+### The ad-hoc escape valve
+
+`--try "text"` / `--try-file`. Generates at greedy/0.8/1.0 and writes to
+`scratch/adhoc-prompts/ADHOC-<utc>-<slug>.md` — **outside `docs/`, outside git** (`scratch/`
+added to `.gitignore`), banner-marked top and bottom. `assert_scratch_path()` refuses anything
+else, including the frozen prompt JSONs, `docs/measurements/`, a `behaviour-*` filename even
+inside scratch, a `..` escape, and a same-prefix sibling (`relative_to`, not `startswith` —
+`adhoc-promptsEVIL` is not inside `adhoc-prompts`). `--help` and the file header both say a
+genuinely diagnostic prompt gets promoted into a **new** set with **new ids** in a deliberate
+commit, never by editing an existing one.
+
+`--out-dir` moves a whole run elsewhere, so a 2-sample plumbing check cannot be mistaken for a
+finding — the convention this project already followed by hand. `assert_writable_out_dir()`
+refuses anything under `artifacts/`.
+
+### The designation
+
+`docs/current_model.json` designates **`artifacts/hf-tt-tnt-1024a`**, with `reason`,
+`evidence` (six paths), and `qualification` all **required** by `load_designation()` — a bare
+"the current model is X" is how a designation goes stale unnoticed. The reason is the matched-
+window result: −0.2994 nats on average against the 384s512 control, negative at 22/22
+checkpoints. The qualification is honest about what that does not mean: 1024a is trained at a
+512 context while v3 is at 2048, so it serves a quarter of the context, its loss advantage is
+established **only at 512**, it is 123.0M parameters against v3's 22M, and its register gain
+over v3 was substantially **context, not capacity** (the clean capacity leg moves the
+tinystories margin 1.03x the floor — a null by the standing rule). All five checkpoints are
+listed as `candidates` with one line each, so a reader can see what was not chosen. Nothing in
+the repo writes this file.
+
+### Mutation-checked, on the source, not in the abstract
+
+Ten mutations applied to `scripts/evaluate.py`, suite re-run, then reverted:
+
+| mutation | result |
+|---|---|
+| window refusal never raises | **7 failed** |
+| refusal says "different windows" without saying which is which | **1 failed** |
+| default window = the model's own context (the original bug) | **2 failed** |
+| floor gate removed; CI verdict alone decides | **4 failed** |
+| `FLOOR_RATIO_MIN` 1.2 → 1.0 (lets the refuted 1.03x through) | **3 failed** |
+| boundary made exclusive (`<` for `<=`) | **1 failed** |
+| missing floor treated as passing rather than unknown | **1 failed** |
+| second gate removed (ratio alone decides) | **1 failed** |
+| floor hardcoded to today's numbers instead of derived | **1 failed** |
+| loss floor uses the mean instead of the spread | **2 failed** |
+| ratio (or seed-floor) column dropped from the table | **1 failed** each |
+| scratch-path guard removed | **4 failed** |
+| trajectory report loses the endpoint/average distinction | **1 failed** |
+
+Two mutations survived the first pass and the *tests* were fixed, not the mutations excused:
+the "names both windows" test passed against a vague message because the message also quotes
+the historical 2048/512 precedent — retested with 777/333 and a proximity regex requiring each
+window to sit beside its own model's name; and "ratio column dropped" passed because the
+verdict bullets further down still printed ratios — retested per table row.
+
+### Tests, and what they do not require
+
+`tests/test_evaluate.py`, **72 tests, no model needed**: a "converted model" here is a directory
+containing `config.json`, which is exactly what `read_model_facts` reads. The two tests that
+genuinely need this machine's checkpoints (`artifacts/` is gitignored) **skip with an explicit
+reason** — verified by pointing them at nonexistent paths and confirming they skip rather than
+pass vacuously.
+
+Suite: **808 passed, 1 skipped** (736 + 72, baseline held). CPU only, no device touched, no
+lease held. Nothing deleted; nothing written under `artifacts/`; neither frozen prompt JSON
+modified. Smoke runs (2 samples × 16 tokens, 4 windows) went to `scratch/`, not
+`docs/measurements/` — and reproduced the committed capacity result end to end: endpoint
+−0.2656 at 1.37x the floor, sign 22/22, matched-window pooled loss delta −0.2913.
