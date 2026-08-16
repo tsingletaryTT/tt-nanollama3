@@ -16,7 +16,9 @@
 # of `train/run.py`. See `.superpowers/seqlen-ddp-investigation.md` for why 512 is safe
 # (no C++ ceiling on sequence length; the only hard constraint is
 # `max_sequence_length % 32 == 0`), and `train/config.py`'s `build_yaml_config` for the
-# invariant this value is paired with: `--seq-len` must equal this number exactly.
+# invariant this value is paired with: `--seq-len` may not EXCEED this number. (That
+# invariant was two-sided until 2026-08-16 -- `--seq-len` had to equal it exactly -- which
+# is why the note above says "exactly". It is one-sided now; see the next paragraph.)
 #
 # RAISED AGAIN 512 -> 2048 (2026-08-14), and this time there is a measurement behind it
 # rather than an expectation. A position-wise loss probe on the tt-tnt-v1 weights showed
@@ -30,6 +32,18 @@
 # length, so the same "no C++ ceiling" reasoning that cleared 512 covers it; what is NOT
 # yet measured is the per-step time and activation memory at 4x the window, which is a
 # throughput question for the run, not a correctness one.
+#
+# THIS VALUE IS THE MODEL'S DECLARED CONTEXT, NOT NECESSARILY THE TRAINED WINDOW
+# (2026-08-16). `--seq-len` may now be set SHORTER than this, and the tt-tnt-384s512
+# control run does exactly that: 384 trained at a 512 window against this 2048 declaration,
+# so that it could be compared with the 1024 run (which trained at 512) at MATCHED context.
+# This is safe and exact rather than approximate: in training, `ttml::ops::rope` hands the
+# op the full 2048-row cos/sin cache, the reader kernel indexes it as `seq_tile * Wt` (a
+# prefix read independent of the cache's declared length), and with no RoPE scaling
+# configured here each position's cos/sin depends only on its own index -- so the first 512
+# rows are bit-identical to a cache built at 512. See `train/config.py`'s `build_yaml_config`
+# docstring for the full trace, including why the OPPOSITE direction is still rejected
+# (tiles past the end of the cache are zero-filled on-device behind only a log_warning).
 #
 # WHY VENDOR IT. Until now `train/run.py` read this file from the tt-metal tree, which
 # meant (a) the architecture could change underneath us on a tt-metal upgrade with no

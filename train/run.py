@@ -399,14 +399,15 @@ def main() -> int:
     p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--seq-len", type=int, default=None,
                    help="Training sequence length in tokens. Defaults to the selected "
-                        "--size's own max_sequence_length, because that is the ONLY value "
-                        "build_yaml_config accepts: the two must be equal, ttml never "
-                        "cross-checks them, and a mismatch would silently produce wrong "
-                        "rotary embeddings rather than raise (see "
-                        "train.config.build_yaml_config). It was previously a fixed 512, "
-                        "which meant raising a size's context turned the default "
-                        "invocation into a guaranteed error. Pass it explicitly only to "
-                        "assert what you expect; it must be a multiple of 32.")
+                        "--size's own max_sequence_length, which is the common case: "
+                        "train at the context the architecture declares. It may also be "
+                        "set SHORTER than that, which is how a matched-context control "
+                        "run is done (e.g. --size 384 --seq-len 512 against a size "
+                        "declaring 2048) -- the RoPE cache is simply read as a prefix, "
+                        "which is exact. It may NOT exceed the size's "
+                        "max_sequence_length: tiles past the end of the cache are "
+                        "zero-filled on-device with no error. build_yaml_config enforces "
+                        "that direction; see its docstring. Must be a multiple of 32.")
     p.add_argument("--eval-every", type=int, default=10)
     p.add_argument("--size", default=DEFAULT_SIZE, choices=sorted(SIZES),
                    help=f"Model architecture to train, from train/sizes.py "
@@ -510,13 +511,23 @@ def main() -> int:
         return 1
     print(f"  model size: {size.name} ({model_config.name})")
 
-    # --seq-len defaults to the size's own declared context. build_yaml_config rejects any
-    # other value anyway (they are independent numbers upstream that must be identical), so
-    # a fixed default here could only ever be right for whichever sizes happened to share
-    # it -- and 384 moving to 2048 while 1024 stayed at 512 is exactly that case.
+    # --seq-len defaults to the size's own declared context. A fixed default here could
+    # only ever be right for whichever sizes happened to share it -- and 384 moving to
+    # 2048 while 1024 stayed at 512 is exactly that case. An explicit shorter value is
+    # allowed (prefix read of the RoPE cache, exact); longer is rejected by
+    # build_yaml_config below. Say which of the two happened, rather than always claiming
+    # the value came from the size -- a run trained at a narrowed window must be legible
+    # as such in its own log.
     if args.seq_len is None:
         args.seq_len = size.max_sequence_length
-    print(f"  seq_len: {args.seq_len} (size's max_sequence_length)")
+        print(f"  seq_len: {args.seq_len} (size's max_sequence_length)")
+    elif args.seq_len < size.max_sequence_length:
+        print(f"  seq_len: {args.seq_len} (NARROWED from the size's declared "
+              f"max_sequence_length {size.max_sequence_length}; RoPE cache is read as a "
+              f"prefix)")
+    else:
+        print(f"  seq_len: {args.seq_len} (explicit; equals the size's "
+              f"max_sequence_length)")
 
     # Resolve the checkpoint directory now that the size is known, and guard it. The guard
     # applies to an explicitly-passed path too, not just the default: the point is that no

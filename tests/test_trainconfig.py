@@ -57,26 +57,51 @@ def test_vocab_size_matches_the_tokenizer_contract():
     assert VOCAB_SIZE == 32000
 
 
-def test_rejects_seq_len_not_equal_to_max_sequence_length():
-    """The critical invariant: cfg.seq_len must equal the model's max_sequence_length.
+def test_rejects_seq_len_longer_than_max_sequence_length():
+    """The critical invariant, and it is ONE-SIDED: seq_len may not EXCEED the context.
 
     ttml never cross-checks the two itself (rotary_embedding_llama's prefill validator
-    checks head_dim but not the sequence dimension), so a mismatch would silently produce
-    wrong rotary embeddings on-device rather than raise -- this repo rejects it up front
-    instead, before a device is ever opened. Both directions of mismatch must raise: a
-    seq_len smaller than the model's max_sequence_length is just as wrong as a larger one,
-    since it is the RoPE cache's shape that stops matching the batch window's, not a
-    capacity ceiling.
+    checks head_dim and the head count but not the sequence dimension), so training past
+    the end of the RoPE cache does not raise on-device. It is worse than a crash: the
+    program factory clamps to ``rotary_seq_len_t = min(input_Ht, cos_Ht, sin_Ht)`` and
+    every sequence tile beyond the cache is zero-filled in the output, announced by
+    nothing louder than a tt-metal ``log_warning``. So this direction is rejected here,
+    before a device is ever opened.
+
+    The opposite direction is deliberately NOT rejected -- see
+    ``test_accepts_seq_len_shorter_than_max_sequence_length``.
     """
     with pytest.raises(ValueError, match="max_sequence_length"):
-        _yaml(seq_len=256, max_sequence_length=512)
-    with pytest.raises(ValueError, match="max_sequence_length"):
         _yaml(seq_len=1024, max_sequence_length=512)
+    with pytest.raises(ValueError, match="max_sequence_length"):
+        _yaml(seq_len=4096, max_sequence_length=2048)
 
 
 def test_accepts_seq_len_matching_max_sequence_length():
     tc = _yaml(seq_len=512, max_sequence_length=512)["training_config"]
     assert tc["seq_len"] == 512
+
+
+def test_accepts_seq_len_shorter_than_max_sequence_length():
+    """Training at a SHORTER window than the declared context is safe, and allowed.
+
+    ``ttml::ops::rope`` slices the cos/sin caches only in decode (``token_position > 0``);
+    in training it hands the full ``[1, 1, max_sequence_length, head_dim]`` cache to an
+    input with a shorter sequence dimension. The reader kernel indexes it as
+    ``cos_curr_idx = seq_tile * Wt`` -- a prefix read whose tile indices are independent
+    of the cache's declared length -- and with RoPE scaling disabled (none of our model
+    YAMLs set scaling_factor/original_context_length) each position's cos/sin depends only
+    on its own index. The first ``seq_len`` rows are therefore bit-identical to a cache
+    built at ``seq_len``, which is what lets a size declaring 2048 be trained at 512 as a
+    matched-context control without minting a near-duplicate registry entry.
+
+    This is the case the 384-at-512 control run needs: the 384 size declares 2048.
+    """
+    tc = _yaml(seq_len=512, max_sequence_length=2048)["training_config"]
+    assert tc["seq_len"] == 512
+    # The model's own declared context is untouched -- only the batch window narrows.
+    tc = _yaml(seq_len=256, max_sequence_length=512)["training_config"]
+    assert tc["seq_len"] == 256
 
 
 def test_rejects_seq_len_not_a_multiple_of_32():

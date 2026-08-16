@@ -113,29 +113,63 @@ def build_yaml_config(
     ``seq_len`` vs. ``max_sequence_length``: these are two independent numbers upstream
     (``cfg.seq_len`` is the window drawn per training batch; ``max_sequence_length`` is
     the model's declared context, which sizes the RoPE cos/sin tables built once at model
-    construction) and **must be identical**. ``rotary_embedding_llama``'s prefill-mode
-    validator checks the head dimension but never checks the sequence dimension against
-    the input's (see ``.superpowers/seqlen-ddp-investigation.md``, §1.3), so a mismatch
-    would not raise on-device -- it would silently hand a shorter batch window a
-    differently-shaped rotary cache and produce wrong rotary embeddings with no error at
-    all. That failure mode is worse than a crash, so it is rejected here, at config-build
-    time, before a device is ever opened.
+    construction). ``rotary_embedding_llama``'s prefill-mode validator checks the head
+    dimension and the head count but **never checks the sequence dimension** against the
+    input's (``rotary_embedding_llama_device_operation.cpp``, prefill branch: it asserts
+    ``cos.logical_shape()[0] == 1``, ``cos.logical_shape()[-1] == head_dim`` and the
+    num-heads match, and says nothing about dim 2). So ttml will not raise on a mismatch,
+    and this function is the only thing standing between a typo and a silently wrong run.
+
+    **The constraint is one-sided, and only the dangerous side is rejected here.** What
+    the two directions actually do, traced through to the kernel:
+
+    - ``seq_len < max_sequence_length`` (this is FINE). ``ttml::ops::rope`` only slices
+      the cos/sin caches when ``token_position > 0`` (decode); in training it passes the
+      full ``[1, 1, max_sequence_length, head_dim]`` cache alongside a shorter input. The
+      op handles that deliberately: the program factory computes
+      ``rotary_seq_len_t = min(input_Ht, cos_Ht, sin_Ht)`` and the reader kernel indexes
+      the cache as ``cos_curr_idx = seq_tile * Wt`` -- a plain prefix read whose tile
+      indices do not depend on the cache's declared length at all. With RoPE scaling
+      disabled (no ``scaling_factor``/``original_context_length`` in any of our model
+      YAMLs, so ``build_rope_params`` builds unscaled tables) each position's cos/sin
+      depends only on its own index, so the first ``seq_len`` rows of a table built for
+      ``max_sequence_length`` are bit-identical to a table built for ``seq_len``. Training
+      at a shorter window than the declared context is therefore exactly equivalent to
+      declaring the shorter context -- which is what makes a matched-context control run
+      possible without minting a near-duplicate size entry.
+    - ``seq_len > max_sequence_length`` (this is the HAZARD, still rejected). The cache is
+      shorter than the window, ``rotary_seq_len_t`` clamps to the cache, and every
+      sequence tile past it is **zero-filled in the output** -- the model silently sees
+      annihilated activations past ``max_sequence_length``. tt-metal emits only a
+      ``log_warning`` for this, which is trivially lost in a long training log, so it is
+      rejected here, at config-build time, before a device is ever opened.
+
+    Note that nothing about the learned parameters depends on this choice: the RoPE tables
+    are built, not trained, so a checkpoint is unaffected by which of the two equivalent
+    routes produced it. The *header* records ``cfg.seq_len`` (the window actually trained),
+    and ``convert/to_hf.py`` derives ``max_position_embeddings`` from that header field
+    rather than from the size's declared context -- so a short-window run converts to an
+    HF model that honestly declares the context it was trained at.
     """
     if seq_len % 32 != 0:
         raise ValueError(
             f"seq_len must be a multiple of 32 (the Tenstorrent tile dimension); got "
             f"seq_len={seq_len}."
         )
-    if seq_len != max_sequence_length:
+    if seq_len > max_sequence_length:
         raise ValueError(
-            f"seq_len ({seq_len}) must equal the model's max_sequence_length "
-            f"({max_sequence_length}) -- they are independent numbers upstream (the batch "
-            f"window vs. the RoPE cache size) that ttml never cross-checks. A mismatch "
-            f"would not raise inside ttml; it would silently produce wrong rotary "
-            f"embeddings (rotary_embedding_llama's prefill validator does not check the "
-            f"sequence dimension). Pass a --seq-len equal to the selected --size's "
-            f"max_sequence_length, or pick a --size whose max_sequence_length is "
-            f"{seq_len}."
+            f"seq_len ({seq_len}) must not exceed the model's max_sequence_length "
+            f"({max_sequence_length}) -- the RoPE cos/sin caches are built once at "
+            f"max_sequence_length, and ttml never cross-checks them against the batch "
+            f"window (rotary_embedding_llama's prefill validator checks the head "
+            f"dimension but not the sequence dimension). Training past the end of the "
+            f"cache does not raise: rotary_seq_len_t clamps to the cache and every "
+            f"sequence tile beyond {max_sequence_length} is ZERO-FILLED in the op's "
+            f"output, behind nothing louder than a tt-metal log_warning. Pass a "
+            f"--seq-len of at most {max_sequence_length}, or pick a --size whose "
+            f"max_sequence_length is at least {seq_len}. (The other direction, "
+            f"seq_len < max_sequence_length, is allowed and safe: it is an exact prefix "
+            f"read of the same unscaled tables -- see this function's docstring.)"
         )
     return {
         "training_config": {
