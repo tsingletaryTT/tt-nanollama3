@@ -319,6 +319,50 @@ The current model is designated in [`docs/current_model.json`](docs/current_mode
 with its reason, its evidence, and — since `tt-tnt-1024a` is trained at a 512 context while
 `tt-tnt-v3` is at 2048 — the qualification that "best" is not unqualified.
 
+## External benchmarks
+
+Everything above is self-referential. Validation loss is a tail of our own blend, the
+per-source losses slice that same blend, the behaviour scores use two prompt sets we wrote,
+and the noise floor comes from our own seed-only control. A model that had learned to imitate
+this corpus and nothing else would score exactly as well on all of it.
+
+`scripts/benchmark_external.py` runs the model against benchmarks **someone else built, on
+data we did not choose**, through EleutherAI's `lm-evaluation-harness`, and writes one report
+per model to `docs/measurements/external-<label>.{md,json}`.
+
+`lm-eval` is **not** a dependency of this repository and must not become one — `pyproject.toml`
+lists three runtime dependencies and this project has repeatedly declined to add a fourth. The
+harness lives in a throwaway virtualenv under `scratch/` (gitignored) and the script shells out
+to it, recording the venv path and the exact `lm_eval`/`torch`/`transformers`/`datasets`
+versions in every report.
+
+```bash
+python3 -m venv scratch/lm-eval-venv
+scratch/lm-eval-venv/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
+scratch/lm-eval-venv/bin/pip install lm-eval==0.4.9 'transformers<5'
+
+# Benchmark the designated current model (CPU only; takes a couple of hours).
+python scripts/benchmark_external.py --model artifacts/hf-tt-tnt-1024a
+```
+
+Three things it will not let you do:
+
+- **Read a chance-level score as a number.** Every task carries an explicit chance baseline
+  (0.25 for 4-way multiple choice, 0.50 for 2-way, ~0 for open-vocabulary LAMBADA). A score
+  within 2 standard errors of it is labelled `AT CHANCE`, its `reportable_score` in the JSON
+  is `null`, and the prose names the task rather than quoting the figure. This is the same
+  move `scripts/evaluate.py` makes with its `NOT INTERPRETABLE` floor — different null, same
+  rule. **At chance is the predicted outcome for a model this size, not a malfunction.**
+- **Quietly report a truncated task.** `tt-tnt-1024a`'s window is 512 tokens. Every request
+  the harness actually issued is re-tokenized and checked against it, and any task with a
+  request over the limit is flagged as not a fair score instead of being averaged in.
+- **Touch a Tenstorrent device.** CPU only; `--device` refuses anything else.
+
+The GPT-2-small column is measured, not quoted, when a reference run is available: benchmark
+`gpt2` with `--reference-run` and pass the resulting JSON as `--reference-json`. Published
+figures from the GPT-2 paper are used only as a fallback and are labelled as such, because the
+paper's detokenizers and scoring code are not lm-eval's.
+
 ## Contributing
 
 This repository follows the plan-then-execute workflow in
