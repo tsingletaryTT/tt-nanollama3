@@ -8,3 +8,7 @@ checkpoints-scratch/
 *.safetensors
 .superpowers/
 generated/
+
+# Ad-hoc --try output and smoke runs from scripts/evaluate.py. Deliberately outside
+# docs/, and deliberately outside git: an ad-hoc completion is not a measurement.
+scratch/
