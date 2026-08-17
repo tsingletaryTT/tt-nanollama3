@@ -87,3 +87,62 @@ which is roughly where this model lives right now.
 
 No trace of the request being a request. Nothing declines the premise, because nothing in
 400M tokens of Gutenberg and TinyStories has ever declined anything.
+
+---
+
+## 2026-08-17 — sampling by NoC neighbourhood
+
+The model did not change. The **sampler** did, and for the first time it is one
+that could not have been written for a GPU.
+
+Every token in the 32k vocabulary now has an address on the harvested 11x10
+Blackhole die (`artifacts/token_core_map.npz`): balanced spherical k-means into
+110 cells, dealt onto the grid by principal coordinates, then annealed against
+the QAP objective so that similar cells sit few NoC hops apart. Sampling scores
+each *core* by the log-sum-exp of its members' logits, picks one, and then draws
+from every core within `--hops` of it on the torus. Tokens that are structurally
+adjacent get to compete with tokens that are merely probable.
+
+Two honest notes. The anneal earned only **1.038x** over the plain PCA squash, so
+most of the layout is the spectral init doing the work. And the first version
+took the `argmax` core, which collapsed onto one cell for 24 of 30 steps —
+log-sum-exp over ~291 members is dominated by word frequency, not by context.
+Sampling the core instead of maximising it took the walk from 5 distinct cores in
+30 tokens to 12.
+
+The interesting part is what happens when you ask the same question from
+different directions on the die.
+
+### The model, asked — six ways
+
+`artifacts/hf-tt-tnt-1024a`, hops=1, t=0.8, seed 20260817.
+
+> **(+1, 0)** — . How long?" She pointed at a hole in the fence with a light bulb and a button. "There, there!
+>
+> **(-1, 0)** — . Let me go! By the light in the darkness I surely shall find myself in the light. Let me go! Oh
+>
+> **(0, +1)** — . It will not work. Do not hide you. Shap with you. Shap with you. So, take me
+>
+> **(0, -1)** — . Now, Mary, give me your hat so that I may know how fast you run." The damsel drew off from her
+>
+> **(+1, +1)** — . 2.” Germany remained unattended! Senator Lena Rule MatterTwo interfered: State cars won't hurt: Part/direct
+>
+> **(-1, -1)** — . Tell common cheersmusmarks occur mostly indicate Englandve abused by advancing BCcomson announce used widely known instruments invented generally used
+
+Each direction has its own register, and they are recognisably *different
+registers* rather than different samples: domestic-narrative to the east,
+incantatory to the west, imperative to the north, period-narrative to the south.
+The west direction reached for light — "By the light in the darkness I surely
+shall find myself in the light" — which is the same grasp at *lightning* the
+model made the first time it was asked this question, arrived at now by walking
+the die rather than by luck.
+
+And the two diagonals fell apart. Both are **two** hops rather than one, and both
+degenerate into word salad — *cheersmusmarks*, *MatterTwo*, *Englandve*. Distance
+on the die predicts distance from sense. That is the first evidence that the
+topology is load-bearing rather than decorative: if the layout were arbitrary,
+one hop and two hops would read the same, and they do not.
+
+Nothing here reaches the model's weights or the decode defect. It changes only
+which tokens are allowed to compete, and it does so by consulting a map of this
+silicon.

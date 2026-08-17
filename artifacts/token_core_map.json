@@ -1,0 +1,27 @@
+{
+  "hf_model": "/home/ttuser/code/tt-tnt/artifacts/hf-tt-tnt-1024a",
+  "embedding_sha256": "f5a352a191289915ae1ff3164ed65c8c60952582863d2c1ad529e97171cbe53f",
+  "vocab_size": 32000,
+  "grid": {
+    "name": "harvested-p300c",
+    "width": 11,
+    "height": 10,
+    "torus": true,
+    "n_cells": 110,
+    "note": "110 functional Tensix on this box's harvested die"
+  },
+  "seed": 0,
+  "anneal_steps": 200000,
+  "qap_cost": {
+    "spectral_init": 20115.126299927477,
+    "anneal_start": 20115.126299927477,
+    "anneal_end": 19374.963821839774,
+    "improvement_ratio": 1.0382020056859864
+  },
+  "occupancy": {
+    "min": 281,
+    "max": 291,
+    "mean": 290.90909090909093
+  },
+  "artifact": "/home/ttuser/code/tt-tnt/artifacts/token_core_map.npz"
+}

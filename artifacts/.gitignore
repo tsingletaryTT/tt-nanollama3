@@ -2,3 +2,11 @@
 # enough to publish with the model bundle; the corpus is ~2 GB and never belongs in git.
 *
 !.gitignore
+
+# The token->core layout IS committed, deliberately. It is 116 KB, and the whole
+# claim of the topological sampler is that a CPU can only replay us by importing
+# this file -- a layout measured from this model's embedding geometry projected
+# onto this box's harvested 11x10 die. An artifact nobody can obtain is not a
+# reference implementation. Rebuild with scripts/build_token_core_map.py.
+!token_core_map.npz
+!token_core_map.json
