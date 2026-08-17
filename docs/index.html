@@ -423,6 +423,8 @@ footer a { color: var(--ink-3); }
           <code>tt-kernel serve episod/tt-tnt</code>. The plugin logged the bundle's adapter
           registering out of the extra-models directory, the mesh opening at <code>(1,&nbsp;1)</code>,
           and <code>/v1/models</code> reporting the manifest's declared context on the wire.
+          The procedure — and the traps that make it more than one command — is written up in
+          <code>docs/serving-with-tt-kernel.md</code>.
         </p>
       </li>
     </ol>
@@ -573,7 +575,13 @@ footer a { color: var(--ink-3); }
   <div class="wrap col">
     <p>
       Both patches describe themselves in-file as <strong>shims, not fixes</strong>, each with
-      the upstream change that would make it a deletable no-op. What genuinely cannot be fixed
+      the upstream change that would make it a deletable no-op.
+      <code>docs/serving-with-tt-kernel.md</code> is the how-to for the whole path: what the
+      manifest fields do, the command that brings a server up, how to confirm you are serving
+      the weights you think you are, and the traps between — a launch command that depends on
+      the working directory, an environment variable that must be left unset, a newer ttnn
+      wheel that cannot compile a kernel on this host, and two independent caches that go stale
+      behind a name that did not change. What genuinely cannot be fixed
       from this side is written up in <code>docs/upstream-tt-metal-asks.md</code>, each ask with
       a reproduction and an explicit note on whether it blocks anything here. None of them
       currently does: the workarounds cost nothing measurable, and one is filed purely because
@@ -1373,6 +1381,10 @@ footer a { color: var(--ink-3); }
       <div class="card">
         <h3>Measurements</h3>
         <p>Every number on this page is in <code>docs/measurements/</code>, in the run's own <code>train.log</code>, or in the <code>.superpowers/</code> bring-up report the surrounding text names. The frozen prompt sets are <code>docs/evaluation_prompts.json</code> and <code>docs/evaluation_prompts_b.json</code>.</p>
+      </div>
+      <div class="card">
+        <h3>Serving it yourself</h3>
+        <p><code>docs/serving-with-tt-kernel.md</code> — the bundle, the command that brings a server up, how to confirm you are serving the weights you think you are, and the traps that were found by hitting them. Its known-limitation section is the one to read first.</p>
       </div>
       <div class="card">
         <h3>Upstream asks</h3>

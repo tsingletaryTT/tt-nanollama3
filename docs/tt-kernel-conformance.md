@@ -146,5 +146,9 @@ a supported pattern rather than leaving authors to discover it.
 - **Multi-chip anything.** `num_groups=3` restricts this model to single-chip serving, so
   `mesh.devices > 1`, fabric, and multi-machine `command_override` are untested against
   real hardware.
-- **`tt-kernel push` / `pull` / catalog.** Not yet run for this model; the serving test laid
-  the bundle down by hand.
+- **The community catalog.** `push` and `pull` have since been run for this model — the
+  bundle no longer has to be laid down by hand, and
+  [`serving-with-tt-kernel.md`](serving-with-tt-kernel.md) records the commands and the two
+  things they turned up: a visibility flag that *asserts* rather than defaults, and a `serve`
+  that prefers a stale local bundle to a corrected manifest on the Hub. `--publish` has
+  deliberately never been passed here, so the catalog path itself remains untested.

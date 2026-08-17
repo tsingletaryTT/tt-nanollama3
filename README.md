@@ -23,13 +23,18 @@ finishing at train loss **3.3125** and validation loss **4.2203**. See
 [`docs/model-card.md`](docs/model-card.md) for the full curve and an honest read of it: it
 plateaus well before the run ends rather than still improving.
 
-**Published, and public.** The trained weights are on Hugging Face at
-[`episod/tt-tnt`](https://huggingface.co/episod/tt-tnt) — `scripts/publish_to_hub.py` creates
-the repo private by default and has no code path that flips it public itself; the repo's
-visibility was changed to public separately, as an explicitly-authorized action outside that
-script (2026-08-14), and is expected to stay that way. tt-kernel packaging manifests already
-exist under [`manifests/`](manifests/). See [`docs/superpowers/specs/`](docs/superpowers/specs/)
-for the full arc.
+**Published, and public.** The weights on Hugging Face at
+[`episod/tt-tnt`](https://huggingface.co/episod/tt-tnt) are **`tt-tnt-v3`** — the same 384-size
+architecture retrained at a 2048-token context, 10,764 steps, final validation loss 2.9937 —
+and it is the checkpoint that has been packaged, published and served end to end. It is *not*
+the `tt-tnt-v1` run whose epoch and losses this section quotes.
+`scripts/publish_to_hub.py` creates the repo private by default and has no code path that flips
+it public itself; the repo's visibility was changed to public separately, as an
+explicitly-authorized action outside that script (2026-08-14), and is expected to stay that
+way. The tt-kernel packaging manifests are under [`manifests/`](manifests/), and
+[`docs/serving-with-tt-kernel.md`](docs/serving-with-tt-kernel.md) is the procedure for pulling
+and serving that bundle — including the traps that cost hours to find. See
+[`docs/superpowers/specs/`](docs/superpowers/specs/) for the full arc.
 
 **The corpus ships as a recipe, not as text.**
 [`episod/tt-tnt-corpus`](https://huggingface.co/datasets/episod/tt-tnt-corpus) (also public)
@@ -42,7 +47,7 @@ concatenated file can satisfy at once.
 
 **Calibrate your expectations — and note which model you are calibrating for.** Two sizes
 matter here, and a parameter count means nothing until it is attached to one of them.
-Everything in this Status section — the epoch, the losses, the samples below — is `tt-tnt-v1`
+The epoch, the losses and the samples quoted in this Status section are `tt-tnt-v1`
 at the **384** size: **22,025,088** parameters, 6 blocks of 384, a 512-token window. The model
 designated current in [`docs/current_model.json`](docs/current_model.json) is `tt-tnt-1024a` at
 the **1024** size: **122,962,944** parameters, 8 blocks of 1024, 16 heads over 4 KV groups,
@@ -310,6 +315,34 @@ the file is trained on as-is, since a head-truncating byte cap would amputate a 
 written one source at a time rather than sample it.
 
 Run the tests with `python -m pytest`. They need no hardware.
+
+## Packaging and serving
+
+The published checkpoint is packaged as a **tt-kernel v4 bundle** — a manifest under
+[`manifests/`](manifests/) plus [`bundle/tt_tnt_adapter.py`](bundle/tt_tnt_adapter.py), the
+class the Tenstorrent vLLM plugin imports — and served through that plugin:
+
+```bash
+cd <the vLLM plugin's examples/ directory>          # the launch command is cwd-dependent
+tt-kernel serve episod/tt-tnt --force --instance metal-src-vllm
+```
+
+**[`docs/serving-with-tt-kernel.md`](docs/serving-with-tt-kernel.md) is the guide**: what the
+bundle is, the two runtime patches the adapter carries (a `find_grid` fix for a harvested
+Blackhole grid, and a converted-weight-cache fingerprint) and what would delete them, the exact
+serve procedure, how to verify you are serving the weights you think you are — and the traps.
+The traps are the valuable part, and all of them were found by hitting them: the cwd
+dependence above, why `TT_VISIBLE_DEVICES` must **not** be exported, why the newest ttnn wheel
+cannot serve on this box, and three separate ways a stale cache or a stale flag will hand you a
+confident wrong answer rather than an error.
+
+Read the guide's known-limitation section before serving this model for generation: **on-device
+generation is degenerate in ways CPU generation is not**, at identical settings, and the cause
+is unknown after nine refuted hypotheses.
+
+[`docs/tt-kernel-conformance.md`](docs/tt-kernel-conformance.md) is the companion findings
+report — what the v4 manifest schema can express, which fields are actually read, and what
+authoring a real bundle against it turned up.
 
 ## Evaluating a checkpoint
 
