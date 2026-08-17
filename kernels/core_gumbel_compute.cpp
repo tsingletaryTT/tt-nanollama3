@@ -99,6 +99,15 @@ void kernel_main() {
     tile_regs_release();
     cb_push_back(cb_perturbed, 1);
 
+#ifdef PERTURB_ONLY
+    // Generation path: the host wants the whole perturbed tile, not its maximum.
+    // The reduce gives the winning VALUE but not its index, and generation needs
+    // to know *which token* won -- so the argmax moves to the host, where the
+    // neighbourhood mask has to be applied anyway. The device keeps the part
+    // that is actually hardware-bound: each core perturbing its own region from
+    // its own PRNG. The writer is pointed at cb_perturbed in this mode.
+    cb_pop_front(cb_logits, 1);
+#else
     // ---- pass 2: this core's Gumbel-max statistic ---------------------------
     cb_wait_front(cb_perturbed, 1);
     cb_wait_front(cb_scaler, 1);
@@ -118,4 +127,5 @@ void kernel_main() {
     cb_pop_front(cb_perturbed, 1);
     cb_pop_front(cb_scaler, 1);
     cb_pop_front(cb_logits, 1);
+#endif
 }

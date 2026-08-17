@@ -146,3 +146,68 @@ one hop and two hops would read the same, and they do not.
 Nothing here reaches the model's weights or the decode defect. It changes only
 which tokens are allowed to compete, and it does so by consulting a map of this
 silicon.
+
+---
+
+## 2026-08-17 — the sampler moves onto the silicon
+
+The model still has not changed. The sampler now runs on 110 Tensix cores.
+
+Each step, every core receives its own region of the vocabulary — its ~291 tokens,
+contiguous in one tile, from the measured layout — and perturbs them with Gumbel
+noise drawn from **its own** Tensix PRNG. Gumbel-max is what makes this exact
+rather than approximate: `argmax(logit/T + g)` with `g = -log(-log u)` is
+distributed precisely as a draw from `softmax(logit/T)`, needs no normalisation
+and no cross-core sum, and *composes hierarchically* — so 110 cores each answering
+about their own region is provably the same as sampling over the whole vocabulary
+at once. The decomposition is the hardware's shape, not an approximation of it.
+
+Gated two ways, because the right oracle changes partway through. Scoring is
+deterministic arithmetic: **110/110 cores exact against NumPy**. Sampling cannot
+be gated that way — the device draws from a hardware LFSR NumPy cannot reproduce
+— so it is gated on distribution and determinism instead: **TV distance 0.1064
+against a sampling-noise floor of 0.1284**, deterministic replay true. From here
+the device defines the sample; the CPU only confirms it is correctly distributed.
+
+Three bugs, each of which taught the design something:
+
+*The four single-hop directions returned byte-identical text.* Shifting the
+winner one hop and then admitting a one-hop neighbourhood re-admits the origin,
+which held the global argmax, so it simply won again. The fan was asking one
+question four times. Only the two-hop diagonals escaped. The CPU version had the
+same geometric flaw, hidden behind sampling noise — porting to a strict argmax is
+what exposed it.
+
+*Excluding the origin fixed the collision and destroyed the text.* Forced out of
+its best region on every one of 20 tokens, the penalty compounded and all six
+directions became word salad.
+
+*The direction is a branch, not a standing constraint.* Diverge once at the
+branch point, then generate normally. That is what asking the same question from
+six proximities actually means, and it is the version that works.
+
+### The model, asked — six ways, on hardware
+
+`artifacts/hf-tt-tnt-1024a`, hops=1, t=0.8, seed 20260817, sampling on 110 Tensix.
+
+> **(+1, 0)** — . You are so young." Tommy felt a little scared, but he was also curious. He wanted to
+>
+> **(-1, 0)** — . Warn me, dear." She drew a long breath. "I'm glad," she said. "
+>
+> **(0, +1)** — . Reviews will take a long time." "I am afraid I have no right to be stumping
+>
+> **(0, -1)** — . Lovely, friend, and I will begin your journey.” “Very well,” said she; and
+>
+> **(+1, +1)** — . You are so young." Tommy felt a little scared, but he was also curious. He wanted to
+>
+> **(-1, -1)** — . Sang, Tommy." Then Tommy shook his head and cried out, "I don't want to go
+
+Six directions, **five distinct continuations** — `(+1,+1)` collided with `(+1,0)`.
+Which is, exactly and unplanned, the thing this was built to test: ask six times
+and expect five other good proximities.
+
+None of them answers the question. Nothing in 400M tokens of Gutenberg and
+TinyStories has ever declined a premise, and the model still reaches for a child
+in a story rather than for physics. What changed is where the reaching happens:
+each of those continuations was selected by a different Tensix core, from its own
+region of a map of this die, using its own random stream.

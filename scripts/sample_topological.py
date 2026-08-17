@@ -194,11 +194,17 @@ def sample_token(
         picker = core_rng if core_rng is not None else core_rngs[0]
         cell = int(picker.choice(len(weights), p=weights))
 
+    origin = cell
     if direction is not None:
         x, y = layout.cell_xy(cell)
         cell = layout.xy_cell(x + direction[0], y + direction[1])
 
     cells = neighbourhood(layout, cell, hops)
+    if direction is not None:
+        # Same exclusion as the device path: a one-hop shift leaves the origin
+        # inside a one-hop neighbourhood, so without this the fan can return the
+        # region it was supposed to move away from.
+        cells = cells[cells != origin]
     candidates = np.flatnonzero(np.isin(layout.token_cell, cells))
 
     # The draw uses the winning core's own generator: on device this is that
@@ -254,9 +260,12 @@ def generate(
     for _ in range(max_new_tokens):
         with torch.no_grad():
             logits = model(ids).logits[0, -1].float().numpy()
+        # Direction is a branch, not a standing constraint -- see the device
+        # sampler for the measurement that forced this.
         token, cell = sample_token(
             logits, layout, hops=hops, temperature=temperature,
-            core_rngs=core_rngs, direction=direction,
+            core_rngs=core_rngs,
+            direction=direction if not visited else None,
             core_select=core_select, core_rng=core_rng,
         )
         visited.append(cell)
