@@ -185,6 +185,41 @@ Three bugs, and what each cost:
 The third one is the reusable lesson: a gate whose reference is less precise than
 its subject measures the reference.
 
+## On-device sampling (2026-08-17)
+
+`docs/measurements/core-sampling-device-gate.json` — **PASS**: TV distance
+**0.1064** against a sampling-noise floor of mean 0.1284 / p95 0.1512 over 400
+draws, 54 distinct cores, deterministic replay.
+
+Sampling is done by **Gumbel-max**, which turns a categorical draw into the max
+reduce already proven exact:
+
+    argmax_i ( logit_i / T + g_i ),   g_i = -log(-log u_i)
+
+is distributed exactly as a draw from `softmax(logits / T)` — no normalisation,
+no cross-core sum. And it **composes hierarchically**: if every core perturbs its
+own tokens and reports its own max, the argmax across cores is a draw from the
+softmax over the entire vocabulary, provably. The sampler therefore decomposes
+into precisely the shape of the hardware — 110 cores, each answering about its
+own region, from its own L1, using its own random stream, needing to know nothing
+about any other core.
+
+**The oracle changes here, and that is the point.** Scoring is deterministic
+arithmetic and is gated bit-for-bit against NumPy. Sampling cannot be: the device
+draws from the Tensix PRNG, a hardware LFSR NumPy cannot reproduce. There is no
+bit-parity oracle for this stage, and inventing one would mean reimplementing the
+silicon. What is gated instead is distribution (against a bootstrap noise floor,
+not an arbitrary threshold) and determinism. From this stage on, the device
+*defines* the sample and the CPU can only confirm it is correctly distributed.
+
+One bug, and it is the reason the gate is built this way: the SFPU `log` and
+`negative` ops each need their init call immediately before use, and interleaved
+ops must re-init at every switch. Without those calls the kernel **ran, replayed
+deterministically, and produced plausible spread** — it simply sampled from the
+wrong distribution (TV 0.9324 against a 0.5008 floor). Nothing about it looked
+like a bug; it looked like a modelling choice. Only a distributional gate
+calibrated to a noise floor could tell the difference.
+
 ## Why not tt-lang
 
 `ttl.call_extern_func` was the obvious route and is a dead end on this box:

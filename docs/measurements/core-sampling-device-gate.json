@@ -1,0 +1,14 @@
+{
+  "cores": 110,
+  "draws": 400,
+  "temperature": 1.0,
+  "tv_distance": 0.10641764346055951,
+  "noise_floor_mean": 0.12835194307010578,
+  "noise_floor_p95": 0.15116076704257025,
+  "distinct_cores_drawn": 54,
+  "deterministic": true,
+  "pass": true,
+  "verdict": "PASS \u2014 draws are correctly distributed and replay exactly",
+  "layout_digest": "f5a352a191289915ae1ff3164ed65c8c60952582863d2c1ad529e97171cbe53f",
+  "note": "No bit-parity oracle exists for this stage: the device draws from the Tensix PRNG, which NumPy cannot reproduce. Gated on distribution and determinism instead."
+}
