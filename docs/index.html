@@ -38,6 +38,13 @@
    this repository that painted itself in wins would be misrepresenting the
    repository.
 
+   §07 borrows the same four hues for the external benchmarks' chance gate, and
+   that is deliberate rather than a leak: `benchmark_external.py` applies the same
+   shape of rule against a different null (a model that learned nothing, rather
+   than another run of the same recipe), so ABOVE / BELOW / AT CHANCE / no chance
+   baseline map one-to-one onto better / worse / null / nofloor. The page says so
+   where it does it.
+
    Nothing else on the page uses these four hues. Structure, links and chrome use
    the Tenstorrent brand accent instead, so a coloured chip always means a verdict.
    ---------------------------------------------------------------------------- */
@@ -299,6 +306,8 @@ footer a { color: var(--ink-3); }
       <li><a href="#fixes">Its own fixes</a></li>
       <li><a href="#speed">4.62×</a></li>
       <li><a href="#instruments">The instruments</a></li>
+      <li><a href="#external">Someone else's benchmarks</a></li>
+      <li><a href="#geography">Embedding geography</a></li>
       <li><a href="#refuted">A refuted finding</a></li>
       <li><a href="#separators">The regression</a></li>
       <li><a href="#cannot">What it can't do</a></li>
@@ -647,14 +656,30 @@ footer a { color: var(--ink-3); }
       <p>
         <code>synchronize_gradients</code> silently returns early when the parallelism context
         is uninitialised — so a run can be four times faster and quietly wrong, and it draws a
-        perfectly ordinary loss curve while it does. Proven synchronised two ways: after DDP
-        steps all four replicas are bit-identical, maximum difference <strong>0.0</strong> over
+        perfectly ordinary loss curve while it does. Proven synchronised two ways: with
+        stochastic rounding off, after DDP steps all four replicas are bit-identical, maximum
+        difference <strong>0.0</strong> over
         66 tensors; and a four-chip run's validation loss tracks the single-chip run at the same
         seed to within <strong>0.048</strong> against a 0.194-nat noise floor. Then, deliberately,
         the broken version: skip the context init and the replicas drift by
         <strong>2.44e-3</strong>. That is what makes the 0.0 a measurement rather than an
         assumption — the instrument was shown to be capable of detecting the exact silent
         failure it was claiming did not occur.
+      </p>
+      <p>
+        The qualifier on that first leg is not decoration, and finding it corrected an earlier
+        write-up here. <code>stochastic_rounding</code> is on in this project's real training
+        config — it has to be, because bf16 parameters at 1.0 have a ulp of 0.0039 and every
+        update otherwise rounds straight back — and it breaks replica identity, because each
+        device draws its own rounding decisions and the four replicas then perform independent
+        random walks about a common trajectory. Measured over four DDP steps: with it off,
+        <strong>0 of 66</strong> parameters' replicas differ; with it on, <strong>66 of 66</strong>
+        do. They remain four coherent models rather than four broken ones — every one saw every
+        all-reduced gradient — but a <code>--ddp N</code> checkpoint holds <em>replica 0's</em>
+        weights, not "the" weights. That is a real choice, and it is why the checkpoint guard
+        below is structural rather than a numeric tolerance: a "verify the replicas agree, then
+        save" check would pass under a config nobody uses and refuse under the one this project
+        recommends.
       </p>
     </div>
 
@@ -768,16 +793,280 @@ footer a { color: var(--ink-3); }
     </p>
     <p class="small">
       The four labels above are this page's entire colour system. They are the verdicts
-      <code>scripts/evaluate.py</code> can stamp on a measured difference, and no other element
-      on the page borrows those hues.
+      <code>scripts/evaluate.py</code> can stamp on a measured difference. The next section
+      borrows the same four for the external benchmarks' chance gate — the same shape of rule
+      against a different null — and says so where it does it. Nothing else on the page borrows
+      those hues.
     </p>
   </div>
 </section>
 
-<!-- ═══ 7. Refuted ════════════════════════════════════════════════════════════ -->
+<!-- ═══ 7. External benchmarks ════════════════════════════════════════════════ -->
+<section id="external">
+  <div class="wrap col section-head">
+    <p class="eyebrow">07 — someone else's benchmarks</p>
+    <h2>Everything above is scored against our own corpus. These are the first numbers that are not.</h2>
+    <p>
+      Validation loss is a tail of our blend. The per-source losses slice that same blend. The
+      behavioural scores use two prompt sets we wrote. The noise floor comes from our own
+      seed-only control. A model that had learned to imitate this corpus and nothing else would
+      score exactly as well on every one of them.
+    </p>
+    <p>
+      So the designated current model was run through EleutherAI's
+      <code>lm-evaluation-harness</code> on eight benchmarks built by other people out of data
+      nobody here chose. CPU only, float32, 3,465 seconds. The prediction going in was that it
+      would score at chance on all of them. That prediction was wrong, and the wrongness is the
+      result.
+    </p>
+  </div>
+  <div class="wrap col">
+    <h3>The reference column is measured, not quoted — and that is the methodological point</h3>
+    <p>
+      GPT-2 small was run through the <em>same</em> harness: same <code>lm_eval</code> version,
+      same task definitions, same machine, same day. Quoting its published figures instead would
+      have compared our scores under lm-eval's detokenizers against numbers produced by
+      different code, and it would have concealed the single most useful thing the reference run
+      turned up. It paid for its hour of CPU three times.
+    </p>
+    <p>
+      <strong>It validated the entire setup with one number.</strong> Our measured GPT-2 WikiText
+      word perplexity is <strong>37.3695</strong> against the paper's published
+      <strong>37.50</strong> — <strong>0.3% apart</strong>. The harness, the detokenizer, and the
+      claim that lm-eval's <code>wikitext</code> task really reports WikiText-103 test perplexity
+      are all confirmed by that agreement. That last one is not assumed either: the script loads
+      both dataset configs at run time and confirms their test splits are byte-identical
+      (1,288,493 characters), printing <span class="chip flag">UNVERIFIED</span> on any failure
+      rather than a false confirmation.
+    </p>
+    <p>
+      <strong>It showed where quoting would have misled.</strong> The same cross-check disagrees
+      by <strong>29.2%</strong> on LAMBADA accuracy — 0.3256 measured against 0.4599 published —
+      because the paper filters stopwords on generation while lm-eval scores the exact
+      continuation by loglikelihood. A published figure and a measured one are different kinds of
+      object. Both are printed, with the gap.
+    </p>
+    <p>
+      <strong>And it showed that three of the eight tasks are dead instruments at this scale, for
+      either model.</strong> GPT-2 small is itself at chance on WinoGrande and below chance on
+      ARC-Challenge and MMLU. Read against quoted figures, our three matching rows would have
+      looked like our failures; they are the benchmarks' own floors. A later model that moves
+      WinoGrande or MMLU has done something GPT-2 small could not.
+    </p>
+  </div>
+  <div class="wrap">
+    <div class="scroller">
+      <table>
+        <caption>
+          <code>tt-tnt-1024a</code>, 512-token window, against GPT-2 small through the same
+          harness. Headline metric per task; the full report carries 15 metric rows. The chance
+          gate is the noise floor's rule against a different null, so it wears the same four
+          colours. Nothing here asks the model to answer anything: every multiple-choice row is
+          scored by comparing the loglikelihood of the supplied options, which is why a base
+          completion model can be measured on them at all.
+        </caption>
+        <thead>
+          <tr>
+            <th>Task</th><th class="num">score</th><th class="num">chance</th>
+            <th class="num">s.e. from chance</th><th>verdict</th><th class="num">GPT-2 small</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>wikitext <span class="small">word perplexity</span></td><td class="num">222.6627</td><td class="num">—</td><td class="num">—</td><td><span class="chip nofloor">no chance baseline</span></td><td class="num">37.3695</td></tr>
+          <tr><td>lambada_openai <span class="small">last word</span></td><td class="num">0.0980</td><td class="num">~0</td><td class="num">+23.7</td><td><span class="chip better">above chance</span></td><td class="num">0.3256</td></tr>
+          <tr><td>arc_easy</td><td class="num">0.3106</td><td class="num">0.25</td><td class="num">+6.4</td><td><span class="chip better">above chance</span></td><td class="num">0.4381</td></tr>
+          <tr><td>piqa</td><td class="num">0.5484</td><td class="num">0.50</td><td class="num">+4.2</td><td><span class="chip better">above chance</span></td><td class="num">0.6289</td></tr>
+          <tr><td>hellaswag</td><td class="num">0.2643</td><td class="num">0.25</td><td class="num">+3.2</td><td><span class="chip better">above chance</span></td><td class="num">0.2892</td></tr>
+          <tr><td>winogrande</td><td class="num">0.4996</td><td class="num">0.50</td><td class="num">−0.0</td><td><span class="chip null">at chance</span></td><td class="num">0.5162 <span class="chip null">at chance</span></td></tr>
+          <tr><td>arc_challenge</td><td class="num">0.1783</td><td class="num">0.25</td><td class="num">−6.4</td><td><span class="chip worse">below chance</span></td><td class="num">0.1903 <span class="chip worse">below</span></td></tr>
+          <tr><td>mmlu</td><td class="num">0.2295</td><td class="num">0.25</td><td class="num">−5.8</td><td><span class="chip worse">below chance</span></td><td class="num">0.2292 <span class="chip worse">below</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="wrap col">
+    <h3>What it says, at the register it deserves</h3>
+    <p>
+      <strong>The model has learned English, not just this corpus.</strong> That is the claim no
+      instrument in the repository could reach, because every other one is scored against the
+      same 400M tokens the model was trained on. ARC-Easy at +6.4 standard errors and PIQA at
+      +4.2 — on data nobody here chose, scored by code nobody here wrote, against a null nobody
+      here controls — are what establish it.
+    </p>
+    <p>
+      That is not a triumph. It is what a 123M-parameter model that has seen 400M tokens should
+      do, and the distance to the reference class is one number:
+      WikiText-103 perplexity <strong>222.66</strong> against GPT-2 small's <strong>37.37</strong>,
+      at <strong>1.2% fewer parameters</strong> (122,962,944 against 124,439,808) and
+      <strong>113× less training data</strong> (352,714,752 tokens seen, against WebText's ~40
+      billion). Roughly six times the perplexity for roughly a hundred-and-thirteenth of the
+      data is an ordinary place to sit on the scaling curve. A reader who sees 222 and concludes
+      "broken" is reading the parameter row instead of the token row.
+    </p>
+    <div class="note">
+      <h3>Four things this table does not say</h3>
+      <p>
+        <strong>MMLU is not a fair score here, and is flagged rather than averaged in.</strong>
+        524 of its 56,168 requests exceed the 512-token window (longest 1,112), and lm-eval drops
+        tokens off the <em>front</em> of the context, so the model answered 524 questions it was
+        shown only part of. Nothing else came close — outside MMLU and WikiText the longest
+        request in the entire run is 238 tokens. <code>tt-tnt-v3</code> at a 2048-token window
+        truncates nothing at all, which is what makes the flag a measurement rather than a guess.
+      </p>
+      <p>
+        <strong>Not every above-chance row is solid.</strong> Eleven rows carry a chance baseline;
+        if all eleven were truly null, about <strong>0.5</strong> would still clear a
+        2-standard-error gate by luck. HellaSwag at +3.2 is the weakest of the four and the one
+        to distrust first. ARC-Easy at +6.4, and four rows moving the same way, is not what half
+        an expected false positive looks like.
+      </p>
+      <p>
+        <strong>The 22M model is not far behind on any of it.</strong> <code>tt-tnt-v3</code>
+        scores WikiText 247.32 against 222.66 and LAMBADA 0.0798 against 0.0980, at 5.6× fewer
+        parameters — and it <em>clears</em> WinoGrande where the larger model does not. That is a
+        single-row flip of the kind a multiple-comparison correction eats, and it should not be
+        read as v3 resolving pronouns better. It remains an awkward result for a designation that
+        rests entirely on matched-window validation loss over our own blend.
+      </p>
+      <p>
+        <strong>LAMBADA and the context probe have not been reconciled.</strong> LAMBADA requires
+        the last word of a passage and clears chance by 23.7 standard errors, which is real
+        long-range signal. <code>probe_context_use.py</code> finds per-token loss going flat —
+        around position ~128 on the 2048-context checkpoint, around ~64 on the older
+        separator-less one. The two instruments have never been run on the same model: there is
+        no context probe for <code>tt-tnt-1024a</code>. So this is an open question, not a
+        contradiction, and it is written down as one.
+      </p>
+    </div>
+    <p class="small">
+      Full reports, with all 15 metric rows, the per-task truncation audit, the pinned harness
+      versions and the exact command line:
+      <code>docs/measurements/external-tt-tnt-1024a.md</code>,
+      <code>external-tt-tnt-v3.md</code>, and the reference run
+      <code>external-gpt2-small.md</code>. <code>lm-eval</code> is not a dependency of this
+      repository and did not become one: it lives in a throwaway virtualenv under
+      <code>scratch/</code> and the script shells out to it. No device was opened.
+    </p>
+  </div>
+</section>
+
+<!-- ═══ 8. Embedding geography ════════════════════════════════════════════════ -->
+<section id="geography">
+  <div class="wrap col section-head">
+    <p class="eyebrow">08 — the embedding space</p>
+    <h2>The vocabulary space has a corpus geography, so a grid layout would be discovered rather than imposed.</h2>
+    <p>
+      A proposed sampler would lay the 32,000-token vocabulary onto Blackhole's Tensix grid and
+      sample by spatial neighbourhood, so that <em>direction on the grid</em> means <em>corpus
+      register</em>. That only works if tokens characteristic of different sources already
+      occupy distinguishable regions of the embedding space. If they do, the layout is
+      discovered. If they do not, any layout is imposed and the claim is decoration. This
+      measurement decides which, before a kernel is written.
+    </p>
+  </div>
+  <div class="wrap col">
+    <p>
+      It reads <code>model.embed_tokens.weight</code> straight out of
+      <code>model.safetensors</code> and nothing else — no forward pass, no device, CPU only.
+      Characteristic tokens are chosen by log-odds ratio with an informative Dirichlet prior,
+      z-scored (Monroe et al. 2008), 150 per source, winner-take-all so the nine label sets are
+      disjoint. Raw frequency would say nothing, since every source's commonest token is the
+      same function word.
+    </p>
+    <p>
+      Take a token characteristic of one of the nine sources, look at its ten nearest neighbours
+      by cosine in the embedding space, and <strong>54.6%</strong> of them are characteristic of
+      the same source. Chance is 11.1%. The <em>label-permutation floor</em> — the identical
+      computation with the source labels shuffled, which holds the geometry and the class sizes
+      and destroys only the correspondence — is <strong>0.1103 ± 0.0031</strong>. The observed
+      value sits <strong>138.8</strong> of those spreads above it. A frequency-only control,
+      built from log corpus count and embedding norm and containing no directional information
+      at all, reaches 0.1350.
+    </p>
+    <p>
+      A linear probe agrees, and it is the number that speaks to whether a layout is possible at
+      all, because a grid needs source identity to be <em>linearly</em> legible: multinomial
+      logistic regression recovers which of nine sources a token belongs to, from its embedding
+      alone, <strong>77.98% ± 2.31%</strong> of the time — against <strong>10.07%</strong> with
+      the labels permuted and <strong>20.99%</strong> from the frequency-only control. Linear on
+      purpose; a stronger classifier would answer an easier question.
+    </p>
+    <p>
+      All of the above is the <code>content</code> condition: the same measurement with the 500
+      globally most frequent tokens excluded. If the geography were a frequency artefact it would
+      collapse there. It <strong>strengthens</strong> — purity 0.4984 → 0.5458, probe 0.7373 →
+      0.7798.
+    </p>
+  </div>
+  <div class="wrap">
+    <div class="scroller">
+      <table>
+        <caption>Per-source k-NN purity, nine-way <code>content</code> condition, 150 labelled tokens each, k = 10. Chance is 0.111.</caption>
+        <thead>
+          <tr><th>Source</th><th class="num">k-NN purity</th><th class="num">probe recall</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>procedural</td><td class="num">0.732</td><td class="num">0.867</td></tr>
+          <tr><td>flavour</td><td class="num">0.666</td><td class="num">0.756</td></tr>
+          <tr><td>poetry</td><td class="num">0.613</td><td class="num">0.853</td></tr>
+          <tr><td>wikipedia_simple</td><td class="num">0.589</td><td class="num">0.831</td></tr>
+          <tr><td>spine</td><td class="num">0.549</td><td class="num">0.818</td></tr>
+          <tr><td>tinystories</td><td class="num">0.544</td><td class="num">0.867</td></tr>
+          <tr><td>weird</td><td class="num">0.431</td><td class="num">0.751</td></tr>
+          <tr><td>folklore</td><td class="num">0.409</td><td class="num">0.644</td></tr>
+          <tr><td>gutenberg_children</td><td class="num">0.377</td><td class="num">0.631</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="wrap col">
+    <p>
+      Every source is far above chance, but the ordering splits cleanly and the split is the part
+      that matters for a layout. <code>procedural</code>, <code>flavour</code>,
+      <code>poetry</code> and <code>wikipedia_simple</code> occupy well-separated regions.
+      <code>folklore</code>, <code>weird</code> and <code>gutenberg_children</code> share one —
+      they are each other's largest off-diagonal neighbours, folklore and weird trading 0.14 and
+      0.17 of each other's neighbourhoods. Asking that region for three independent directions
+      would return three draws from the same neighbourhood, which is exactly the failure the
+      proposal exists to avoid.
+    </p>
+    <div class="note">
+      <h3>What it does not show</h3>
+      <p>
+        <strong>A "direction" means subject matter <em>and</em> register, not provenance.</strong>
+        <code>procedural</code> separates best because its characteristic tokens are food and
+        kitchen words — <code>Ġflour</code>, <code>Ġsugar</code>, <code>Ġboiling</code> — and food
+        words would cluster in any embedding of any corpus. That the clusters <em>align with</em>
+        corpus sources is the finding. That the model represents "which file this came from" is
+        not claimed and was not measured.
+      </p>
+      <p>
+        <strong>The geography is not two-dimensional.</strong> The first two principal components
+        of the labelled tokens explain <strong>2.7%</strong> and <strong>1.8%</strong> of their
+        variance. The report prints a PCA scatter and labels it <em>for looking at only</em>;
+        nothing rests on it. Cosine silhouette is 0.0209 against a permuted floor of −0.0070 ±
+        0.0004 — positive, far outside its own floor, and small, which is what silhouette does in
+        1024 dimensions where everything is far from everything.
+      </p>
+      <p>
+        And it establishes nothing about generated text. This is a measurement of the embedding
+        table, not of behaviour. <code>scripts/score_behaviour.py</code> is where register in
+        actual completions is measured, and what it found is reported further down.
+      </p>
+    </div>
+    <p class="small">
+      Source: <code>scripts/probe_embedding_geography.py</code>, written to
+      <code>docs/measurements/embedding-geography-tt-tnt-1024a.{md,json}</code>. Model
+      <code>artifacts/hf-tt-tnt-1024a</code>, embedding matrix only. CPU, no device opened, no
+      forward pass run.
+    </p>
+  </div>
+</section>
+
+<!-- ═══ 9. Refuted ════════════════════════════════════════════════════════════ -->
 <section id="refuted">
   <div class="wrap col section-head">
-    <p class="eyebrow">07 — a result we withdrew</p>
+    <p class="eyebrow">09 — a result we withdrew</p>
     <h2>The floor refuted one of our own findings.</h2>
     <p>
       A run with a cosine learning-rate decay tail was compared against its predecessor and
@@ -883,10 +1172,10 @@ footer a { color: var(--ink-3); }
   </div>
 </section>
 
-<!-- ═══ 8. Separators ═════════════════════════════════════════════════════════ -->
+<!-- ═══ 10. Separators ════════════════════════════════════════════════════════ -->
 <section id="separators">
   <div class="wrap col section-head">
-    <p class="eyebrow">08 — the regression that mattered</p>
+    <p class="eyebrow">10 — the regression that mattered</p>
     <h2>The corpus contained zero document separators, so the model could not stop.</h2>
     <p>
       Until it was fixed, each document was written into the blend as its text followed by a
@@ -979,10 +1268,10 @@ footer a { color: var(--ink-3); }
   </div>
 </section>
 
-<!-- ═══ 9. What it can't do ═══════════════════════════════════════════════════ -->
+<!-- ═══ 11. What it can't do ══════════════════════════════════════════════════ -->
 <section id="cannot">
   <div class="wrap col section-head">
-    <p class="eyebrow">09 — open, unresolved, or simply not working</p>
+    <p class="eyebrow">11 — open, unresolved, or simply not working</p>
     <h2>What this model still cannot do.</h2>
     <p>
       Everything in this section is measured. None of it is hidden in a footnote, because a
@@ -1061,10 +1350,10 @@ footer a { color: var(--ink-3); }
   </div>
 </section>
 
-<!-- ═══ 10. Links ═════════════════════════════════════════════════════════════ -->
+<!-- ═══ 12. Links ═════════════════════════════════════════════════════════════ -->
 <section id="links">
   <div class="wrap col section-head">
-    <p class="eyebrow">10 — everything</p>
+    <p class="eyebrow">12 — everything</p>
     <h2>Where all of this lives.</h2>
   </div>
   <div class="wrap">
@@ -1083,11 +1372,11 @@ footer a { color: var(--ink-3); }
       </div>
       <div class="card">
         <h3>Measurements</h3>
-        <p>Every number on this page is in <code>docs/measurements/</code> or in the run's own <code>train.log</code>. The frozen prompt sets are <code>docs/evaluation_prompts.json</code> and <code>docs/evaluation_prompts_b.json</code>.</p>
+        <p>Every number on this page is in <code>docs/measurements/</code>, in the run's own <code>train.log</code>, or in the <code>.superpowers/</code> bring-up report the surrounding text names. The frozen prompt sets are <code>docs/evaluation_prompts.json</code> and <code>docs/evaluation_prompts_b.json</code>.</p>
       </div>
       <div class="card">
         <h3>Upstream asks</h3>
-        <p><code>docs/upstream-tt-metal-asks.md</code> — three open asks against tt-metal, each with a reproduction and a note on whether it blocks anything.</p>
+        <p><code>docs/upstream-tt-metal-asks.md</code> — four open asks against tt-metal, each with a reproduction and a note on whether it blocks anything. None of them currently blocks.</p>
       </div>
       <div class="card">
         <h3>Where it came from</h3>
