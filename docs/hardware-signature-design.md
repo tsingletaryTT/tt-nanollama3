@@ -112,6 +112,45 @@ Outcomes and what each licenses:
 | `identical` cores differ, reproducibly | Something is bound to the physical core. Find out what before building on it. |
 | `unseeded` differs run-to-run | Genuinely irreproducible — and therefore useless as a medium, even though it is the one thing CPU truly cannot mimic. |
 
+## Measured result (2026-08-17, p300c Blackhole, 16 cores)
+
+`docs/measurements/core-prng-probe.json` and `…-unseeded.json`.
+
+| Condition | Cores differing from core 0 | Replays across runs |
+|---|---|---|
+| `distinct` (seed = base + i·7919) | 15 / 16 | **yes** |
+| `identical` (same seed everywhere) | **0 / 16** | yes |
+| `unseeded`, fresh process | 7 / 16 | no |
+
+**The decisive line is the middle one.** Sixteen cores handed the same seed
+produced byte-identical streams. There is **no intrinsic core identity** in the
+seeded PRNG: it is an LFSR, the seed fully determines the sequence, and nothing
+about the physical Tensix enters it. Per-core behaviour is manufactured by the
+host, and is reproducible on CPU by anyone who reimplements the LFSR. The
+earlier framing — "per-core noise a CPU cannot reach" — is now measured false,
+not merely overstated.
+
+`distinct` confirms the mechanism works as intended and replays exactly, which
+is what makes it usable as a foundation.
+
+`unseeded` is the one surprise: at rest the cores are **not** uniform — 7 of 16
+differ from core 0. So some per-core state does exist in that register before
+anyone writes it. Two limits on what that licenses, both important:
+
+* It does not replay. The register advances as draws are taken, so a second
+  dispatch never sees what the first saw.
+* This probe **cannot** test boot-state reproducibility at all. Doing that needs
+  a device reset between observations, which these runs did not do. What is
+  measured is "state at first dispatch after `open_device`", not "state at boot".
+
+So the unseeded register is exactly trilemma option 1: the one thing a CPU
+genuinely cannot mimic, and unusable for anything we intend to measure.
+
+**Consequence for the design:** proceed on option 2 with option 3's character,
+as planned. Structure comes from the measured grid layout; selection comes from
+host-assigned per-core seeds. The claim is "the hardware is the reference
+implementation", and that claim is now backed by measurement rather than hope.
+
 ## Why not tt-lang
 
 `ttl.call_extern_func` was the obvious route and is a dead end on this box:

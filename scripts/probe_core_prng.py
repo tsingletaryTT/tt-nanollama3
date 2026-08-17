@@ -111,6 +111,18 @@ def run_condition(
         memory_config=ttnn.DRAM_MEMORY_CONFIG,
     )
 
+    # generic_op requires at least one input and one output tensor (it asserts
+    # io_tensors.size() >= 2). This probe genuinely has no input -- the draws are
+    # generated on-core from the PRNG -- so we hand it a single unused tile to
+    # satisfy the contract. No kernel reads it.
+    unused_input = ttnn.zeros(
+        (TILE, TILE),
+        dtype=ttnn.float32,
+        layout=ttnn.TILE_LAYOUT,
+        device=device,
+        memory_config=ttnn.DRAM_MEMORY_CONFIG,
+    )
+
     core_set = ttnn.CoreRangeSet([ttnn.CoreRange(c, c) for c in cores])
 
     cb_format = ttnn.CBFormatDescriptor(
@@ -162,7 +174,7 @@ def run_condition(
         kernels=[compute_kernel, writer_kernel], semaphores=[], cbs=[cb_descriptor]
     )
 
-    result = ttnn.generic_op([output], program)
+    result = ttnn.generic_op([unused_input, output], program)
     draws = ttnn.to_torch(result).float().numpy()
     return draws.reshape(num_cores, tiles_per_core, TILE, TILE)
 
@@ -230,11 +242,27 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=20260817)
     parser.add_argument("--device-id", type=int, default=0)
     parser.add_argument(
+        "--only",
+        choices=["distinct", "identical", "unseeded"],
+        help=(
+            "Run a single condition. Required to read 'unseeded' honestly: the "
+            "PRNG config register survives across dispatches, so running it "
+            "after a seeded condition measures that condition's leftover state, "
+            "not the state the core booted into."
+        ),
+    )
+    parser.add_argument(
         "--out",
         type=Path,
-        default=REPO_ROOT / "docs" / "measurements" / "core-prng-probe.json",
+        default=None,
     )
     args = parser.parse_args()
+
+    # A single-condition run must not overwrite the full three-condition
+    # measurement: they answer different questions and are not interchangeable.
+    if args.out is None:
+        stem = f"core-prng-probe-{args.only}" if args.only else "core-prng-probe"
+        args.out = REPO_ROOT / "docs" / "measurements" / f"{stem}.json"
 
     device = ttnn.open_device(device_id=args.device_id)
     try:
@@ -250,6 +278,9 @@ def main() -> None:
             "unseeded": ([0] * n, True),
         }
 
+        if args.only:
+            conditions = {args.only: conditions[args.only]}
+
         results = {}
         for name, (seeds, skip) in conditions.items():
             run_a = run_condition(device, cores, seeds, args.tiles_per_core, skip)
@@ -257,7 +288,14 @@ def main() -> None:
             results[name] = summarise(name, run_a, run_b)
             print(json.dumps(results[name], indent=2))
 
-        final = verdict(results["distinct"], results["identical"], results["unseeded"])
+        if args.only:
+            # A single condition cannot support the cross-condition verdict; say
+            # so rather than inventing one from partial evidence.
+            final = f"SINGLE CONDITION ({args.only}) — no cross-condition verdict."
+        else:
+            final = verdict(
+                results["distinct"], results["identical"], results["unseeded"]
+            )
         print("\nVERDICT:", final)
 
         payload = {

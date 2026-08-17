@@ -1,0 +1,104 @@
+{
+  "cores_probed": 16,
+  "tiles_per_core": 1,
+  "base_seed": 20260817,
+  "core_coords": [
+    [
+      0,
+      0
+    ],
+    [
+      1,
+      0
+    ],
+    [
+      2,
+      0
+    ],
+    [
+      3,
+      0
+    ],
+    [
+      4,
+      0
+    ],
+    [
+      5,
+      0
+    ],
+    [
+      6,
+      0
+    ],
+    [
+      7,
+      0
+    ],
+    [
+      8,
+      0
+    ],
+    [
+      9,
+      0
+    ],
+    [
+      10,
+      0
+    ],
+    [
+      0,
+      1
+    ],
+    [
+      1,
+      1
+    ],
+    [
+      2,
+      1
+    ],
+    [
+      3,
+      1
+    ],
+    [
+      4,
+      1
+    ]
+  ],
+  "conditions": {
+    "distinct": {
+      "condition": "distinct",
+      "num_cores": 16,
+      "reproducible_across_runs": true,
+      "cores_distinct_from_core0": 15,
+      "cores_identical_to_core0": 1,
+      "draws_in_unit_interval": true,
+      "mean": 0.48626580834388733,
+      "std": 0.28596219420433044
+    },
+    "identical": {
+      "condition": "identical",
+      "num_cores": 16,
+      "reproducible_across_runs": true,
+      "cores_distinct_from_core0": 0,
+      "cores_identical_to_core0": 16,
+      "draws_in_unit_interval": true,
+      "mean": 0.4029179811477661,
+      "std": 0.2491970658302307
+    },
+    "unseeded": {
+      "condition": "unseeded",
+      "num_cores": 16,
+      "reproducible_across_runs": false,
+      "cores_distinct_from_core0": 0,
+      "cores_identical_to_core0": 16,
+      "draws_in_unit_interval": true,
+      "mean": 0.43442416191101074,
+      "std": 0.26281070709228516
+    }
+  },
+  "verdict": "NO INTRINSIC CORE IDENTITY \u2014 same seed gives byte-identical streams on every core. Per-core behaviour is manufactured by the host, and is reproducible on CPU by anyone who reimplements the LFSR. The hardware is a reference implementation, not an unreachable oracle."
+}
