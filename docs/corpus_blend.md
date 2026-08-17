@@ -8,13 +8,13 @@ The corpus itself is ~1.7 GB and is not committed; `artifacts/` is gitignored. T
 of what `scripts/blend_corpus.py` built, so "what was this model trained on" is answerable
 from a clone rather than only from the machine that ran the blend.
 
-**The manifest is authoritative.** It is written by the blend itself. The figures below are
+The manifest is authoritative. It is written by the blend itself. The figures below are
 copied from it and `tests/test_corpus_blend_doc.py` holds them to it, so this page cannot
 drift from the artifact it describes.
 
 ## The headline number
 
-**399,508,203 tokens** against a **400,000,000** budget — **491,797 short, −0.123%**.
+399,508,203 tokens against a **400,000,000** budget — **491,797 short, −0.123%**.
 
 That is the real count from the trained tokenizer, not an estimate. Each source's emitted
 text is counted as it is written, chunked into paragraphs exactly the way
@@ -56,7 +56,7 @@ see a document boundary at all: `scripts/fetch_corpus.py` writes one JSON object
 document, `prepare_corpus.py` consumes them one at a time, and everything downstream sees
 nothing but concatenated text.
 
-**This was missing, and it mattered.** Until 2026-08-14 a document was written as
+This was missing, and it mattered. Until 2026-08-14 a document was written as
 `text + "\n\n"`, which spells a document boundary exactly the way a paragraph break *inside* a
 document is spelled. Nothing downstream could tell the two apart. `train/tokenization.py`
 compounded it: it encodes the corpus one line at a time and drops the newline, so blank lines
@@ -136,7 +136,7 @@ length is independent of position in the file. For `wikipedia_simple` (articles 
 lengths varying by orders of magnitude) that assumption is visibly wrong, and for `weird` —
 55 books total — the granularity alone explains it.
 
-**The count survives tokenization exactly.** `artifacts/tokens-v3/` holds 734,978 occurrences
+The count survives tokenization exactly. `artifacts/tokens-v3/` holds 734,978 occurrences
 of id 2 in `train_ids.npy` and 63,793 in `val_ids.npy`: **798,771** together, equal to the
 number of `</s>` lines in `blend.txt` to the token. None were added, none were lost, and none
 were split into ordinary subwords.
@@ -165,7 +165,7 @@ This is directly checkable on disk: `artifacts/tokens-v3/train_ids.npy` and
 `(39192152,)`. The split is stratified per source — see `_tokenize_stratified` — and the
 per-source token counts it reports are in the run's `TokenStats`.
 
-**The older arrays are a different corpus and are kept.** `artifacts/tokens/` (353,495,970 /
+The older arrays are a different corpus and are kept. `artifacts/tokens/` (353,495,970 /
 39,277,330, total 392,773,300) and `artifacts/tokens-stratified/` (353,495,973 train) were
 tokenized from the blend as it stood *before* separators existed, and 392,773,300 is the
 `corpus_tokens` recorded in the header of every `tt-tnt-v1` checkpoint (e.g.
@@ -174,7 +174,7 @@ actually trained on, which is why `tokenize_corpus` refuses to overwrite them an
 rebuild went to a new directory instead. Both contain **zero** occurrences of id 2 — that is
 the regression, still visible on disk.
 
-**Why this differs from the manifest's 399,508,203.** They are two different measurements of
+Why this differs from the manifest's 399,508,203. They are two different measurements of
 two different things, not two attempts at the same number:
 
 - The manifest's figure is a **sum of nine separate tokenizer calls**, one per source, each
@@ -202,7 +202,7 @@ which is why 1.90% is unremarkable rather than alarming. Neither count is wrong.
 `train/run.py` actually reads token-by-token)** — use whichever one answers the question being
 asked, and do not average them or treat the smaller one as a correction to the larger one.
 
-**This is also where the step budget for one epoch comes from.** The **train split**, not the
+This is also where the step budget for one epoch comes from. The **train split**, not the
 manifest total, is what a training run iterates over, and the step size follows the context
 length:
 
@@ -283,7 +283,7 @@ Retraining the tokenizer on the current blend would restart the loop — new voc
 availability, new shares, new blend, and the same statement to write one revision later. It is
 deliberately not being done.
 
-**If you retrain it**, re-run `scripts/measure_corpus.py` and `scripts/blend_corpus.py`
+If you retrain it, re-run `scripts/measure_corpus.py` and `scripts/blend_corpus.py`
 afterwards and settle the shares against the new measurement, exactly as Task 6 did. Watch
 `flavour` in particular: it sits 0.075 points under its arithmetic ceiling, and a further 13%
 fall in its measured availability makes even a 0.5% share unreachable within the 4x cap.

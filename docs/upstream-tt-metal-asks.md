@@ -14,7 +14,7 @@ Against tt-metal `620793d898` (`rollback-pre-qwen36-1576-g620793d898`).
 
 ## 1. Python cannot pass a null attention mask to `CppLlama` / `GPT2Transformer`
 
-**Status:** open. Worked around in `train/model.py`; see
+Status: open. Worked around in `train/model.py`; see
 `.superpowers/attention-mask-fix.md` for the full report and every measurement.
 
 ### The defect
@@ -138,11 +138,11 @@ parameters to the C++ scheme so checkpoints, HF conversion and `--resume` are un
 
 ## 2. A mesh graph descriptor whose declared dims disagree with the opened `MeshShape` hangs instead of failing
 
-**Status:** open. Worked around in this repo by shipping matching descriptors
+Status: open. Worked around in this repo by shipping matching descriptors
 (`train/configs/mesh/mesh-1x2.textproto`, `mesh-1x4.textproto`); see
 `.superpowers/ddp-bringup.md` for the full experiment and every measurement.
 
-**Nothing we need is blocked on this** — the workaround is complete and costs nothing at
+Nothing we need is blocked on this — the workaround is complete and costs nothing at
 runtime. This is a diagnosability ask, filed because the failure mode is expensive to debug and
 will be hit again by anyone bringing up multi-chip training on a box whose physical topology is
 not a line.
@@ -227,10 +227,10 @@ rather than failing, a fallback would be the worst possible default.
 
 ## 3. A DDP training step re-marks replicated parameters as `Shard(0)`, so checkpoints save every replica
 
-**Status:** open upstream, but **no longer blocking here** — corrected 2026-08-16 from this
+Status: open upstream, but **no longer blocking here** — corrected 2026-08-16 from this
 repo, in `train/checkpoint.py:replicated_for_save`. See `.superpowers/ddp-checkpoint-fix.md`.
 
-**This entry previously claimed this could not be fixed in our own tree. That was wrong**, and
+This is fixable in our own tree;
 the correction is the useful part of this update: `ttnn.Tensor.update_tensor_topology` is bound
 in Python (`ttnn/cpp/ttnn-nanobind/pytensor.cpp:1611`) and `ttnn.TensorTopology` is constructible
 from Python (`ttnn/core/distributed/distributed_nanobind.cpp:734`). The false placement can
@@ -311,7 +311,7 @@ the placements being corrected. The restore is what makes this safe to run mid-r
 a run that checkpoints is the same computation as one that does not.
 
 `assert_saveable_on_mesh` remains a real gate, narrowed rather than removed. It refuses unless
-**both** (a) ttml's live parallelism context is DDP and only DDP — under TP a `Shard` placement
+both (a) ttml's live parallelism context is DDP and only DDP — under TP a `Shard` placement
 may be the truth, and re-marking it would write a quarter of a model — and (b) the tensor is
 distributed over exactly the DDP axis. Both conditions fail closed; any failure to read the
 parallelism context is a reason to refuse, never permission.
@@ -320,7 +320,7 @@ parallelism context is a reason to refuse, never permission.
 
 ## 4. Stochastic rounding under DDP breaks the replica-identity invariant
 
-**Status:** open. Not blocking — a `--ddp N` checkpoint records replica 0, which is a complete
+Status: open. Not blocking — a `--ddp N` checkpoint records replica 0, which is a complete
 and coherent model — but it means "the model" a multi-chip run produces is one of N
 non-identical models rather than the single model DDP is supposed to maintain. Measured
 2026-08-16; see `.superpowers/ddp-checkpoint-fix.md` §4.

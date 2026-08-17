@@ -37,7 +37,7 @@ A ~22M-parameter Llama-3-style language model **trained from random initializati
 Tenstorrent Blackhole hardware** with `ttml` (tt-train), then converted to Hugging Face
 format and numerically verified.
 
-**This is a demonstration of a pipeline, not a capable model.** Please read the limitations
+This is a demonstration of a pipeline, not a capable model. Please read the limitations
 before using it for anything.
 
 ## What it demonstrates
@@ -82,7 +82,7 @@ a verbatim copy of tt-train's own `nanollama3.yaml`.
 
 ## Limitations — please read these
 
-**The headline validation loss is not comparable to the previous checkpoint's.** 2.9937 against
+The headline validation loss is not comparable to the previous checkpoint's. 2.9937 against
 4.2203 looks like a large gain, and most of it is not one. The previous checkpoint's validation
 split was the tail 10% of a token stream whose sources are concatenated in sorted-name order,
 so it landed **entirely inside `wikipedia_simple`** — the most out-of-domain source in the
@@ -95,7 +95,7 @@ mixture, and a much easier one, because 31% of the mixture is TinyStories. A mea
 of the drop from 4.22 to 2.99 is the yardstick changing, not the model improving. The two
 numbers should not be subtracted.
 
-**It has seen its training corpus once, not memorized it.** At batch 16, sequence length 2048,
+It has seen its training corpus once, not memorized it. At batch 16, sequence length 2048,
 10,764 steps is one epoch over the blend's 352.7M-token training split — the same 32,768
 tokens per step as the previous run, at four times the context. The validation curve
 (`artifacts/checkpoints-tt-tnt-v3/val_losses.jsonl`) falls from 5.084 at step 500 to ~3.28 by
@@ -105,7 +105,7 @@ decline, unlike the previous run, which was flat for its final stretch. Read pla
 had not clearly stopped improving when it ended, but the per-step gain over the last third is
 small enough that more steps at these settings would not transform it.
 
-**It can now stop, which no previous checkpoint could.** Every earlier tt-tnt checkpoint was
+It can now stop, which no previous checkpoint could. Every earlier tt-tnt checkpoint was
 trained on a corpus containing **zero** `</s>` tokens while its `config.json` nonetheless
 declared `eos_token_id: 2` — so generation could never terminate naturally and always ran to
 whatever token limit the caller set. This is the first checkpoint trained on a corpus that
@@ -136,10 +136,10 @@ which is the honest way to read the greedy loops: greedy decoding on a 22M-param
 manufactures repetition attractors that sampling largely avoids. Treat the promising examples
 as evidence of what the blend can nudge toward, not as evidence the voice has arrived.
 
-**It is a base completion model.** No instruction tuning, no chat template. Give it the opening
+It is a base completion model. No instruction tuning, no chat template. Give it the opening
 of a simple story; do not ask it questions.
 
-**Its context is 2048 tokens** (256 → 512 → 2048 across the three checkpoints — see Lineage).
+Its context is 2048 tokens (256 → 512 → 2048 across the three checkpoints — see Lineage).
 Note that `tokenizer_config.json` carries the conventional `model_max_length` sentinel
 (~1e18). Do not derive a serving length from it — use `max_position_embeddings`. Serving this
 model with a 4k context will silently degrade output; serving it at 512 silently discards three
@@ -158,7 +158,7 @@ about 0.02 nats per bucket against a standard error of ~0.08, i.e. **directional
 inside the noise**. The honest claim is that the long window is no longer actively useless, not
 that all 2048 tokens are earning their keep.
 
-**Unlike the original checkpoint, this run's RMSNorm layers did learn.** The very first tt-tnt
+Unlike the original checkpoint, this run's RMSNorm layers did learn. The very first tt-tnt
 checkpoint (see Lineage) trained with `stochastic_rounding` disabled, which silently froze all
 13 RMSNorm gammas at bfloat16's rounding fixed-point of 1.0 — the gradients were real, but every
 update rounded back to 1.0 and was discarded. This run set `stochastic_rounding: true`, and it
@@ -170,7 +170,7 @@ trained with its normalization layers genuinely live.
 ## Verification
 
 The Hugging Face conversion is not merely assumed correct. It is checked against an
-**independently derived pure-NumPy reimplementation** of ttml's forward pass — written from
+independently derived pure-NumPy reimplementation of ttml's forward pass — written from
 ttml's C++ source rather than from the converter, so the two paths reach logits by different
 routes. They agree to a **maximum absolute logit difference of ~6e-6** (correlation ≈ 1 − 1e-13).
 
@@ -220,9 +220,9 @@ and is the more representative read of the model's range.
 
 ## Licensing and provenance
 
-**The model weights and this project's code are Apache-2.0.**
+The model weights and this project's code are Apache-2.0.
 
-**The training corpus is not.** This checkpoint was trained on the nine-source blend described
+The training corpus is not. This checkpoint was trained on the nine-source blend described
 above. Two of those sources are share-alike: `tinystories`
 ([`roneneldan/TinyStories`](https://huggingface.co/datasets/roneneldan/TinyStories), 31% of the
 blend, CDLA-Sharing-1.0) and `wikipedia_simple`
@@ -241,7 +241,7 @@ The corpus itself is not redistributed here or anywhere else — this repository
 fetch/prepare/measure/blend scripts, published as
 [`episod/tt-tnt-corpus`](https://huggingface.co/datasets/episod/tt-tnt-corpus) on the Hub.
 
-**Architectural credit.** The component choices — RoPE, RMSNorm, SwiGLU, GQA, subword BPE —
+Architectural credit. The component choices — RoPE, RMSNorm, SwiGLU, GQA, subword BPE —
 follow [Mini-LLM by Ashx098](https://github.com/Ashx098/Mini-LLM), which the originating lesson
 arc credits. That repository declares no license, so it grants no rights; this is a credit, not
 a license inheritance. The components come from published papers, and this implementation

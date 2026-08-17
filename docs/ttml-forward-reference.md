@@ -1,10 +1,10 @@
 # ttml's Llama forward pass — derived from source
 
-**Purpose.** This is the specification a pure-NumPy reimplementation of ttml's Llama forward
+Purpose. This is the specification a pure-NumPy reimplementation of ttml's Llama forward
 pass is written against, so that the NumPy model can be run on the raw checkpoint tensors and
 its logits compared against the Hugging Face conversion at a tight tolerance.
 
-**Independence.** Everything below is derived from ttml's C++ (and the ttnn kernels it calls),
+Independence. Everything below is derived from ttml's C++ (and the ttnn kernels it calls),
 plus the checkpoint's own manifest. Nothing here was taken from `convert/hf_mapping.py` or
 `convert/to_hf.py` — those files encode our converter's *interpretation* of these same
 conventions, and deriving from them would make the eventual parity check circular. Plan 4
@@ -15,7 +15,7 @@ remedy.
 `convert/checkpoint_reader.py` *was* used, but only to stream raw tensor names, shapes and
 dtypes out of the checkpoint pickle — it contains no model semantics.
 
-**Source root.** All `ttml/...` citations below are relative to
+Source root. All `ttml/...` citations below are relative to
 `$TT_METAL_HOME/tt-train/sources/ttml/` (here: `/home/ttuser/tt-metal/tt-train/sources/ttml/`).
 `ttnn/...` citations are relative to `$TT_METAL_HOME/`.
 
@@ -128,7 +128,7 @@ embedding lookup and slices back afterwards. For S = 256 this is a no-op.
 
 ## 2. RMSNorm
 
-**Citations.** `ttml/modules/rms_norm_module.cpp:24-30`, `ttml/ops/rmsnorm_op.cpp:26-67`
+Citations. `ttml/modules/rms_norm_module.cpp:24-30`, `ttml/ops/rmsnorm_op.cpp:26-67`
 (fused, the default) and `ttml/ops/rmsnorm_op.cpp:69-125` (composite reference), plus the
 device kernel `ttml/metal/ops/rmsnorm_fw/device/kernels/compute/rmsnorm_fw_kernel.cpp:288-372`
 and its program factory `.../rmsnorm_fw_program_factory.cpp:154-157`.
@@ -158,14 +158,14 @@ y_c    = gamma_c * x_c / rms(x)
 
 with `eps = 1e-5`, mean over the last axis (C = 384), `gamma` of shape `[C]`.
 
-**Where gamma sits:** the kernel multiplies `gamma` into `x` *before* dividing by `rms`, but
+Where gamma sits: the kernel multiplies `gamma` into `x` *before* dividing by `rms`, but
 both are elementwise scalar operations on the same element, so `gamma·x/rms == gamma·(x/rms)`
 — mathematically it does not matter. What *does* matter and is unambiguous: the weight is
 plain `gamma`, **not** `1 + gamma` (no unit offset anywhere;
 `ttml/modules/rms_norm_module.cpp:13` initialises gamma to ones, and nothing adds one at use
 time).
 
-**Confidence: high.** Two independent implementations in the tree (kernel + composite) agree.
+Confidence: high. Two independent implementations in the tree (kernel + composite) agree.
 
 ---
 
@@ -178,7 +178,7 @@ frequency table), a structural one (the rotation matrix and the kernel that appl
 architectural one (a tiling constraint that makes the alternative impossible), and an
 intentional one (ttml's own importer converting the other convention into this one).
 
-**Citations.** `ttml/ops/rope_op.cpp:191-235` (`gen_freqs`), `:237-248` (`gen_trans_mat`),
+Citations. `ttml/ops/rope_op.cpp:191-235` (`gen_freqs`), `:237-248` (`gen_trans_mat`),
 `:250-299` (`build_rope_params`), `:112-189` (`rope`), and the ttnn kernel that actually does
 the arithmetic,
 `ttnn/cpp/ttnn/operations/experimental/transformer/rotary_embedding_llama/device/kernels/compute/rotary_embedding_llama.cpp:90-138`.
@@ -243,7 +243,7 @@ pair. This fixes the pairing as `(2j, 2j+1)`.
 #### The tiling makes split-halves structurally impossible
 
 `rotary_embedding_llama.cpp:93-96` applies that one 32×32 tile to each head-dim tile
-**independently**:
+independently:
 
 ```cpp
 for (uint32_t j = 0; j < Wt; ++j) {
@@ -338,7 +338,7 @@ gradient with `neg_cos_cache`/`neg_sin_cache` substituted, reusing `trans_mat` u
 comment at `:166-169` says exactly this). The four caches therefore imply nothing about the
 forward pairing — they are a precompute-instead-of-negate-at-runtime optimisation for training.
 
-**A pure forward reference needs only `cos_cache` and `sin_cache`.**
+A pure forward reference needs only `cos_cache` and `sin_cache`.
 
 ### 3.7 Position offset
 
@@ -358,7 +358,7 @@ checkpoint records no scaling params rather than silently ignoring them.
 
 ## 4. `grouped_heads_creation` — K precedes V, head-major, plain reshape
 
-**Citations.** `ttml/ops/multi_head_utils.cpp:88-130`, which calls
+Citations. `ttml/ops/multi_head_utils.cpp:88-130`, which calls
 `ttnn::experimental::nlp_create_qkv_heads(qs, kvs, num_q_heads=H, num_kv_heads=G, transpose_k_heads=false, …)`.
 The semantics come from
 `ttnn/cpp/ttnn/operations/experimental/transformer/nlp_create_qkv_heads/nlp_create_qkv_heads.cpp:20-32`
@@ -416,13 +416,13 @@ walks `c_dim` outer / `w_dim` inner and writes contiguously, giving
 confirmed by the gradient at `ttml/ops/multi_head_utils.cpp:75-79`, which is
 `transpose(-2,-1) → reshape(B,H,E/H,S) → transpose(-2,-1)`, the transpose-of-reshape inverse.
 
-**Confidence: high** for the K-before-V ordering and the head-major layout.
+Confidence: high for the K-before-V ordering and the head-major layout.
 
 ---
 
 ## 5. `scaled_dot_product_attention`
 
-**Citations.** `ttml/ops/scaled_dot_product_attention.cpp:241-300` (the production entry point,
+Citations. `ttml/ops/scaled_dot_product_attention.cpp:241-300` (the production entry point,
 which dispatches to the fused metal kernel) and `:140-239` (`_composite`, a second
 implementation kept in-tree). The fused kernel's scale is set in
 `ttml/metal/ops/sdpa_fw/device/sdpa_fw_program_factory.cpp:271,293-294`; the softmax and
@@ -449,7 +449,7 @@ scale = 1 / sqrt(head_dim) = 1/8
 
 ### 5.2 Causal mask — additive, large negative, applied to the raw scores
 
-**This checkpoint took the `Arbitrary` path, not the built-in `Causal` one.** The driver is
+This checkpoint took the `Arbitrary` path, not the built-in `Causal` one. The driver is
 `train/run.py:150` → `ttml.common.trainer.train()`, and that function builds an explicit mask:
 
 ```python
@@ -473,7 +473,7 @@ not our entry point. The arithmetic below is unchanged, but the justification wa
 the failure mode this document exists to prevent, so it is recorded rather than quietly
 overwritten.)*
 
-**The two branches coincide numerically**, which is what makes this a cross-check rather than a
+The two branches coincide numerically, which is what makes this a cross-check rather than a
 correction. Both produce an **additive** `0 / −1e9`:
 
 *Arbitrary* (`sdpa_compute_utils.hpp:67-98`), given mask `m ∈ {0, 1}` and score `s`:
@@ -510,7 +510,7 @@ max-subtraction for better numerical precision"). `sdpa_compute_utils.hpp:167-17
 in whether the effective mask constant is `−1e9` or `−1.25e8`; both are `−inf` for every
 practical purpose after `exp`.
 
-**Trap worth naming:** under `Arbitrary` the built-in causal pattern is *not* additionally
+Trap worth naming: under `Arbitrary` the built-in causal pattern is *not* additionally
 applied — the supplied `[1,1,S,S]` mask must itself be causal, and here it is. Anyone who
 passes a non-causal mask (or an all-ones one) gets a non-causal model with no complaint from
 the kernel.
@@ -540,14 +540,14 @@ scores[h, i, j] = (q[h, i, :] · k[h//2, j, :]) / sqrt(64)     for j <= i
 attn[h, i, :]   = softmax_j(scores[h, i, :]) @ v[h//2, :, :]
 ```
 
-**Confidence: high** for the scale and the additive causal mask; **high** for the head→group
+Confidence: high for the scale and the additive causal mask; **high** for the head→group
 mapping (fused and composite paths independently agree).
 
 ---
 
 ## 6. SwiGLU
 
-**Citations.** `ttml/modules/llama_block.cpp:34-37` (the call site) and
+Citations. `ttml/modules/llama_block.cpp:34-37` (the call site) and
 `ttml/ops/swiglu_op.cpp:56-125` (fused, default) / `:41-54` (composite reference).
 
 Call site, `llama_block.cpp:36`:
@@ -580,7 +580,7 @@ mlp(x) = ( silu(x @ w1.T) * (x @ w3.T) ) @ w2.T
 silu(z) = z * sigmoid(z) = z / (1 + exp(-z))
 ```
 
-**SiLU is on the `w1` branch; `w3` is the un-activated gate.** In HF `LlamaMLP` terms,
+SiLU is on the `w1` branch; `w3` is the un-activated gate. In HF `LlamaMLP` terms,
 `w1 = gate_proj`, `w3 = up_proj`, `w2 = down_proj` — corroborated independently by ttml's HF
 importer, which maps `mlp.gate_proj → mlp/w1`, `mlp.up_proj → mlp/w3`, `mlp.down_proj → mlp/w2`
 (`ttml/models/llama.cpp:602-638`).
@@ -588,14 +588,14 @@ importer, which maps `mlp.gate_proj → mlp/w1`, `mlp.up_proj → mlp/w3`, `mlp.
 Dropout is `0.0` for this model and is applied only to the *output* of the `w2` projection
 (`swiglu_op.cpp:113-124`), so it is identity here.
 
-**Confidence: high.** Two implementations agree and the checkpoint shapes are consistent with
+Confidence: high. Two implementations agree and the checkpoint shapes are consistent with
 only this assignment.
 
 ---
 
 ## 7. Embedding, output projection, weight tying
 
-**Citations.** `ttml/models/llama.cpp:136-141` (construction), `:169,177` (registration),
+Citations. `ttml/models/llama.cpp:136-141` (construction), `:169,177` (registration),
 `:207,250-252` (forward), `ttml/modules/embedding_module.cpp:38-55`,
 `ttml/ops/embedding_op.cpp:16-28`, `ttml/modules/module_base.cpp:56-82` (the dedup that explains
 the checkpoint's tensor set), and `ttml/models/llama.cpp:461-475` (the importer's own choice of
@@ -651,7 +651,7 @@ logits[s, :] = h_final[s, :] @ W_fc.T
 multiple of 32, and the checkpoint's `(1, 1, 32000, 384)` confirms it. Logits are `[S, 32000]`
 with no padded tail to slice off.
 
-**Confidence: high.**
+Confidence: high.
 
 ---
 
@@ -741,7 +741,7 @@ Mean next-token cross-entropy, and the same run with one convention deliberately
 | GQA broadcast changed to `tile` instead of `repeat_interleave` | 3.717 | +1.870 | 16.8 |
 | fused `kv` split changed to V-before-K | 7.603 | +5.756 | 51.6 |
 
-**Dispersion matters here, so it is reported rather than left implicit.** Per-window spread is
+Dispersion matters here, so it is reported rather than left implicit. Per-window spread is
 large (sd ≈ 0.315 nats across the eight windows), giving SE of the mean ≈ **0.112 nats** and a
 2σ detection floor of ≈ **0.22 nats**. This instrument is *coarse*: it cannot see anything
 smaller than roughly a fifth of a nat.
@@ -798,13 +798,13 @@ Still untraced: the accumulation and output dtype of `ttnn_fixed::matmul`
 (`ttml/ttnn_fixed/matmuls.cpp`), which governs every projection and the QK^T/AV products, and
 what `core::ComputeKernelConfig::precise()` resolves to per-op. Those are the remaining terms.
 
-**Consequence for the next task — the important part:** the 1e-3 tolerance is a
-**NumPy-vs-HF-conversion** budget, and both sides of *that* comparison are float32 host
+Consequence for the next task — the important part: the 1e-3 tolerance is a
+NumPy-vs-HF-conversion budget, and both sides of *that* comparison are float32 host
 arithmetic, so it may well be fine. What it must **not** be read as is a NumPy-vs-device budget.
 And a NumPy-vs-NumPy control should be run before the gate is asserted, otherwise a failure is
 ambiguous between "the conversion is wrong" and "the tolerance was never achievable".
 
-**Q2 — `fmod(theta_mat, 2π)` — CLOSED, immaterial.**
+Q2 — `fmod(theta_mat, 2π)` — CLOSED, immaterial.
 `ttml/ops/rope_op.cpp:221` reduces the angle to the principal range before sin/cos; a naive
 NumPy `rope` does not. Measured: running the §8 reference in float32 with and without
 `np.fmod(ang, 2π)` gives mean CE **1.8470 both ways** — identical to four decimal places
@@ -812,7 +812,7 @@ NumPy `rope` does not. Measured: running the §8 reference in float32 with and w
 range for this reduction. **No action needed**, though applying the `fmod` costs nothing if a
 reader wants to remove the question entirely.
 
-**Q3 — `RotaryEmbeddingParams::theta` is never populated.**
+Q3 — `RotaryEmbeddingParams::theta` is never populated.
 `build_rope_params` (`ttml/ops/rope_op.cpp:287-298`) sets every field *except* `.theta`, so the
 struct member keeps its `10000.0F` default (`ttml/ops/rope_op.hpp:32`) while the frequencies are
 built from the real `theta = 500000` passed as an argument to `gen_freqs` (`:285`). A grep found
@@ -822,7 +822,7 @@ tt-train tree including tests and the distributed model variants. **Flagged beca
 later reads `params.theta` expecting the configured value will get `10000` and produce a
 plausible-but-wrong model — the same failure shape as the Plan 4 bug.
 
-**Q4 — Value of the causal mask constant — CLOSED.**
+Q4 — Value of the causal mask constant — CLOSED.
 `constexpr uint16_t BF16_NEG_LARGE_BITS = 0xCE6E;  // upper 16 bits of -1e9F (bfloat16)`
 (`ttml/metal/common/dataflow_utils.hpp:46`, used at `:275` by `fill_causal_mask_tile`). So the
 constant is exactly `−1e9` rounded to bf16, matching the `1e9` multiplier the `Arbitrary` path
@@ -830,7 +830,7 @@ uses (§5.2) — the two mask branches agree on the value as well as the form. B
 `−1e9/8 ≈ −1.25e8` underflow to exactly 0 after `exp`, identically to a true `−inf`, so a
 reference using `−np.inf` is correct. **No action needed.**
 
-**Q5 — Whether ttml's `softmax` differs from a textbook softmax.**
+Q5 — Whether ttml's `softmax` differs from a textbook softmax.
 The fused kernel uses an online/flash formulation with running max and log-sum-exp
 (`sdpa_compute_utils.hpp:160-274`); the composite path calls `ttml::metal::softmax`
 (`scaled_dot_product_attention.cpp:181`). I read enough of the flash path to confirm it is a
@@ -838,7 +838,7 @@ standard max-subtracted softmax, but did not audit `metal/ops/softmax` itself. S
 production path is the fused one, this is a gap only for anyone reasoning about the composite
 path. **To resolve:** read `ttml/metal/ops/softmax/`.
 
-**Q6 — No ttml activation was ever captured; §8.1 is an end-to-end proxy, not an op-level check.**
+Q6 — No ttml activation was ever captured; §8.1 is an end-to-end proxy, not an op-level check.
 Every convention above is read off source. §8.1 then runs the derived reference and shows it
 reproduces the checkpoint's training loss (1.847 vs 1.8781, 0.3 SE) while three
 deliberately-broken variants do not — real evidence, and much stronger than the four checks Plan
@@ -860,7 +860,7 @@ So the genuinely §8.1-invisible set is essentially **just epsilon placement** �
 "quiet-looking" conventions turn out to be loud. Useful to know when deciding where to look
 first if the harness misbehaves.
 
-**To resolve:** capture per-layer activations from an actual ttml forward pass and diff them
+To resolve: capture per-layer activations from an actual ttml forward pass and diff them
 against the reference block by block, which localises a convention error to one op instead of
 leaving a whole-model mismatch to bisect. **Consequence:** if the next task's HF-vs-NumPy
 comparison fails at 1e-3, §8.1 does *not* license concluding "the NumPy side is right, so the
@@ -894,7 +894,7 @@ obstacle), Q3 is a latent trap in ttml rather than a fact about this forward pas
 only for the non-production composite path, and Q6 is about the coarseness of the end-to-end
 check.
 
-**If you read only one open question, read Q1** — though note its body scopes the remaining
+If you read only one open question, read Q1 — though note its body scopes the remaining
 obstacle to the *NumPy-vs-device* comparison specifically. The *NumPy-vs-HF-conversion* gate
 Q1 originally worried might be unreachable was resolved by Task 3 at ~5e-6 to ~1.6e-5
 (`tests/test_numpy_parity.py`), two orders of magnitude inside the 1e-3 tolerance that

@@ -29,35 +29,28 @@ Verified on this box, against tt-metal at `~/tt-metal`:
 | Core-local L1 | Per-Tensix SRAM | circular buffers pinned to a `CoreRangeSet` |
 | Register-coherent token bags | measured, not assumed | `scripts/probe_grid_layout.py` — a core's bag is 86% as coherent as a cosine neighbourhood, and past ~200 cells it beats one |
 
-## The correction that shapes everything downstream
+## What the per-core PRNG is, and is not
 
-An earlier framing of this work leaned on per-core stochastic-rounding noise as
-the ingredient a CPU "could not possibly" reach. **That was overstated.** What
-the hardware has is a *seeded LFSR sitting in a config register* — not entropy.
-Hand a CPU the seed and the algorithm and it reproduces the sequence exactly.
-The hardware gives per-core **distinctness**, not per-core **unreproducibility**.
+The Tensix PRNG is a seeded LFSR held in a config register, not an entropy
+source. Given the seed and the algorithm, a CPU reproduces the sequence exactly.
+The hardware provides per-core *distinctness*, not per-core *unreproducibility*.
 
-This is the better outcome, and not as a consolation prize. Everything this
-project measures by — the digest-pinned prompt sets, the seed-noise floor, the
-`episod-log.md` discipline of asking one question over and over — depends on
-being able to run the same thing twice. A process seeded from genuine entropy
-would be unmeasurable and unloggable: we could never say a change moved
-anything, because nothing would ever repeat.
+That suits this project. Everything here is measured by comparison — digest-pinned
+prompt sets, seed-noise floors, the same question asked of every checkpoint — and
+all of it requires running the same thing twice. A process seeded from genuine
+entropy could not be measured or logged, because nothing would repeat.
 
-So the achievable claim is not *"impossible to fake"*. It is:
+So the claim this design supports is:
 
-> **The hardware is the reference implementation. Everything else is a
-> simulation of it.**
-
-That survives contact with our own measurement discipline. The stronger claim
-does not.
+> The hardware is the reference implementation. Everything else is a simulation
+> of it.
 
 ## The trilemma
 
 Pushing on "CPU can't possibly get it" leads somewhere uncomfortable that is
 better stated up front than discovered late:
 
-**Anything deterministic can be simulated.** If a process replays identically on
+Anything deterministic can be simulated. If a process replays identically on
 TT, then it is an algorithm plus a state, and a sufficiently determined person
 can reimplement both on a CPU. Reproducibility *is* simulability. So "impossible
 to reach on CPU" and "reproducible" cannot both hold. Pick one:
@@ -96,9 +89,9 @@ silicon at all.
 
 `scripts/probe_core_prng.py` settles it. Three conditions, each run twice:
 
-* **distinct** — every core seeded differently
-* **identical** — every core seeded the *same* (the decisive one)
-* **unseeded** — `rand_tile_init()` never called
+* `distinct` — every core seeded differently
+* `identical` — every core seeded the same
+* `unseeded` — `rand_tile_init()` never called
 
 Running each twice is what separates *different* from *unreproducible*. A stream
 that changes between runs is not a signature; it is noise, and noise cannot be
@@ -122,18 +115,15 @@ Outcomes and what each licenses:
 | `identical` (same seed everywhere) | **0 / 16** | yes |
 | `unseeded`, fresh process | 7 / 16 | no |
 
-**The decisive line is the middle one.** Sixteen cores handed the same seed
-produced byte-identical streams. There is **no intrinsic core identity** in the
-seeded PRNG: it is an LFSR, the seed fully determines the sequence, and nothing
-about the physical Tensix enters it. Per-core behaviour is manufactured by the
-host, and is reproducible on CPU by anyone who reimplements the LFSR. The
-earlier framing — "per-core noise a CPU cannot reach" — is now measured false,
-not merely overstated.
+The middle row is the one that matters. Sixteen cores handed the same seed
+produce byte-identical streams, so the seeded PRNG carries no intrinsic core
+identity: the seed fully determines the sequence and nothing about the physical
+Tensix enters it. Per-core behaviour is assigned by the host and is reproducible
+on CPU by anyone who reimplements the LFSR.
 
-`distinct` confirms the mechanism works as intended and replays exactly, which
-is what makes it usable as a foundation.
+`distinct` confirms the mechanism replays exactly, which is what makes it usable.
 
-`unseeded` is the one surprise: at rest the cores are **not** uniform — 7 of 16
+Under `unseeded`, the cores are not uniform at rest — 7 of 16
 differ from core 0. So some per-core state does exist in that register before
 anyone writes it. Two limits on what that licenses, both important:
 
@@ -146,7 +136,7 @@ anyone writes it. Two limits on what that licenses, both important:
 So the unseeded register is exactly trilemma option 1: the one thing a CPU
 genuinely cannot mimic, and unusable for anything we intend to measure.
 
-**Consequence for the design:** proceed on option 2 with option 3's character,
+Consequence for the design: proceed on option 2 with option 3's character,
 as planned. Structure comes from the measured grid layout; selection comes from
 host-assigned per-core seeds. The claim is "the hardware is the reference
 implementation", and that claim is now backed by measurement rather than hope.
@@ -165,30 +155,23 @@ broadcast-subtract, exp, sum and log — four more stages and a second pass — 
 MAX is one reduce and is a legitimate scoring rule on its own. The log-sum-exp
 version is the follow-up.
 
-Three bugs, and what each cost:
+Requirements this path depends on, each of which fails quietly if missed:
 
-1. **Compile failure.** This tt-metal wants compute kernels to define
-   `kernel_main`; the older `namespace NAMESPACE { void MAIN }` does not link.
-2. **A 20-minute hang at 110 cores, and zeros at one core.** Both were the same
-   omission: `compute_kernel_hw_startup()`, which programs the unpacker tile
-   descriptors and the math ALU format registers. Without it the pipeline is
-   unconfigured, the reduce packs zeros *silently*, and at full width it stalls.
-   Bisecting to a single core is what separated the two symptoms — at 110 cores
-   the stall said nothing about which kernel was at fault.
-3. **1-ULP disagreements that were never a device bug.** The Tensix source
-   registers narrow fp32 on the way into the math pipeline, so with arbitrary
-   fp32 inputs the gate was really measuring float narrowing. A hypothesis that
-   the hardware *truncates* where torch rounds was tested and **refuted** —
-   round-to-nearest and truncation matched identically (4/32, then 13/110).
-   Feeding bf16-exact inputs removed the ambiguity and the gate went green.
-
-The third one is the reusable lesson: a gate whose reference is less precise than
-its subject measures the reference.
+1. Compute kernels define `kernel_main`. The older
+   `namespace NAMESPACE { void MAIN }` form does not link against this tt-metal.
+2. `compute_kernel_hw_startup()` must be called before the reduce. It programs
+   the unpacker tile descriptors and math ALU format registers; without it the
+   reduce packs zeros and, at full grid width, the program stalls.
+3. The gate's reference must be at least as precise as the device. Tensix source
+   registers narrow fp32 entering the math pipeline, so with arbitrary fp32
+   inputs the comparison measures float narrowing rather than the reduction.
+   The gate feeds bf16-exact inputs, and reports agreement under both
+   round-to-nearest and truncation so the ambiguity cannot return unnoticed.
 
 ## On-device sampling (2026-08-17)
 
 `docs/measurements/core-sampling-device-gate.json` — **PASS**: TV distance
-**0.1064** against a sampling-noise floor of mean 0.1284 / p95 0.1512 over 400
+0.1064 against a sampling-noise floor of mean 0.1284 / p95 0.1512 over 400
 draws, 54 distinct cores, deterministic replay.
 
 Sampling is done by **Gumbel-max**, which turns a categorical draw into the max
@@ -200,11 +183,11 @@ is distributed exactly as a draw from `softmax(logits / T)` — no normalisation
 no cross-core sum. And it **composes hierarchically**: if every core perturbs its
 own tokens and reports its own max, the argmax across cores is a draw from the
 softmax over the entire vocabulary, provably. The sampler therefore decomposes
-into precisely the shape of the hardware — 110 cores, each answering about its
+into the shape of the hardware — 110 cores, each answering about its
 own region, from its own L1, using its own random stream, needing to know nothing
 about any other core.
 
-**The oracle changes here, and that is the point.** Scoring is deterministic
+The oracle changes here, and that is the point. Scoring is deterministic
 arithmetic and is gated bit-for-bit against NumPy. Sampling cannot be: the device
 draws from the Tensix PRNG, a hardware LFSR NumPy cannot reproduce. There is no
 bit-parity oracle for this stage, and inventing one would mean reimplementing the
@@ -212,13 +195,11 @@ silicon. What is gated instead is distribution (against a bootstrap noise floor,
 not an arbitrary threshold) and determinism. From this stage on, the device
 *defines* the sample and the CPU can only confirm it is correctly distributed.
 
-One bug, and it is the reason the gate is built this way: the SFPU `log` and
-`negative` ops each need their init call immediately before use, and interleaved
-ops must re-init at every switch. Without those calls the kernel **ran, replayed
-deterministically, and produced plausible spread** — it simply sampled from the
-wrong distribution (TV 0.9324 against a 0.5008 floor). Nothing about it looked
-like a bug; it looked like a modelling choice. Only a distributional gate
-calibrated to a noise floor could tell the difference.
+The SFPU `log` and `negative` ops each require their init call immediately
+before use, and interleaved ops must re-init at every switch. Omitting them
+produces a kernel that runs, replays deterministically and yields plausible
+spread while sampling from the wrong distribution, which is why this stage is
+gated against a noise floor rather than by inspection.
 
 ## Why not tt-lang
 

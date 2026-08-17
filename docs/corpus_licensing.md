@@ -3,7 +3,7 @@
 
 # Corpus sources and licensing
 
-**Generated from `train/corpus.py` by `scripts/render_licensing.py`. Do not edit by hand — regenerate it.**
+Generated from `train/corpus.py` by `scripts/render_licensing.py`. Do not edit by hand — regenerate it.
 
 | Source | Slice | Share | Licence | Pinned revision |
 |---|---|---|---|---|
@@ -31,12 +31,12 @@
 
 ## What this project does and does not claim
 
-**We do not redistribute the corpus.** This repository ships a *recipe* — pinned dataset revisions and a deterministic blend — not the text. Reconstructing it locally is what `scripts/fetch_corpus.py` and `scripts/blend_corpus.py` are for.
+We do not redistribute the corpus. This repository ships a *recipe* — pinned dataset revisions and a deterministic blend — not the text. Reconstructing it locally is what `scripts/fetch_corpus.py` and `scripts/blend_corpus.py` are for.
 
-**What the blend actually contains** — real per-source token counts, achieved shares and repetition factors from the build itself — is recorded in [`corpus_blend.md`](corpus_blend.md) and [`measurements/blend_manifest.json`](measurements/blend_manifest.json). The table above is the *target*; that record is the *outcome*.
+What the blend actually contains — real per-source token counts, achieved shares and repetition factors from the build itself — is recorded in [`corpus_blend.md`](corpus_blend.md) and [`measurements/blend_manifest.json`](measurements/blend_manifest.json). The table above is the *target*; that record is the *outcome*.
 
-**Share-alike sources:** `tinystories` (CDLA-Sharing-1.0), `wikipedia_simple` (CC-BY-SA-3.0). Whether model weights trained on share-alike data constitute a Data Derivative is **unsettled**. This project does not assert that they do not. Anyone publishing weights trained with this recipe should reach their own conclusion rather than inheriting one.
+Share-alike sources: `tinystories` (CDLA-Sharing-1.0), `wikipedia_simple` (CC-BY-SA-3.0). Whether model weights trained on share-alike data constitute a Data Derivative is **unsettled**. This project does not assert that they do not. Anyone publishing weights trained with this recipe should reach their own conclusion rather than inheriting one.
 
-**Project Gutenberg material** is public domain as *text*; the aggregations we fetch it through carry their own permissive terms, recorded in the table above. `scripts/prepare_corpus.py` strips Project Gutenberg headers, footers and front-matter packaging, and this project does not use the Project Gutenberg trademark.
+Project Gutenberg material is public domain as *text*; the aggregations we fetch it through carry their own permissive terms, recorded in the table above. `scripts/prepare_corpus.py` strips Project Gutenberg headers, footers and front-matter packaging, and this project does not use the Project Gutenberg trademark.
 
 This is a stated position, not legal advice.

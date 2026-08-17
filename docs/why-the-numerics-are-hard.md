@@ -52,7 +52,7 @@ continuous side. That is not an accident of this project; it is what is easy to 
 
 ## Two properties that make TT arithmetic harder to reason about
 
-**Block float is not iid noise.** `bfp8` and `bfp4` share a single exponent across a tile of
+Block float is not iid noise. `bfp8` and `bfp4` share a single exponent across a tile of
 32 values. One large activation degrades the precision of its 31 neighbours. Error is
 therefore *data-dependent and correlated between adjacent elements* — precisely the
 assumption that standard error-propagation arguments violate. "Raise the precision and the
@@ -60,7 +60,7 @@ error shrinks proportionally" is a hypothesis, not a theorem. Tested here: movin
 to `BFLOAT16` and the MLP off `BFLOAT4_B` bought about **one token** of free-running
 agreement (median 3 → 4 of 40).
 
-**Autoregressive decode is a feedback loop.** Prefill is one forward pass and its error is
+Autoregressive decode is a feedback loop. Prefill is one forward pass and its error is
 bounded. Decode feeds output back as input, so the model's own dynamics amplify whatever was
 wrong. This is exactly why teacher forcing hides the failure — it breaks the loop — and why
 nine teacher-forced decode steps said nothing useful about four real ones.

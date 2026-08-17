@@ -62,7 +62,7 @@ silently ignored. For multi-chip Blackhole this is not hypothetical: fabric conf
 is exactly what a 2/4-chip run needs, and getting it wrong produces
 `Fabric Router Sync: Timeout` rather than a clear error.
 
-**Suggested fix:** either compose them into the launch env, or drop the promise from the
+Suggested fix: either compose them into the launch env, or drop the promise from the
 docstring and mark both as search-only metadata. The current state is the worst of the
 three, because it reads as implemented.
 
@@ -82,13 +82,13 @@ The author must know to duplicate the repo id into `manifest.env`, and nothing v
 that they did. Since tt-kernel already knows `weights.repo`, it could either default
 `HF_MODEL` from it or warn when a vLLM-backend manifest omits it.
 
-**Impact:** every v4 vLLM bundle needs this, so every author hits it once.
+Impact: every v4 vLLM bundle needs this, so every author hits it once.
 
 ### 3. `mesh.devices` and `env.MESH_DEVICE` are independent, and nothing cross-checks them
 
 Authoring the 1024 manifest with `mesh.devices: 4` exposed this. The rendered
 `vllm_metadata.json` has exactly four keys — `arch`, `hf_weights`, `launch`, `main_class`.
-**The entire `mesh` block contributes nothing to it.** The mesh the plugin actually opens
+The entire `mesh` block contributes nothing to it. The mesh the plugin actually opens
 comes only from the `MESH_DEVICE` string in `env`.
 
 So these are two independent channels describing the same thing, and a manifest can claim
@@ -103,7 +103,7 @@ That validates cleanly and serves on **one** chip while advertising four. `mesh.
 does reach `device_count` in the published bundle (`cli.py:332-334`), so the bundle's own
 metadata is wrong too — `search` and any consumer reasoning about topology see 4.
 
-**Suggested fix:** cross-check them at push. tt-kernel already parses both, and the plugin's
+Suggested fix: cross-check them at push. tt-kernel already parses both, and the plugin's
 preset table (`vllm_tt_plugin/utils/dp_discovery.py::_MESH_GRID_PRESETS`) is the mapping
 needed. Failing that, compose `MESH_DEVICE` *from* `mesh.devices` rather than requiring the
 author to state it twice.

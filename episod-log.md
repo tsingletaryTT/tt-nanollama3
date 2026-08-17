@@ -15,7 +15,7 @@ faster than light **that will not work** is not a way at all — the request can
 there is no fact it is fishing for and nothing here can be graded against physics. Known
 physics has no faster-than-light method to report, and one that fails is simply not a method.
 
-**So the success condition is: a continuation inspired by the prompt and reasonably coherent.**
+So the success condition is: a continuation inspired by the prompt and reasonably coherent.
 That is not a consolation bar, it is the actual bar. This is a base language model with no
 instruction tuning — it continues, it does not answer — and what comes back is a reading of its
 register and its grip on a sentence. The numbers in `docs/measurements/` say whether a change
@@ -25,7 +25,7 @@ Entries should therefore not be written up as though the model failed to answer,
 engage with physics, or missed a target. There is no target. Note what the voice is doing —
 where it reaches, what register it lands in, whether the sentence holds — and leave it there.
 
-**These completions are ad-hoc samples, not benchmark results.** They come from
+These completions are ad-hoc samples, not benchmark results. They come from
 `scripts/evaluate.py --try`, which writes to `scratch/` precisely so nobody mistakes them for a
 measurement. The frozen prompt sets (`docs/evaluation_prompts.json`,
 `docs/evaluation_prompts_b.json`) are digest-pinned and are where comparable numbers come
@@ -41,7 +41,7 @@ at 1.0, and only seeing all three tells you which.
 
 Two wins landed the same day, and they compose.
 
-**The redundant causal mask** (`36d9be8`). `ttml/common/trainer.py` always passed an explicit
+The redundant causal mask (`36d9be8`). `ttml/common/trainer.py` always passed an explicit
 attention mask, and the SDPA kernel picks its mask mode from *whether a mask object was passed*
 rather than what is in it — so every step paid for `AttentionMaskType::Arbitrary`: roughly
 double the attention FLOPs with load balancing off. The C++ `CppLlama` binding has no
@@ -50,9 +50,9 @@ already declares `nb::arg("mask") = std::nullopt`. No rebuild, no monkeypatch, n
 edit. **503.3 → 356.7 s/1000 steps at the 384 shape, 1.41x.** Causality verified directly:
 perturbing token 128 leaves every earlier logit bit-identical.
 
-**Four-chip data parallelism** (`856362e`). Every run before this used one chip of four.
-**770.2 → 193.4 s/1000 at the 1024 shape, 3.98x**, and it composes with the mask fix for
-**4.62x** over the morning's baseline. Gradients are proven to synchronise — all four replicas
+Four-chip data parallelism (`856362e`). Every run before this used one chip of four.
+770.2 → 193.4 s/1000 at the 1024 shape, 3.98x, and it composes with the mask fix for
+4.62x over the morning's baseline. Gradients are proven to synchronise — all four replicas
 bit-identical across 66 tensors — with a negative control that produces 2.44e-3 when the
 parallelism context is left uninitialised. That control matters: the broken version trains at
 full speed and draws a perfectly ordinary loss curve.
@@ -60,22 +60,18 @@ full speed and draws a perfectly ordinary loss curve.
 Neither win touched tt-metal. What could not be fixed from our side is written up in
 `docs/upstream-tt-metal-asks.md` with reproductions.
 
-**Known limitation as of this entry — since resolved, same day:** a DDP run could not write a
-usable checkpoint. The optimizer step re-marks replicated parameters as `Shard(0)` while the data
-stays replicated, so the saver wrote all four copies concatenated;
-`assert_saveable_on_mesh` refused rather than produce a plausible-looking corrupt file.
-
-**The fix needed no upstream change after all.** `ttnn.Tensor.update_tensor_topology` is bound in
-Python, so the false marking is correctable by any holder of the tensor: `train/checkpoint.py`
-now re-marks each parameter `Replicate` immediately before a save and restores the original
-topology immediately after, moving no data. A `--ddp 4` checkpoint is 737,824,624 bytes — the
-single-chip size — and every tensor in it is bitwise equal to replica 0. It converts to
-HuggingFace, loads, and generates; the NumPy parity gate ran against it for the first time and
-agreed to 2.56e-06, tighter than the committed baseline. Along the way: **stochastic rounding
-breaks DDP's replica-identity invariant** (each device rounds from its own RNG, so the four
-replicas drift apart despite identical all-reduced gradients) — filed upstream, and the reason
-the save-time guard is built on structural facts rather than a numeric replica comparison. Full
-write-up in `.superpowers/ddp-checkpoint-fix.md`.
+Checkpointing under `--ddp 4`: the optimizer step re-marks replicated parameters
+as `Shard(0)` while the data stays replicated, which would have the saver write
+all four copies concatenated. `ttnn.Tensor.update_tensor_topology` is bound in
+Python, so `train/checkpoint.py` re-marks each parameter `Replicate` immediately
+before a save and restores the original topology after, moving no data. A
+`--ddp 4` checkpoint is 737,824,624 bytes — the single-chip size — and every
+tensor in it is bitwise equal to replica 0. It converts to HuggingFace, loads and
+generates, and the NumPy parity gate agrees to 2.56e-06. Note that stochastic
+rounding breaks DDP's replica-identity invariant, since each device rounds from
+its own RNG; the save-time guard is therefore built on structural facts rather
+than a numeric replica comparison. Write-up in
+`.superpowers/ddp-checkpoint-fix.md`.
 
 ### The model, asked
 
@@ -102,8 +98,7 @@ weather in it and the model went to the nearest thing it owns.
 
 ## 2026-08-17 — sampling by NoC neighbourhood
 
-The model did not change. The **sampler** did, and for the first time it is one
-that could not have been written for a GPU.
+The model did not change; the sampler did.
 
 Every token in the 32k vocabulary now has an address on the harvested 11x10
 Blackhole die (`artifacts/token_core_map.npz`): balanced spherical k-means into
@@ -113,15 +108,14 @@ each *core* by the log-sum-exp of its members' logits, picks one, and then draws
 from every core within `--hops` of it on the torus. Tokens that are structurally
 adjacent get to compete with tokens that are merely probable.
 
-Two honest notes. The anneal earned only **1.038x** over the plain PCA squash, so
-most of the layout is the spectral init doing the work. And the first version
-took the `argmax` core, which collapsed onto one cell for 24 of 30 steps —
-log-sum-exp over ~291 members is dominated by word frequency, not by context.
-Sampling the core instead of maximising it took the walk from 5 distinct cores in
-30 tokens to 12.
+Two notes on the layout and the selection rule. The anneal contributes 1.038x
+over the plain PCA squash, so most of the arrangement comes from the spectral
+init. And the core is sampled from its softmax rather than maximised: log-sum-exp
+over ~291 members tracks word frequency more than context, so taking the argmax
+concentrates the walk on a single cell. Sampling gives 12 distinct cores in 30
+tokens.
 
-The interesting part is what happens when you ask the same question from
-different directions on the die.
+Below, the same question asked from different directions on the die.
 
 ### The model, asked — six ways
 
@@ -172,29 +166,19 @@ and no cross-core sum, and *composes hierarchically* — so 110 cores each answe
 about their own region is provably the same as sampling over the whole vocabulary
 at once. The decomposition is the hardware's shape, not an approximation of it.
 
-Gated two ways, because the right oracle changes partway through. Scoring is
-deterministic arithmetic: **110/110 cores exact against NumPy**. Sampling cannot
-be gated that way — the device draws from a hardware LFSR NumPy cannot reproduce
-— so it is gated on distribution and determinism instead: **TV distance 0.1064
-against a sampling-noise floor of 0.1284**, deterministic replay true. From here
-the device defines the sample; the CPU only confirms it is correctly distributed.
+Gated two ways, because the available oracle differs by stage. Scoring is
+deterministic arithmetic: 110/110 cores exact against NumPy. Sampling draws from
+a hardware LFSR NumPy cannot reproduce, so it is gated on distribution and
+determinism: TV distance 0.1064 against a sampling-noise floor of 0.1284, with
+deterministic replay.
 
-Three bugs, each of which taught the design something:
-
-*The four single-hop directions returned byte-identical text.* Shifting the
-winner one hop and then admitting a one-hop neighbourhood re-admits the origin,
-which held the global argmax, so it simply won again. The fan was asking one
-question four times. Only the two-hop diagonals escaped. The CPU version had the
-same geometric flaw, hidden behind sampling noise — porting to a strict argmax is
-what exposed it.
-
-*Excluding the origin fixed the collision and destroyed the text.* Forced out of
-its best region on every one of 20 tokens, the penalty compounded and all six
-directions became word salad.
-
-*The direction is a branch, not a standing constraint.* Diverge once at the
-branch point, then generate normally. That is what asking the same question from
-six proximities actually means, and it is the version that works.
+Two properties of the directional fan, both of which follow from the geometry.
+A one-hop shift still leaves the origin inside a one-hop neighbourhood, so the
+origin cell is excluded when a direction is given; without that exclusion the
+four orthogonal directions return the same token. And the direction applies only
+at the first step: as a standing constraint it forces the sampler out of its best
+region on every token and the penalty compounds, so it is a branch point rather
+than a persistent restriction.
 
 ### The model, asked — six ways, on hardware
 

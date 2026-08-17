@@ -1,0 +1,53 @@
+{
+  "hf_model": "artifacts/hf-tt-tnt-1024a",
+  "tokens": "/home/ttuser/code/tt-tnt/artifacts/tokens-v3/val_ids.npy",
+  "seq_len": 512,
+  "n_windows": 256,
+  "batch_size": 32,
+  "seed": 0,
+  "bucket_edges": [
+    0,
+    32,
+    64,
+    128,
+    256,
+    512
+  ],
+  "overall": [
+    {
+      "lo": 0,
+      "hi": 32,
+      "mean": 3.6932372161880607,
+      "sem": 0.08696219502311243,
+      "n_windows": 256
+    },
+    {
+      "lo": 32,
+      "hi": 64,
+      "mean": 3.0063403067985766,
+      "sem": 0.07362506820992495,
+      "n_windows": 256
+    },
+    {
+      "lo": 64,
+      "hi": 128,
+      "mean": 2.7620578475548694,
+      "sem": 0.06410434199362545,
+      "n_windows": 256
+    },
+    {
+      "lo": 128,
+      "hi": 256,
+      "mean": 2.6941453528544814,
+      "sem": 0.06316597992363472,
+      "n_windows": 256
+    },
+    {
+      "lo": 256,
+      "hi": 512,
+      "mean": 2.649791747351987,
+      "sem": 0.0632373695656172,
+      "n_windows": 256
+    }
+  ]
+}

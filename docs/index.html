@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>tt-tnt — a small model built Tenstorrent-native, and measured until it stopped flattering itself</title>
+<title>tt-tnt — a small language model trained on Tenstorrent hardware</title>
 <meta name="description" content="tt-tnt is a Llama-3-style language model trained from random initialization on Tenstorrent Blackhole with ttml, packaged with tt-kernel, and served through the Tenstorrent vLLM plugin. It is small and it is not capable. What is unusual is how precisely its limits are known.">
 
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="tt-tnt">
-<meta property="og:title" content="tt-tnt — a small model built Tenstorrent-native, and measured until it stopped flattering itself">
+<meta property="og:title" content="tt-tnt — a small language model trained on Tenstorrent hardware">
 <meta property="og:description" content="Trained from random init on Blackhole with ttml, packaged with tt-kernel, served through the Tenstorrent vLLM plugin. ~123M parameters, one epoch, 400M tokens. Not capable — but its limits are measured, including the finding it had to withdraw.">
 <!-- ABSOLUTE, and it has to be. Open Graph and Twitter card scrapers do not resolve
      relative URLs against the page they scraped: a relative path here produces a link
@@ -279,20 +279,17 @@ footer a { color: var(--ink-3); }
 <header class="hero">
   <div class="wrap col">
     <p class="eyebrow">tenstorrent · tt-tnt</p>
-    <h1>A small model, built Tenstorrent-native, and measured until it stopped flattering itself.</h1>
+    <h1>A small language model trained on Tenstorrent hardware.</h1>
     <p class="lede">
       tt-tnt is a Llama-3-style language model trained from random initialization on
       Tenstorrent Blackhole hardware with <code>ttml</code> (tt-train), converted, packaged
-      with tt-kernel, and served through the Tenstorrent vLLM plugin. The whole path, with no
-      step borrowed from another vendor's stack.
+      with tt-kernel, and served through the Tenstorrent vLLM plugin.
     </p>
     <p class="lede">
-      It is not a capable model. It has ~123M parameters and has made a single pass over the
-      training split of a 400-million-token corpus. It cannot answer a question, it has no
-      instruction tuning, and
-      under greedy decoding it repeats itself. What is genuinely unusual about it is not what
-      it can do — it is how precisely its limits are known, and that one of this project's own
-      published findings was withdrawn when the measurement apparatus caught up with it.
+      It is a small model: ~123M parameters, a single pass over the training split of a
+      400-million-token corpus. It has no instruction tuning, does not answer questions, and
+      repeats itself under greedy decoding. The measurements below describe what it does and
+      where its limits are.
     </p>
   </div>
 </header>
@@ -303,13 +300,13 @@ footer a { color: var(--ink-3); }
       <li><a href="#ask">Ask it something</a></li>
       <li><a href="#path">The path</a></li>
       <li><a href="#corpus">The corpus</a></li>
-      <li><a href="#fixes">Its own fixes</a></li>
+      <li><a href="#fixes">Runtime patches</a></li>
       <li><a href="#speed">4.62×</a></li>
       <li><a href="#instruments">The instruments</a></li>
       <li><a href="#external">Someone else's benchmarks</a></li>
       <li><a href="#geography">Embedding geography</a></li>
-      <li><a href="#refuted">A refuted finding</a></li>
-      <li><a href="#separators">The regression</a></li>
+      <li><a href="#refuted">Measurement floors</a></li>
+      <li><a href="#separators">Document separators</a></li>
       <li><a href="#cannot">What it can't do</a></li>
       <li><a href="#links">Everything</a></li>
     </ol>
@@ -322,7 +319,7 @@ footer a { color: var(--ink-3); }
 <section id="ask">
   <div class="wrap col section-head">
     <p class="eyebrow">01 — the model, asked</p>
-    <h2>Nothing conveys the scale of a small model better than its own words.</h2>
+    <h2>Sample output.</h2>
     <p>
       Every notable change to this project ends by putting the same prompt to the current
       model and writing down what came back. The prompt is deliberately a <em>request</em>:
@@ -529,7 +526,7 @@ footer a { color: var(--ink-3); }
 <section id="fixes">
   <div class="wrap col section-head">
     <p class="eyebrow">04 — the bundle</p>
-    <h2>The model carries the tt-metal changes it needs, rather than waiting for them.</h2>
+    <h2>The bundle carries the tt-metal runtime patches it needs.</h2>
     <p>
       <code>bundle/tt_tnt_adapter.py</code> ships inside the distributed model bundle, applies
       at import time in the serving process, and is inert everywhere else. It is the
@@ -551,7 +548,7 @@ footer a { color: var(--ink-3); }
         </p>
       </div>
       <div class="card">
-        <h3>A converted-weight cache that lies</h3>
+        <h3>Converted-weight cache keyed without a source revision</h3>
         <p>
           The reuse decision for a converted-weight cache is a bare existence check — no
           revision, no content hash, no comparison against the source weights. A project that
@@ -608,10 +605,10 @@ footer a { color: var(--ink-3); }
 <section id="speed">
   <div class="wrap col section-head">
     <p class="eyebrow">05 — training throughput</p>
-    <h2>4.62× faster training, landed in one day, from two independent levers.</h2>
+    <h2>4.62× faster training, from two independent changes.</h2>
   </div>
   <div class="wrap col">
-    <h3>1.41× — a causal mask that was doing nothing</h3>
+    <h3>1.41× — redundant explicit attention mask</h3>
     <p>
       <code>ttml</code>'s trainer always passed an explicit attention mask, and the fused SDPA
       kernel picks its mask mode from <em>whether a mask object was passed</em> rather than
@@ -660,7 +657,7 @@ footer a { color: var(--ink-3); }
       <strong>1.41×</strong>. The two levers are independent, and they compose.
     </p>
     <div class="note">
-      <h3>The negative control is the part that makes the number mean anything</h3>
+      <h3>The negative control</h3>
       <p>
         <code>synchronize_gradients</code> silently returns early when the parallelism context
         is uninitialised — so a run can be four times faster and quietly wrong, and it draws a
@@ -691,7 +688,7 @@ footer a { color: var(--ink-3); }
       </p>
     </div>
 
-    <h3>The loose end: a four-chip run could not write a checkpoint</h3>
+    <h3>Four-chip checkpoint saving</h3>
     <p>
       The training step re-marks each replicated parameter's topology as sharded while the data
       stays genuinely replicated, so the saver wrote all four replicas concatenated —
@@ -701,7 +698,7 @@ footer a { color: var(--ink-3); }
       ask recorded this as something that could not be fixed here.
     </p>
     <p>
-      That was wrong, and being wrong about it is the more useful half of the story. The
+      That expectation did not hold. The
       topology marking turns out to be writable from Python, so it can be corrected by any
       holder of the tensor: the saver now re-marks each parameter as replicated immediately
       before a write and restores the original marking immediately after. No data moves, and a
@@ -723,7 +720,7 @@ footer a { color: var(--ink-3); }
 <section id="instruments">
   <div class="wrap col section-head">
     <p class="eyebrow">06 — the instruments</p>
-    <h2>The measurement apparatus is the substantial part of this project.</h2>
+    <h2>How the model is measured.</h2>
     <p>
       A 123M-parameter model trained for one epoch is not interesting. Knowing exactly what it
       does and does not do, with the error bars attached and the false positives thrown out, is.
@@ -775,7 +772,7 @@ footer a { color: var(--ink-3); }
     </div>
   </div>
   <div class="wrap col">
-    <h3>And the one that makes the rest trustworthy: a seed-noise floor</h3>
+    <h3>A seed-noise floor</h3>
     <p>
       Two runs, identical in every respect except the random seed. Everything they differ by is
       noise, by construction, and that difference is the floor under which no claim in this
@@ -824,12 +821,12 @@ footer a { color: var(--ink-3); }
       So the designated current model was run through EleutherAI's
       <code>lm-evaluation-harness</code> on eight benchmarks built by other people out of data
       nobody here chose. CPU only, float32, 3,465 seconds. The prediction going in was that it
-      would score at chance on all of them. That prediction was wrong, and the wrongness is the
+      would score at chance on all of them. It does not; the
       result.
     </p>
   </div>
   <div class="wrap col">
-    <h3>The reference column is measured, not quoted — and that is the methodological point</h3>
+    <h3>The reference column is measured, not quoted</h3>
     <p>
       GPT-2 small was run through the <em>same</em> harness: same <code>lm_eval</code> version,
       same task definitions, same machine, same day. Quoting its published figures instead would
@@ -893,7 +890,7 @@ footer a { color: var(--ink-3); }
     </div>
   </div>
   <div class="wrap col">
-    <h3>What it says, at the register it deserves</h3>
+    <h3>What the table says</h3>
     <p>
       <strong>The model has learned English, not just this corpus.</strong> That is the claim no
       instrument in the repository could reach, because every other one is scored against the
@@ -962,7 +959,7 @@ footer a { color: var(--ink-3); }
 <section id="geography">
   <div class="wrap col section-head">
     <p class="eyebrow">08 — the embedding space</p>
-    <h2>The vocabulary space has a corpus geography, so a grid layout would be discovered rather than imposed.</h2>
+    <h2>The vocabulary space has a corpus geography.</h2>
     <p>
       A proposed sampler would lay the 32,000-token vocabulary onto Blackhole's Tensix grid and
       sample by spatial neighbourhood, so that <em>direction on the grid</em> means <em>corpus
@@ -1075,7 +1072,7 @@ footer a { color: var(--ink-3); }
 <section id="refuted">
   <div class="wrap col section-head">
     <p class="eyebrow">09 — a result we withdrew</p>
-    <h2>The floor refuted one of our own findings.</h2>
+    <h2>Comparing a result against the seed-noise floor.</h2>
     <p>
       A run with a cosine learning-rate decay tail was compared against its predecessor and
       looked like an improvement. Several signals moved in the right direction and cleared
@@ -1184,7 +1181,7 @@ footer a { color: var(--ink-3); }
 <section id="separators">
   <div class="wrap col section-head">
     <p class="eyebrow">10 — the regression that mattered</p>
-    <h2>The corpus contained zero document separators, so the model could not stop.</h2>
+    <h2>Document separators were absent from the corpus.</h2>
     <p>
       Until it was fixed, each document was written into the blend as its text followed by a
       blank line — which spells a document boundary exactly the way a paragraph break
@@ -1243,7 +1240,7 @@ footer a { color: var(--ink-3); }
       tokens in the short sources to one per ~80,000 in the books.
     </p>
     <div class="note refuted">
-      <h3>And a hand count that the instrument then contradicted</h3>
+      <h3>A hand count, and what the instrument reports</h3>
       <p>
         Reading the two sample sheets side by side, someone counted fairy-tale collapse falling
         from 9 of 15 prompts to 1 of 15, and that figure was written down. The behavioural
@@ -1265,7 +1262,7 @@ footer a { color: var(--ink-3); }
       </p>
     </div>
     <div class="note">
-      <h3>Why this one is worth telling</h3>
+      <h3>What the separator regression affected</h3>
       <p>
         Three deliberate interventions had been proposed to fix the model's qualitative
         failures — a sampling change, a stratified validation split, and the learning-rate
@@ -1287,7 +1284,7 @@ footer a { color: var(--ink-3); }
     </p>
   </div>
   <div class="wrap col">
-    <h3>Register was the axis that would not move — and then moved for a reason nobody predicted</h3>
+    <h3>Register, and what moves it</h3>
     <p>
       The corpus was blended to pull the model's voice away from children's stories and towards
       its nineteenth-century naturalist and folklore sources. Three deliberate interventions

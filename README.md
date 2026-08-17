@@ -3,28 +3,27 @@
 
 # tt-tnt
 
-A small Llama-3-style language model built **Tenstorrent-first** — trained from random
-initialization on Blackhole hardware with `ttml` (tt-train), packaged with
+A small Llama-3-style language model trained from random initialization on Blackhole
+hardware with `ttml` (tt-train), packaged with
 [tt-kernel](https://github.com/tenstorrent/tt-kernel-package-manager), and served through the
 Tenstorrent vLLM plugin.
 
-The model is deliberately small. The point is not capability — it is to show, end to end and
-without gaps, what a model designed for Tenstorrent from the first line looks like when it is
-trained, packaged, published, and served entirely on Tenstorrent tooling.
+The model is small and is not intended to be capable. It exists to exercise the full path —
+training, packaging, publishing and serving — on Tenstorrent tooling.
 
 ## Status
 
-**Working today:** corpus preparation (a nine-source, licence-audited blend), a 32,000-token
+Working today: corpus preparation (a nine-source, licence-audited blend), a 32,000-token
 BPE tokenizer trained on that blend, a training entrypoint that runs on hardware with a real
 validation loop, checkpointing with resume, and conversion to a Hugging Face model directory.
-**The model has been trained for a full epoch** — 10,787 steps, batch 64, sequence length 512,
+The model has been trained for a full epoch — 10,787 steps, batch 64, sequence length 512,
 ~58 minutes on a single Blackhole p300c — over the blend's 353,495,970-token training split,
-finishing at train loss **3.3125** and validation loss **4.2203**. See
-[`docs/model-card.md`](docs/model-card.md) for the full curve and an honest read of it: it
-plateaus well before the run ends rather than still improving.
+finishing at train loss 3.3125 and validation loss 4.2203. See
+[`docs/model-card.md`](docs/model-card.md) for the full curve; it plateaus before the run
+ends rather than still improving.
 
-**Published, and public.** The weights on Hugging Face at
-[`episod/tt-tnt`](https://huggingface.co/episod/tt-tnt) are **`tt-tnt-v3`** — the same 384-size
+Published and public. The weights on Hugging Face at
+[`episod/tt-tnt`](https://huggingface.co/episod/tt-tnt) are `tt-tnt-v3` — the same 384-size
 architecture retrained at a 2048-token context, 10,764 steps, final validation loss 2.9937 —
 and it is the checkpoint that has been packaged, published and served end to end. It is *not*
 the `tt-tnt-v1` run whose epoch and losses this section quotes.
@@ -33,10 +32,10 @@ it public itself; the repo's visibility was changed to public separately, as an
 explicitly-authorized action outside that script (2026-08-14), and is expected to stay that
 way. The tt-kernel packaging manifests are under [`manifests/`](manifests/), and
 [`docs/serving-with-tt-kernel.md`](docs/serving-with-tt-kernel.md) is the procedure for pulling
-and serving that bundle — including the traps that cost hours to find. See
+and serving that bundle. See
 [`docs/superpowers/specs/`](docs/superpowers/specs/) for the full arc.
 
-**The corpus ships as a recipe, not as text.**
+The corpus ships as a recipe, not as text.
 [`episod/tt-tnt-corpus`](https://huggingface.co/datasets/episod/tt-tnt-corpus) (also public)
 carries the source registry with pinned revisions, the fetch/prepare/measure/blend scripts, the
 generated licensing table, and the provenance manifest with the blend's `sha256` — everything
@@ -45,7 +44,7 @@ is a licensing necessity rather than a stylistic choice: 46% of the blend is sha
 two mutually incompatible copyleft terms (CDLA-Sharing-1.0 and CC-BY-SA-3.0), which no single
 concatenated file can satisfy at once.
 
-**Calibrate your expectations — and note which model you are calibrating for.** Two sizes
+Calibrate your expectations — and note which model you are calibrating for. Two sizes
 matter here, and a parameter count means nothing until it is attached to one of them.
 The epoch, the losses and the samples quoted in this Status section are `tt-tnt-v1`
 at the **384** size: **22,025,088** parameters, 6 blocks of 384, a 512-token window. The model
@@ -92,7 +91,7 @@ in [`train/sizes.py`](train/sizes.py) and one YAML each under
 | Corpus | Nine-source blend, **as it stood before 2026-08-14** — 399,594,747 tokens emitted per the provenance manifest; 392,773,300 tokens when the finished file is tokenized as training data (353,495,970 train / 39,277,330 validation). That revision carried no document separators, which has since been fixed and the blend rebuilt; see [`docs/corpus_blend.md`](docs/corpus_blend.md) for the current figures, for both of these, and for why they differ |
 | Hardware | Tenstorrent Blackhole — trained on **one** p300c (`mesh_shape [1, 1]`, no DDP/TP) |
 
-**This repository owns its architectures.** They live in
+This repository owns its architectures. They live in
 [`train/configs/model/`](train/configs/model/), one YAML per size, described and validated by
 the registry in [`train/sizes.py`](train/sizes.py). `train/run.py --size <name>` selects one.
 
@@ -103,13 +102,13 @@ holds the registry and the YAML to describing the same model.
 
 Measured on the `tt-tnt-v1` run: 10,787 steps — one epoch over the blend's train split — at
 batch 64, sequence length 512, finishing at train loss **3.3125** with a validation loss of
-**4.2203**. The validation curve
+4.2203. The validation curve
 (`artifacts/checkpoints-tt-tnt-v1/val_losses.jsonl`) falls from 6.7125 at step 500 to about
 4.29 by step 10,000, then plateaus — oscillating 4.29–4.38 for the last ~2,300 steps, including
 a rise at step 9000 — rather than continuing to improve. ~58 minutes wall clock on one p300c;
 eleven checkpoints at steps 1000–10787.
 
-**One chip is the default, not the ceiling.** `train/config.py` sets `device_config` to
+One chip is the default. `train/config.py` sets `device_config` to
 `mesh_shape: [1, 1]` with `enable_ddp` and `enable_tp` both false, so an unqualified
 `train/run.py` opens a single device, and every checkpoint this project has published was
 trained that way — including all of the ones measured on this page. `--ddp 4` opens four
@@ -117,7 +116,7 @@ instead; the next paragraph is what that took. The host this was
 developed on is a **TT-QuietBox 2** — four Blackhole chips on two dual-chip p300 cards, wired
 as a `P300_X2` 2×2 ring mesh, not four independent boards — and three of those four chips sit
 idle during a run. During the v2 run the working chip drew **82 W at 73 °C** against
-**61–73 W / 63–68 °C** on the idle three; idle Blackhole holds its clock at 1350 MHz, so the
+61–73 W / 63–68 °C on the idle three; idle Blackhole holds its clock at 1350 MHz, so the
 power gap is a clearer signal than temperature.
 
 Multi-chip data parallelism was future work when this model was trained; it is not any more.
@@ -127,19 +126,17 @@ DDP steps all four replicas are bit-identical (max `|replica0 − replica_i|` = 
 tensors), and the same instrument was shown to be capable of catching the failure — skip the
 parallelism-context init deliberately and the replicas drift by 2.44e-3. A four-chip run's
 validation loss also tracks a single-chip run at the same seed to within 0.048, against this
-project's 0.1944-nat seed-noise floor. As of `dce5b43` a `--ddp N` run also writes
-a **correct checkpoint** — 737,824,624 bytes, byte-for-byte the single-chip size, down from the
-1,475,602,288 bytes the saver produced while it was honouring a `Shard(0)` marking over
-genuinely replicated data. `ttnn.Tensor.update_tensor_topology` is bound in Python, so the
-false marking is correctable by any holder of the tensor; an upstream ask that recorded this as
-unfixable from here was wrong, and has been corrected in place. See
-[`docs/multi-chip-notes.md`](docs/multi-chip-notes.md) for the catches that made it more than a
-one-line config edit. (The blow-by-blow lives in this repo's session reports under
+project's 0.1944-nat seed-noise floor. As of `dce5b43` a `--ddp N` run writes a
+checkpoint of 737,824,624 bytes, matching the single-chip size. The optimizer step marks
+replicated parameters `Shard(0)` while the data stays replicated;
+`ttnn.Tensor.update_tensor_topology` is bound in Python, so the marking is correctable by any
+holder of the tensor before a save. See
+[`docs/multi-chip-notes.md`](docs/multi-chip-notes.md) for the details. (The blow-by-blow lives in this repo's session reports under
 `.superpowers/`, which is gitignored and therefore absent from a clone — their durable
 conclusions are in the tracked docs instead.) The v2 run described on this page predates all of it and did use a single
 chip.
 
-**One caveat that travels with a `--ddp N` checkpoint.** `stochastic_rounding: true` — which
+One caveat that travels with a `--ddp N` checkpoint. `stochastic_rounding: true` — which
 this project's training config sets, and needs, because bf16 parameters at 1.0 otherwise round
 every update away — breaks DDP's replica-identity invariant. Each device draws its own rounding
 decisions, so the replicas perform independent random walks about a common trajectory: with it
@@ -175,7 +172,7 @@ This repository takes that arc past where the lessons stop: it owns its training
 its corpus and tokenizer pipeline, and the packaging work that turns a checkpoint into
 something servable.
 
-**Why it owns its own training entrypoint.** tt-train's stock Python trainer does not work
+Why it has its own training entrypoint. tt-train's stock Python trainer does not work
 against current tt-metal. `examples/python/transformers/training.py` imports a `trainer`
 module that is not on its path, calls `train()` with a `val_ids` argument the signature does
 not accept, and depends on a `TrainingConfig` that never defines the `seq_len` `train()`
@@ -183,7 +180,7 @@ requires. Its data loader also hardcodes `shakespeare.txt`, ignoring any configu
 reuse everything ttml genuinely provides — `create_optimizer`, `train()`, `checkpointing`,
 and both of its Llama implementations — and replace only what is broken or hardcoded.
 
-**Which Llama, and why it matters for speed.** ttml ships two: a C++ `CppLlama` (reached
+Which Llama, and why it matters for speed. ttml ships two: a C++ `CppLlama` (reached
 through its `TransformerModelFactory`) and a pure-Python `ttml.models.llama.Llama`. They are
 the same architecture over the same fused ops and cost the same per step — but only the
 Python one can be handed a null attention mask, and a null mask is what puts the fused SDPA
@@ -200,7 +197,7 @@ carries the two-line tt-metal fix that would make this workaround unnecessary.
 This project was originally named **tt-nanollama3**, and this section says plainly what
 changed and what didn't, rather than quietly dropping the earlier name.
 
-**What it started as.** The model began as a hand-rolled nanollama3-like model: a Llama-3
+What it started as. The model began as a hand-rolled nanollama3-like model: a Llama-3
 architecture, trained from random initialization with tt-train's `ttml` trainer, on a single
 downloaded corpus (TinyStories). That is still true today in the parts that matter most for
 correctness — the 384 config vendored at
@@ -209,7 +206,7 @@ verbatim copy of tt-train's own `nanollama3.yaml`, and every checkpoint this pro
 produced is trained against that same Llama-3 architecture (RoPE, RMSNorm, SwiGLU, grouped-query
 attention) through `ttml`. Nothing about the rename touched the model's shape or its trainer.
 
-**What earned the new name.** Two things this project now owns that it didn't at the start:
+What changed with the new name. Two things this project now owns that it didn't at the start:
 a **nine-source, licence-audited corpus** blended to a 400M-token budget (see
 [`docs/corpus_blend.md`](docs/corpus_blend.md) and [`docs/corpus_licensing.md`](docs/corpus_licensing.md)),
 in place of a single downloaded TinyStories dump; and a **32,000-token BPE tokenizer trained
@@ -217,7 +214,7 @@ on that blend**, rather than inherited from someone else's vocabulary. Those two
 what stopped "nanollama3-like" from being an accurate description of this project's identity,
 even though the underlying architecture and trainer it sits on did not change.
 
-**Existing artifacts still carry the old name, on purpose.** Checkpoints from before this
+Existing artifacts still carry the old name, on purpose. Checkpoints from before this
 rename are named `nanollama3_step*.pkl` and are left untouched — they are evidence of runs
 made under the old name, and renaming them would misrepresent when they were produced. New
 checkpoints are written as `tt_tnt_step*.pkl`; `train/checkpoint.latest_checkpoint` reads
@@ -225,13 +222,13 @@ both naming schemes so an existing checkpoint directory keeps resolving correctl
 
 ## Provenance and licensing
 
-**This project's source code is Apache-2.0**, matching tt-metal and tt-vscode-toolkit. Every
+This project's source code is Apache-2.0, matching tt-metal and tt-vscode-toolkit. Every
 source file carries an SPDX header. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
 
 Apache-2.0 covers *our code*. It does not override the terms of what this project consumes,
 and two of those inputs deserve stating plainly rather than being folded into a blanket claim:
 
-**Training corpus — a nine-source blend, two sources share-alike.** The corpus (see
+Training corpus — a nine-source blend, two sources share-alike. The corpus (see
 [`docs/corpus_blend.md`](docs/corpus_blend.md) and
 [`docs/corpus_licensing.md`](docs/corpus_licensing.md), the latter generated from
 `train/corpus.py`) mixes TinyStories, Simple English Wikipedia, and seven curated Project
@@ -246,14 +243,14 @@ weights trained on share-alike data constitute a "Data Derivative" (CDLA-Sharing
 publishing weights trained with this code should reach their own conclusion rather than
 inheriting ours.
 
-**Architectural inspiration — Mini-LLM.** The lesson arc credits
+Architectural inspiration — Mini-LLM. The lesson arc credits
 [Mini-LLM by Ashx098](https://github.com/Ashx098/Mini-LLM) for its component choices — RoPE,
 RMSNorm, SwiGLU, GQA, subword BPE. That repository **declares no license**, so no rights are
 granted by it. This is a credit, not a license inheritance: the components themselves come
 from published papers, and this implementation derives from tt-train's `nanollama3` model
 config and the `ttml` library, not from Mini-LLM's source. No code was copied from it.
 
-**Model weights.** Published, and public, at
+Model weights. Published, and public, at
 [`episod/tt-tnt`](https://huggingface.co/episod/tt-tnt) via `scripts/publish_to_hub.py`, which
 creates the repo private by default and has no code path of its own that flips it public — the
 repo's visibility was changed separately, as an explicitly-authorized action (2026-08-14), and
@@ -262,7 +259,7 @@ for the card pushed there; it states the corpus and its license explicitly and d
 model honestly as a demonstration rather than a capable general model, per the standard set
 above.
 
-**Runtime dependencies** — tt-metal / `ttml` / `ttnn` (Apache-2.0), `transformers` and
+Runtime dependencies — tt-metal / `ttml` / `ttnn` (Apache-2.0), `transformers` and
 `tokenizers` (Apache-2.0), numpy (BSD-3-Clause).
 
 ## Getting started
@@ -300,7 +297,7 @@ once a tokenizer exists settles the numbers against the real vocabulary — see
 [`docs/corpus_blend.md`](docs/corpus_blend.md), which records what the shipped blend actually
 contains and why that ordering is cut where it is.
 
-**TinyStories only, for a quick smoke test** — a ~512 MB single-source corpus rather than the
+TinyStories only, for a quick smoke test — a ~512 MB single-source corpus rather than the
 blend, downloading ~2.2 GB. It is named `corpus.txt`, never `blend.txt`: `build_tokenizer.py`
 refuses to write the blend's name from this path, because a TinyStories file called
 `blend.txt` is indistinguishable from the real blend to every later step.
@@ -327,7 +324,7 @@ cd <the vLLM plugin's examples/ directory>          # the launch command is cwd-
 tt-kernel serve episod/tt-tnt --force --instance metal-src-vllm
 ```
 
-**[`docs/serving-with-tt-kernel.md`](docs/serving-with-tt-kernel.md) is the guide**: what the
+[`docs/serving-with-tt-kernel.md`](docs/serving-with-tt-kernel.md) is the guide: what the
 bundle is, the two runtime patches the adapter carries (a `find_grid` fix for a harvested
 Blackhole grid, and a converted-weight-cache fingerprint) and what would delete them, the exact
 serve procedure, how to verify you are serving the weights you think you are — and the traps.
@@ -433,7 +430,7 @@ The GPT-2-small column is measured, not quoted, when a reference run is availabl
 figures from the GPT-2 paper are used only as a fallback and are labelled as such, because the
 paper's detokenizers and scoring code are not lm-eval's.
 
-### Running GPT-2 through the same harness is the part that made the rest readable
+### GPT-2 through the same harness
 
 That option is the methodological centre of this section, not a convenience. Quoting GPT-2's
 published figures would have compared our scores, under lm-eval's task definitions and
@@ -477,14 +474,14 @@ metric rows, the per-task truncation audit and the caveats:
 | arc_challenge | accuracy | 0.1783 | 0.25 | −6.4 | BELOW CHANCE | 0.1903 (also below) |
 | mmlu | accuracy | 0.2295 | 0.25 | −5.8 | BELOW CHANCE | 0.2292 (also below) |
 
-**The headline is not the scores. It is that the model has learned English, not just our
+**The scores indicate the model has learned English, not just our
 corpus.** That is the one thing no instrument in this repository could establish, because every
 other one is scored against our own 400M tokens. ARC-Easy at +6.4 standard errors and PIQA at
 +4.2, on data we did not choose and scored by code we did not write, against a null we do not
 control, are the evidence.
 
 The size of the gap is one number: WikiText-103 perplexity **222.66** against GPT-2 small's
-**37.37**, at **1.2% fewer parameters** (122,962,944 against 124,439,808) and **113x less
+37.37, at **1.2% fewer parameters** (122,962,944 against 124,439,808) and **113x less
 training data** (352,714,752 tokens seen — 10,764 steps × batch 64 × seq_len 512 — against
 WebText's ~40 billion). Roughly 6x the perplexity for roughly 1/113th of the tokens is an
 ordinary place to sit on the scaling curve. Reading 222 as "broken" is reading the parameter
@@ -531,10 +528,10 @@ Dirichlet prior, z-scored (Monroe et al. 2008), 150 per source, winner-take-all 
 sets are disjoint. Report:
 [`docs/measurements/embedding-geography-tt-tnt-1024a.md`](docs/measurements/embedding-geography-tt-tnt-1024a.md).
 
-**The geography is real.** In the `content` condition — the same measurement after excluding the
+In the `content` condition — the same measurement after excluding the
 500 globally most frequent tokens, so a frequency artefact would collapse rather than survive —
 k-NN purity over cosine neighbours of 1,350 labelled tokens is **0.5458** against a
-**label-permutation floor of 0.1103 ± 0.0031** and a chance rate of 0.1111. That is 138.8 of the
+label-permutation floor of 0.1103 ± 0.0031 and a chance rate of 0.1111. That is 138.8 of the
 floor's own standard deviations. A multinomial logistic probe recovers which of nine sources a
 token belongs to, from its embedding alone, **77.98% ± 2.31%** of the time, against **0.1007**
 with the labels permuted and **0.2099** from a frequency-only control that carries no

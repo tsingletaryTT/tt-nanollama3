@@ -17,7 +17,7 @@
 > and a shape mismatch hangs rather than fails) and the closing section's claim that this
 > "should be its own plan" (it was; this is it).
 
-**Original status, retained for context: not done here.** Every run in this repo is
+Original status, retained for context: not done here. Every run in this repo is
 single-chip. This file records what a multi-chip run would require, so that work starts from
 known ground instead of rediscovering it. Nothing below has been measured *by this repo* — the
 measurements cited are from the `ct5`/`ct8` lessons in
@@ -53,7 +53,7 @@ made until 2026-08-12.
 "device_config": {"mesh_shape": [1, 1], "enable_ddp": False, "enable_tp": False}
 ```
 
-**This is the only device config that takes effect.** `train/configs/nanollama3_bpe_v2.yaml`
+This is the only device config that takes effect. `train/configs/nanollama3_bpe_v2.yaml`
 also contains a `device_config` block, but `apply_optimizer_override` reads *only*
 `training_config.optimizer` from that file — editing `mesh_shape` there changes nothing. That
 trap is called out in the YAML itself.
@@ -68,16 +68,16 @@ Single-chip operation is directly visible in telemetry. During the v2 training r
 | `aiclk` | 1350 MHz | 1350 MHz |
 
 Idle Blackhole holds its clock rather than dropping it, so idle chips stay warm and the
-**power** gap is the more reliable indicator of which chip is working.
+power gap is the more reliable indicator of which chip is working.
 
 ## Data parallel vs tensor parallel
 
-**DDP is the applicable one.** It replicates the model on each chip and splits the batch, so
+DDP is the applicable one. It replicates the model on each chip and splits the batch, so
 per-chip memory is unchanged — appropriate here, because this model has no capacity problem
 (22M parameters, well inside one chip's DRAM). The motivation is speed and demonstrating the
 mesh, not fitting the model.
 
-**TP is not, and would likely break conversion.** Tensor parallelism shards weights across
+TP is not, and would likely break conversion. Tensor parallelism shards weights across
 chips; `convert/checkpoint_reader.py` and `convert/hf_mapping.py` assume whole tensors. Do not
 enable it without reworking the converter.
 
@@ -85,7 +85,7 @@ enable it without reworking the converter.
 
 All three come from `ct8`'s troubleshooting section, recorded there from real four-chip runs.
 
-**1. The fabric router times out on 2/4-chip Blackhole.** The run dies at
+1. The fabric router times out on 2/4-chip Blackhole. The run dies at
 `Fabric Router Sync: Timeout` unless `TT_MESH_GRAPH_DESC_PATH` is set. This is the
 single most likely first failure.
 
@@ -101,7 +101,7 @@ single most likely first failure.
 > a descriptor declaring more devices than you open (e.g. `--ddp 2` against the 4-device
 > `p300_x2`), which fails cleanly in 10 s. Full evidence in `.superpowers/ddp-bringup.md`.
 
-**2. Checkpoint saving throws under DDP.** The stock saver fails with
+2. Checkpoint saving throws under DDP. The stock saver fails with
 `Can't get a single buffer from host storage distributed over mesh`. Weights are *replicated*
 across chips, so the fix is to pull them through
 `ttml.core.distributed.concat_mesh_to_tensor_composer(device, 0)` and keep the first replica.
@@ -143,12 +143,12 @@ made, since it is exactly the instrument that would catch a layout change.
 > nominated. "Produce publishable weights from a `--ddp 1` run" no longer applies. See
 > `.superpowers/ddp-checkpoint-fix.md`.
 
-**3. Auto-resume is broken.** Any run without `--fresh` triggers auto-resume, which injects an
+3. Auto-resume is broken. Any run without `--fresh` triggers auto-resume, which injects an
 empty `--resume` and dies in argparse. Use `--fresh` and checkpoint frequently.
 
 ## The arithmetic that is easy to get wrong
 
-**Correction (2026-08-13): the claim that used to be here was backwards.** `batch_size` under
+Correction (2026-08-13): the claim that used to be here was backwards. `batch_size` under
 ttml's DDP is the **total** batch, sharded across devices on dim 0 — not multiplied by the
 device count. `ttml/common/trainer.py:30-38` builds `batch_size` host-side samples and shards
 them across the mesh with `shard_tensor_to_mesh_mapper(device, 0)`; each of the 4 chips sees
@@ -193,7 +193,7 @@ gradient-synchronization overhead may claim a meaningful share.
 > exactly as invisible as this section says. See `.superpowers/ddp-bringup.md`.
 
 Turning on `enable_ddp: True` in `train/config.py`'s `device_config` today would change
-**nothing** — `ttml.common.utils.initialize_device` only ever reads `mesh_shape`
+nothing — `ttml.common.utils.initialize_device` only ever reads `mesh_shape`
 (`ttml/common/utils.py:108-119`); `enable_ddp` is read by `ttml.common.model_factory` for
 vocab padding but never by the device-init path, and `train/run.py` calls `train()` with
 `use_ddp` **hardcoded to `False`** (`train/run.py`'s `train_fn(cfg, model, optimizer,
