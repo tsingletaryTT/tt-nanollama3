@@ -1642,3 +1642,46 @@ does block DDP checkpointing).
 
 Suite: **845 passed, 1 skipped** (831 baseline + 14 new). tt-metal left untouched at
 `620793d898`. Nothing deleted; all benchmark runs checkpointed to a scratch dir outside the repo.
+
+## Embedding geography — is a token-to-Tensix-grid layout discovered or imposed? (2026-08-16)
+
+One question, no hardware: *does the embedding space have a geography that corresponds to the
+corpus?* It matters because a proposal wanted to lay the 32,000-token vocabulary onto
+Blackhole's Tensix grid and sample by spatial neighbourhood, claiming *direction = corpus
+register*. If sources already occupy distinct embedding regions the layout is **discovered**;
+if not it is **imposed** and the claim is decoration. Full report:
+[`.superpowers/embedding-geography.md`](.superpowers/embedding-geography.md).
+
+**Answer: discovered, at 139 sigma above its own noise floor.** k-NN purity over cosine
+neighbours of 1,350 source-labelled tokens is **0.5458** against a label-permutation floor of
+0.1103 ± 0.0031 and a chance baseline of 0.1111; a linear probe recovers which of nine sources
+a token belongs to **78%** of the time. Characteristicness is **log-odds with an informative
+Dirichlet prior, z-scored** (Monroe et al. 2008) — chosen over tf-idf because it divides by its
+own standard error, so a token must be skewed *and* well-attested. That statistic favours
+frequent tokens, so the result is reported against a **frequency-only control** (log count +
+embedding norm: 0.135 purity, 0.21 probe) and re-run with the 500 commonest tokens excluded,
+where it goes **up**, not down.
+
+**The prediction was directionally right and specifically wrong, and the specifics are the
+finding.** Narrative sources really are more entangled: as matched 4-way problems (chance
+0.25), `folklore`/`gutenberg_children`/`spine`/`weird` reach 0.5813 while
+`flavour`/`poetry`/`procedural`/`wikipedia_simple` reach 0.7865 — 44% vs 72% of the headroom
+above chance. But (a) **`tinystories` does not separate cleanest** (0.544, mid-table, confused
+with `gutenberg_children`) — `score_behaviour.py`'s 99.9% register control classifies a
+*passage* by syntax, while a sampler picks *tokens*, and children's-narrative vocabulary is
+children's-narrative vocabulary; and (b) **`spine` is the cleanest of the four narrative
+sources** (0.699), because its vocabulary is naturalist/taxonomic, not narrative. The real
+entangled cluster is `folklore` ↔ `weird` ↔ `gutenberg_children`. Consequence for the pitch:
+**four to five clean directions, not six** — and `weird`'s top tokens (`Ġletter`, `Ġsupper`,
+`ĠMadame`, `Ġcarriage`) read as period social prose, which is a question about that slice's
+contents worth asking separately.
+
+New: `scripts/probe_embedding_geography.py` (reads one tensor from `model.safetensors`, never
+the model; numpy-only k-NN/silhouette/probe/PCA — sklearn and matplotlib are importable in the
+venv but are not declared dependencies, and none was added), `tests/test_probe_embedding_
+geography.py` (41 tests, none needing the model — including a planted-null test asserting the
+tool returns NOT INTERPRETABLE when there is nothing there), and
+`docs/measurements/embedding-geography-tt-tnt-1024a.{md,json}`. Nothing built beyond the
+measurement: no sampler, no layout, no kernel. Suite: **982 passed, 1 skipped** (941 + 41 mine;
+the 941 is the 939 baseline plus 2 from a concurrent agent's uncommitted `benchmark_external`
+work, which this change does not touch).
