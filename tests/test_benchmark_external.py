@@ -385,6 +385,22 @@ def test_markdown_describes_a_rolling_task_as_windowed_not_truncated():
     assert "windowed, not truncated" in wikitext_row
 
 
+def test_markdown_states_how_many_rows_the_gate_was_applied_to():
+    # Four rows carry a chance baseline in the fixture (piqa acc/acc_norm, hellaswag acc, and
+    # -- no: wikitext's three are continuous). The point of the assertion is that the count and
+    # the expected-false-positive figure are both stated, not silently assumed to be one test.
+    md = render_markdown(_inputs())
+    tested = [r for r in _inputs().rows if r.chance is not None and r.z is not None]
+    assert f"this table has {len(tested)} of them" in md
+    assert "by luck alone" in md
+
+
+def test_markdown_omits_the_multiple_comparison_note_when_nothing_was_tested():
+    rows = build_metric_results(_fake_results(), _specs("wikitext"))   # all continuous
+    md = render_markdown(_inputs(rows=rows))
+    assert "by luck alone" not in md
+
+
 def test_markdown_records_the_data_gap_and_the_venv():
     md = render_markdown(_inputs())
     assert "122,962,944" in md
@@ -392,6 +408,31 @@ def test_markdown_records_the_data_gap_and_the_venv():
     assert "40,000,000,000" in md
     assert "/tmp/venv/bin/python" in md
     assert "0.4.9" in md
+
+
+def test_the_data_gap_prose_is_derived_not_asserted_for_a_parameter_twin():
+    # 122,962,944 params against GPT-2 small's 124,439,808 -- a like-for-like capacity match.
+    md = render_markdown(_inputs())
+    assert "like-for-like comparison on capacity" in md
+    assert "113x" in md      # 40e9 / 352,714,752
+
+
+def test_the_data_gap_prose_does_not_claim_a_twin_for_a_much_smaller_model():
+    # tt-tnt-v3 is 22M, not 123M: the fixed "within 1.2% of each other" sentence would be a
+    # plain falsehood in its report, so the renderer must state the real ratio instead.
+    md = render_markdown(_inputs(n_params=22_025_088))
+    assert "like-for-like comparison on capacity" not in md
+    assert "5.6x** this model's parameters" in md
+
+
+def test_the_data_gap_prose_says_when_training_tokens_are_unknown():
+    facts = ModelFacts(path=Path("x"), label="x", max_position_embeddings=2048,
+                       hidden_size=384, num_hidden_layers=6, training_tokens=None,
+                       training_tokens_note="no train.log at x/train.log")
+    md = render_markdown(_inputs(model=facts, n_params=22_025_088))
+    assert "could not be established from disk" in md
+    # ...and it must not silently quote a token ratio it cannot compute.
+    assert "as many training tokens" not in md
 
 
 def test_markdown_says_when_training_tokens_could_not_be_established():
@@ -432,6 +473,54 @@ def test_a_reference_run_does_not_compare_gpt2_to_itself():
     assert "This is a reference run" in md
     assert "the gap to its reference class" not in md
     assert "first this project has that our corpus did not produce" not in md
+
+
+def _measured_reference(scores: dict) -> dict:
+    """A --reference-json payload with hand-chosen measured scores, keyed (task, metric)."""
+    return {
+        "model": {"label": "gpt2-small"},
+        "harness": {"lm_eval_version": "0.4.9", "max_length": 1024},
+        "results": [{"task": t, "metric": m, "score": v} for (t, m), v in scores.items()],
+    }
+
+
+def test_caveats_do_not_warn_about_published_rows_when_there_are_none():
+    reference = _measured_reference({("wikitext", "word_perplexity"): 37.3695})
+    rows = build_metric_results(_fake_results(), _specs("wikitext"), reference)
+    md = render_markdown(_inputs(rows=rows))
+    caveats = md.split("## Caveats on the GPT-2 column")[1].split("## Reproducing")[0]
+    assert "real head-to-head" in caveats
+    assert "produced by their authors' own code" not in caveats
+
+
+def test_caveats_warn_about_published_rows_when_there_are_some():
+    rows = build_metric_results(_fake_results(), _specs("wikitext"), None)
+    md = render_markdown(_inputs(rows=rows))
+    caveats = md.split("## Caveats on the GPT-2 column")[1].split("## Reproducing")[0]
+    assert "produced by their authors' own code" in caveats
+
+
+def test_the_protocol_cross_check_reports_agreement():
+    # Measured 37.3695 against the GPT-2 paper's published 37.50 is 0.35% apart.
+    reference = _measured_reference({("wikitext", "word_perplexity"): 37.3695})
+    rows = build_metric_results(_fake_results(), _specs("wikitext"), reference)
+    md = render_markdown(_inputs(rows=rows))
+    assert "Protocol cross-check" in md
+    assert "0.3% apart" in md
+    assert "agree closely here" in md
+
+
+def test_the_protocol_cross_check_reports_disagreement():
+    reference = _measured_reference({("wikitext", "word_perplexity"): 20.0})
+    rows = build_metric_results(_fake_results(), _specs("wikitext"), reference)
+    md = render_markdown(_inputs(rows=rows))
+    assert "do NOT agree here" in md
+
+
+def test_no_cross_check_without_a_measured_value():
+    rows = build_metric_results(_fake_results(), _specs("wikitext"), None)
+    md = render_markdown(_inputs(rows=rows))
+    assert "Protocol cross-check" not in md
 
 
 def test_json_drops_the_score_of_an_at_chance_row():

@@ -337,14 +337,25 @@ GPT2_PUBLISHED: Dict[Tuple[str, str], PublishedFigure] = {
         35.13, "GPT-2 paper Table 3, LAMBADA perplexity, 117M, zero-shot"),
 }
 
+#: GPT-2 small as shipped (`gpt2` on the Hub), counted by lm-eval's own
+#: ``model_num_parameters`` on the real checkpoint rather than quoted as the paper's "117M".
+GPT2_SMALL_PARAMS = 124_439_808
+
+#: WebText is ~40 GB of text and was never released with an official token count; ~40 billion
+#: is the figure usually quoted for it and is right to within a factor that does not matter at
+#: the ~100x scale this comparison is making. Stated as approximate everywhere it is used.
+GPT2_SMALL_TRAINING_TOKENS = 40_000_000_000
+
 #: Caveats that apply to EVERY published comparison, printed once in the report rather than
 #: repeated per row.
 PROTOCOL_CAVEATS: Tuple[str, ...] = (
     "Published figures were produced by their authors' own code, not by lm-eval. Task "
     "definitions, detokenizers and normalisation all differ in detail, so treat a published "
     "row as an order-of-magnitude reference and not as a head-to-head result.",
-    "A `--reference-json` row, by contrast, is a real head-to-head: the same lm-eval version, "
-    "the same task definitions, the same machine, the same batch size, on the same day.",
+    "A row marked `(measured)` is a real head-to-head: GPT-2 small was run through this same "
+    "harness — same lm-eval version, same task definitions, same machine, same day — rather "
+    "than quoted. The one thing it does not match is the context window, which is each "
+    "model's own; GPT-2 small's is 1024.",
 )
 
 
@@ -1133,9 +1144,10 @@ def render_markdown(inputs: ReportInputs) -> str:
         lines.append("")
         lines.append("| | this model | GPT-2 small |")
         lines.append("|---|---:|---:|")
-        lines.append(f"| parameters | {_fmt_int(inputs.n_params)} | 124,439,808 |")
-        lines.append(f"| training tokens | {_fmt_int(m.training_tokens)} | ~40,000,000,000 "
-                     f"(WebText, ~40 GB) |")
+        lines.append(f"| parameters | {_fmt_int(inputs.n_params)} | "
+                     f"{GPT2_SMALL_PARAMS:,} |")
+        lines.append(f"| training tokens | {_fmt_int(m.training_tokens)} | "
+                     f"~{GPT2_SMALL_TRAINING_TOKENS:,} (WebText, ~40 GB) |")
         lines.append(f"| context window | {m.max_position_embeddings} | 1,024 |")
         lines.append(f"| layers x hidden | {m.num_hidden_layers} x {m.hidden_size} | 12 x 768 |")
         lines.append("")
@@ -1144,12 +1156,33 @@ def render_markdown(inputs: ReportInputs) -> str:
         else:
             lines.append(f"Training tokens could not be established: {m.training_tokens_note}.")
         lines.append("")
-        lines.append(
-            "The parameter counts are within 1.2% of each other and the token counts differ by "
-            "roughly **two orders of magnitude**. Every score below should be read against that "
-            "row, not against the parameter row. A low score here is the expected consequence "
-            "of the data gap and is not evidence that anything is broken."
-        )
+        # Both sentences below are derived from the numbers in the table rather than asserted,
+        # because this same renderer produces reports for models of very different sizes: the
+        # 123M current model IS GPT-2 small's parameter twin, and the 22M v3 is emphatically
+        # not, and a fixed "within 1.2% of each other" would be false in the second report.
+        gap_sentences: List[str] = []
+        if inputs.n_params:
+            ratio = GPT2_SMALL_PARAMS / inputs.n_params
+            if 0.95 <= ratio <= 1.05:
+                gap_sentences.append(
+                    f"The parameter counts are within {abs(1 - ratio) * 100:.1f}% of each "
+                    f"other, so this is a like-for-like comparison on capacity.")
+            else:
+                gap_sentences.append(
+                    f"GPT-2 small has **{ratio:.1f}x** this model's parameters, so capacity is "
+                    f"part of the gap here as well as data.")
+        if m.training_tokens:
+            token_ratio = GPT2_SMALL_TRAINING_TOKENS / m.training_tokens
+            gap_sentences.append(
+                f"It saw roughly **{token_ratio:.0f}x** as many training tokens.")
+        else:
+            gap_sentences.append(
+                "This model's training-token count could not be established from disk (see "
+                "above), so the data gap can only be stated for GPT-2's side of it.")
+        gap_sentences.append(
+            "Every score below should be read against those ratios. A low score here is the "
+            "expected consequence of the gap and is not evidence that anything is broken.")
+        lines.append(" ".join(gap_sentences))
         lines.append("")
 
     # -- How to read the table ------------------------------------------------------------
@@ -1179,6 +1212,21 @@ def render_markdown(inputs: ReportInputs) -> str:
         "sampling of the benchmark, and nothing else — not training-seed variance, not "
         "prompt-format sensitivity. It is a lower bound on the real uncertainty."
     )
+    # The gate is applied once per row, so the table as a whole has more chances to produce a
+    # spurious "clears chance" than any single row does. Saying so is the same instinct as
+    # evaluate.py's floor: a threshold quoted without its false-positive rate invites exactly
+    # the over-reading this project has already published once.
+    tested = [r for r in inputs.rows if r.chance is not None and r.z is not None]
+    if tested:
+        expected_false = len(tested) * (1.0 - 0.9545)
+        lines.append(
+            f"- **The gate is applied per row, and this table has {len(tested)} of them.** "
+            f"If every one of those scores were truly at chance, roughly "
+            f"**{expected_false:.1f}** would still clear a {CHANCE_SE_MULTIPLE:g}-standard-"
+            f"error gate by luck alone. A row sitting just past the threshold is therefore "
+            f"weaker evidence than its verdict makes it look; a row at 5+ standard errors, or "
+            f"a pattern of several rows moving the same way, is not."
+        )
     lines.append("")
 
     # -- The results ----------------------------------------------------------------------
@@ -1288,11 +1336,38 @@ def render_markdown(inputs: ReportInputs) -> str:
     # -- Caveats --------------------------------------------------------------------------
     lines.append("## Caveats on the GPT-2 column")
     lines.append("")
-    for caveat in PROTOCOL_CAVEATS:
-        lines.append(f"- {caveat}")
+    # Only warn about the kinds of row this report actually contains. A caveat about
+    # published-under-another-protocol figures, printed over a table where every cell is a
+    # measured head-to-head, trains a reader to skip caveats.
+    kinds = {row.reference_kind for row in inputs.rows if row.reference is not None}
+    if "published" in kinds:
+        lines.append(f"- {PROTOCOL_CAVEATS[0]}")
+    if "measured" in kinds:
+        lines.append(f"- {PROTOCOL_CAVEATS[1]}")
+    if not kinds:
+        lines.append("- No GPT-2 figure is available for any row in this table.")
     for row in inputs.rows:
         if row.reference is not None and row.reference_caveat:
             lines.append(f"- `{row.task}` {row.metric_title}: {row.reference_caveat}")
+    # Where a cell has BOTH a measured value and a published one, the two together say how far
+    # apart the protocols really are -- which is the only honest way to calibrate how much to
+    # trust a published figure elsewhere. Computed, not asserted.
+    for row in inputs.rows:
+        if row.reference is None or row.reference_kind != "measured":
+            continue
+        published = GPT2_PUBLISHED.get((row.task, row.metric))
+        if published is None or published.value == 0:
+            continue
+        drift = abs(row.reference - published.value) / abs(published.value)
+        verdict = ("the two protocols agree closely here"
+                   if drift < 0.05 else
+                   "the two protocols do NOT agree here, so published figures for other rows "
+                   "should be treated with corresponding suspicion")
+        lines.append(
+            f"- **Protocol cross-check, `{row.task}` {row.metric_title}:** measured "
+            f"{_fmt(row.reference)} against the published {_fmt(published.value)} "
+            f"({drift * 100:.1f}% apart) — {verdict}."
+        )
     lines.append("")
     if inputs.wikitext_identity:
         lines.append(f"- {inputs.wikitext_identity}")
