@@ -133,10 +133,10 @@ a **correct checkpoint** — 737,824,624 bytes, byte-for-byte the single-chip si
 genuinely replicated data. `ttnn.Tensor.update_tensor_topology` is bound in Python, so the
 false marking is correctable by any holder of the tensor; an upstream ask that recorded this as
 unfixable from here was wrong, and has been corrected in place. See
-[`.superpowers/ddp-bringup.md`](.superpowers/ddp-bringup.md) and
-[`.superpowers/ddp-checkpoint-fix.md`](.superpowers/ddp-checkpoint-fix.md), and
 [`docs/multi-chip-notes.md`](docs/multi-chip-notes.md) for the catches that made it more than a
-one-line config edit. The v2 run described on this page predates all of it and did use a single
+one-line config edit. (The blow-by-blow lives in this repo's session reports under
+`.superpowers/`, which is gitignored and therefore absent from a clone — their durable
+conclusions are in the tracked docs instead.) The v2 run described on this page predates all of it and did use a single
 chip.
 
 **One caveat that travels with a `--ddp N` checkpoint.** `stochastic_rounding: true` — which
