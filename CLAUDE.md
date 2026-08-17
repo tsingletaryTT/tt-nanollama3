@@ -1685,3 +1685,64 @@ tool returns NOT INTERPRETABLE when there is nothing there), and
 measurement: no sampler, no layout, no kernel. Suite: **982 passed, 1 skipped** (941 + 41 mine;
 the 941 is the 939 baseline plus 2 from a concurrent agent's uncommitted `benchmark_external`
 work, which this change does not touch).
+
+## The grid-distance gate — the 2-D squash keeps the cells and loses the directions (2026-08-17)
+
+The gate the embedding-geography report proposed for itself, run: *assign the vocabulary to an
+11x10 grid and re-run the same purity statistic with grid distance substituted for cosine
+distance.* Full report:
+[`.superpowers/grid-distance-gate.md`](.superpowers/grid-distance-gate.md).
+
+**The gate as written passes — and the pitch fails anyway, because the aggregate hides which
+half of the idea works.** Grid-distance k-NN purity is **0.3996 ± 0.0101** against a
+label-permutation floor of 0.1105 ± 0.0033 (88 sigma), which is 0.73 of the 0.5458 cosine
+baseline and **66%** of that baseline's headroom above its own floor. No collapse.
+
+**But almost all of it is which tokens share a core, and almost none is which cores are
+adjacent.** Three independent ways of seeing the same thing: (a) randomly placing the *same*
+clusters scores **0.3943** against the annealed layout's 0.3996 — the layout is worth half a
+purity point; (b) with cell-mates excluded, purity is 0.1702 against 0.1029 for random
+placement, i.e. adjacency carries **15%** of the cosine headroom; (c) the hop profile —
+0.4836 within a core, 0.1681 at one hop, 0.1132 at four, against a 0.1111 baseline. **The
+register correlation reaches about one hop.** A *label-cheating* layout that groups same-source
+cells into continents reaches only 35%, so the ceiling is the squash, not the annealer (and
+across 9 restarts, QAP cost and off-cell purity correlate at r = +0.13 — the objective the
+annealer minimises is not the one the pitch cares about).
+
+**What survives is the useful half.** A core's contents are register-coherent — within-cell
+purity 0.4836, **86%** as coherent as a cosine 10-NN ball, rising to 0.6805 on 816 cells where a
+core beats a cosine neighbourhood outright — and six *neighbouring* cores return **4.22** of a
+possible 4.56 distinct sources (90% of the way from "one register" to chance). So neighbourhood
+sampling really does hand back divergent, coherent registers. It just is not because of
+direction: random placement scores 4.55 on the same statistic. Consequence: **build the sampler,
+drop the story, and place clusters wherever the NoC prefers.**
+
+**Four grids, and more room does not rescue direction.** 11x10 = 110 (this box's harvested
+p300c), 17x12 = 204 (full die), and 2x2 tilings at 440 and 816 treated as one flat torus (an
+optimistic idealisation — an inter-die Ethernet hop is not a NoC hop, stated as such). Adjacency
+headroom goes 15% → 16% → 23% → 21%: it plateaus. What a bigger grid buys is cell coherence,
+0.484 → 0.681. **36 layouts** were built (4 grids x 3 clusterings x 3 annealing restarts) and
+every table reports the distribution; not one passed the direction clause.
+
+New: `scripts/probe_grid_layout.py` (balanced spherical k-means over all 32,000 tokens, spectral
+init, simulated-annealing QAP on torus Manhattan distance; numpy only, and it imports
+`probe_embedding_geography`'s `permuted_purity`/`purity_from_neighbours` rather than
+reimplementing them, so the two measurements' floors are the same computation),
+`tests/test_probe_grid_layout.py` (45 tests, none needing the model — including planted nulls
+that must come back REFUTED, and an identity test pinning the annealer's O(cells) swap delta to
+a full cost recompute), and `docs/measurements/grid-layout-gate-tt-tnt-1024a.{md,json}`. Nothing
+built beyond the measurement: no sampler, no kernel.
+
+Suite at the time of this commit: **1028 passed, 7 failed, 1 skipped** — 1035 collected, which
+is the 990 baseline plus my 45. (One of mine skips explicitly once the scratch corpus profile is
+gone: the test that checks this script's cosine baseline still reproduces 0.5458 needs a token
+profile, and re-tokenising nine million words is not a unit test. It ran, and it passed, before
+the cache was removed.) The 7 failures are **not this change**: a concurrent agent's
+uncommitted TinyStories-reduction experiment had just re-cut `train/corpus.py`'s target shares
+(tinystories 31% → 10%) and re-blended `artifacts/corpus/blend.txt` without regenerating the
+docs those tests check, so `test_corpus_blend_doc` (4), `test_render_licensing` (2) and
+`test_measure_corpus` (1) fail on the mismatch. Verified by checking out HEAD into a throwaway
+worktree with only my two new files added: all 7 pass there, along with all 45 of mine. Nothing
+of that agent's work was staged, stashed, reverted or touched — this commit stages five explicit
+paths. My measurement is unaffected by the re-blend either way: it reads a prefix of each
+**per-source** file with an equal word budget, not the blend.

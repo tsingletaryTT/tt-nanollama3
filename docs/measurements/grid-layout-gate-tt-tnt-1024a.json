@@ -1,0 +1,2305 @@
+{
+  "hf_model": "/home/ttuser/code/tt-tnt/artifacts/hf-tt-tnt-1024a",
+  "gate": "k-NN purity with grid distance substituted for cosine distance",
+  "published_cosine_purity": 0.5458,
+  "headline_condition": "content",
+  "k": 10,
+  "n_directions": 6,
+  "tie_breaks": 6,
+  "n_permutations": 100,
+  "seed": 0,
+  "cosine_baseline": {
+    "content": {
+      "mean": 0.5457777777777778,
+      "sd": 0.0,
+      "permuted_mean": 0.11020814814814814,
+      "permuted_sd": 0.003292701520777214,
+      "chance": 0.1111111111111111,
+      "sigmas_above_floor": 132.28336272849205,
+      "verdict": "above floor"
+    },
+    "all": {
+      "mean": 0.49844444444444447,
+      "sd": 0.0,
+      "permuted_mean": 0.11011407407407407,
+      "permuted_sd": 0.0034428679077137055,
+      "chance": 0.1111111111111111,
+      "sigmas_above_floor": 112.79270096314782,
+      "verdict": "above floor"
+    }
+  },
+  "grids": [
+    {
+      "name": "harvested-p300c",
+      "width": 11,
+      "height": 10,
+      "cells": 110,
+      "n_chips": 1,
+      "torus": true,
+      "note": "110 functional Tensix on this box's harvested die",
+      "n_layouts": 9,
+      "seconds": 104.71180319786072,
+      "qap_cost_start_mean": 20030.725222511992,
+      "qap_cost_end_mean": 19268.772629007774,
+      "verdicts": {
+        "aggregate_purity": "SURVIVES (66% of the cosine headroom survives the squash)",
+        "neighbourhood_sampling": "SUPPORTED (a cell is 86% as register-coherent as a cosine neighbourhood, and 6 neighbouring cells still return 4.22 distinct sources \u2014 90% of the way from one register to chance)",
+        "direction_means_register": "REFUTED (adjacency carries 15% of the cosine headroom; even the label-cheating continent layout reaches only 35%, so the limit is the 2-D squash, not the annealer)",
+        "overall": "NOT VIABLE AS PITCHED (direction_means_register)"
+      },
+      "aggregate_headroom_kept": 0.6636620711361494,
+      "adjacency_headroom_kept": 0.15453015407098528,
+      "adjacency_headroom_oracle_ceiling": 0.3457465754602413,
+      "variants": {
+        "content/annealed": {
+          "n_layouts": 9,
+          "purity_all": {
+            "mean": 0.3995775034293553,
+            "sd": 0.010054524380389293,
+            "min": 0.3883703703703704,
+            "max": 0.41432098765432096,
+            "permuted_mean": 0.11050646090534978,
+            "permuted_sd": 0.0032818260717721475,
+            "ratio_to_cosine": 0.7321249044918968
+          },
+          "purity_offcell": {
+            "mean": 0.17016186556927299,
+            "sd": 0.01499670039973139,
+            "min": 0.14155555555555557,
+            "max": 0.19186419753086423,
+            "permuted_mean": 0.11046522633744855,
+            "permuted_sd": 0.0029155972680175984
+          },
+          "within_cell_purity": 0.48357011321334625,
+          "within_cell_chance": 0.1111111111111111,
+          "diversity_knn": {
+            "mean": 3.8065843621399176,
+            "sd": 0.08565846339840359,
+            "chance": 6.228484671083053
+          },
+          "diversity_directions": {
+            "mean": 4.218353909465019,
+            "sd": 0.05637759453609174,
+            "min": 4.137777777777778,
+            "max": 4.283703703703703,
+            "chance": 4.560568341546852
+          },
+          "occupied_cells": 103,
+          "tokens_per_cell_max": 71,
+          "purity_by_hop": [
+            {
+              "hops": 0,
+              "purity": 0.48357011321334625,
+              "pairs": 16741
+            },
+            {
+              "hops": 1,
+              "purity": 0.16814937339407873,
+              "pairs": 32803
+            },
+            {
+              "hops": 2,
+              "purity": 0.14173722294282165,
+              "pairs": 66054
+            },
+            {
+              "hops": 3,
+              "purity": 0.1304242856906329,
+              "pairs": 100499
+            },
+            {
+              "hops": 4,
+              "purity": 0.11321449410481045,
+              "pairs": 129824
+            },
+            {
+              "hops": 5,
+              "purity": 0.09955306131444448,
+              "pairs": 154644
+            }
+          ]
+        },
+        "content/oracle-continents": {
+          "n_layouts": 9,
+          "purity_all": {
+            "mean": 0.406721536351166,
+            "sd": 0.0098988292372337,
+            "min": 0.3960493827160494,
+            "max": 0.4202469135802469,
+            "permuted_mean": 0.11048732510288066,
+            "permuted_sd": 0.003271362433148858,
+            "ratio_to_cosine": 0.7452145413600354
+          },
+          "purity_offcell": {
+            "mean": 0.2534499314128944,
+            "sd": 0.025979711339368376,
+            "min": 0.23203703703703704,
+            "max": 0.2882222222222222,
+            "permuted_mean": 0.11051684499314128,
+            "permuted_sd": 0.002917009405181142
+          },
+          "within_cell_purity": 0.48357011321334625,
+          "within_cell_chance": 0.1111111111111111,
+          "diversity_knn": {
+            "mean": 3.7826337448559664,
+            "sd": 0.08423146559192032,
+            "chance": 6.228484671083053
+          },
+          "diversity_directions": {
+            "mean": 4.073251028806585,
+            "sd": 0.05474901511719086,
+            "min": 4.017777777777778,
+            "max": 4.165925925925926,
+            "chance": 4.560568341546852
+          },
+          "occupied_cells": 103,
+          "tokens_per_cell_max": 71,
+          "purity_by_hop": [
+            {
+              "hops": 0,
+              "purity": 0.48357011321334625,
+              "pairs": 16741
+            },
+            {
+              "hops": 1,
+              "purity": 0.24520210204323523,
+              "pairs": 36094
+            },
+            {
+              "hops": 2,
+              "purity": 0.15218538017937577,
+              "pairs": 65431
+            },
+            {
+              "hops": 3,
+              "purity": 0.12398687248067837,
+              "pairs": 98340
+            },
+            {
+              "hops": 4,
+              "purity": 0.1113321942186868,
+              "pairs": 132585
+            },
+            {
+              "hops": 5,
+              "purity": 0.09688186706818988,
+              "pairs": 159134
+            }
+          ]
+        },
+        "content/shuffled": {
+          "n_layouts": 9,
+          "purity_all": {
+            "mean": 0.3942908093278464,
+            "sd": 0.009856443883068826,
+            "min": 0.3849012345679012,
+            "max": 0.4080987654320987,
+            "permuted_mean": 0.11051949245541838,
+            "permuted_sd": 0.0032654630628248934,
+            "ratio_to_cosine": 0.7224383721397837
+          },
+          "purity_offcell": {
+            "mean": 0.10285322359396433,
+            "sd": 0.005899928326828625,
+            "min": 0.0917283950617284,
+            "max": 0.10916049382716049,
+            "permuted_mean": 0.11048131687242799,
+            "permuted_sd": 0.0028952425386294285
+          },
+          "within_cell_purity": 0.48357011321334625,
+          "within_cell_chance": 0.1111111111111111,
+          "diversity_knn": {
+            "mean": 3.8665843621399176,
+            "sd": 0.09255069010705845,
+            "chance": 6.228484671083053
+          },
+          "diversity_directions": {
+            "mean": 4.5494650205761324,
+            "sd": 0.0420232115913619,
+            "min": 4.479259259259259,
+            "max": 4.615555555555556,
+            "chance": 4.560568341546852
+          },
+          "occupied_cells": 103,
+          "tokens_per_cell_max": 71,
+          "purity_by_hop": [
+            {
+              "hops": 0,
+              "purity": 0.48357011321334625,
+              "pairs": 16741
+            },
+            {
+              "hops": 1,
+              "purity": 0.10127972141715934,
+              "pairs": 34439
+            },
+            {
+              "hops": 2,
+              "purity": 0.10520308116428091,
+              "pairs": 64850
+            },
+            {
+              "hops": 3,
+              "purity": 0.10588224071389357,
+              "pairs": 97920
+            },
+            {
+              "hops": 4,
+              "purity": 0.10667902194797538,
+              "pairs": 128840
+            },
+            {
+              "hops": 5,
+              "purity": 0.10530777428538497,
+              "pairs": 156415
+            }
+          ]
+        },
+        "content/random-cells": {
+          "n_layouts": 9,
+          "purity_all": {
+            "mean": 0.10979423868312757,
+            "sd": 0.0031864948499002463,
+            "min": 0.10501234567901234,
+            "max": 0.11599999999999999,
+            "permuted_mean": 0.11038953360768176,
+            "permuted_sd": 0.0036205324374980305,
+            "ratio_to_cosine": 0.20117022560019301
+          },
+          "purity_offcell": {
+            "mean": 0.11137860082304527,
+            "sd": 0.0015826202278345167,
+            "min": 0.10854320987654321,
+            "max": 0.11360493827160494,
+            "permuted_mean": 0.11052292181069959,
+            "permuted_sd": 0.002881279381262759
+          },
+          "within_cell_purity": 0.10963303995082394,
+          "within_cell_chance": 0.1111111111111111,
+          "diversity_knn": {
+            "mean": 6.269711934156378,
+            "sd": 0.04382976865826585,
+            "chance": 6.228484671083053
+          },
+          "diversity_directions": {
+            "mean": 4.576707818930042,
+            "sd": 0.019059185527311808,
+            "min": 4.544444444444444,
+            "max": 4.605925925925926,
+            "chance": 4.560568341546852
+          },
+          "occupied_cells": 110,
+          "tokens_per_cell_max": 20,
+          "purity_by_hop": [
+            {
+              "hops": 0,
+              "purity": 0.10963303995082394,
+              "pairs": 8213
+            },
+            {
+              "hops": 1,
+              "purity": 0.11083506119851202,
+              "pairs": 33070
+            },
+            {
+              "hops": 2,
+              "purity": 0.11032471446965554,
+              "pairs": 66269
+            },
+            {
+              "hops": 3,
+              "purity": 0.11043098422802171,
+              "pairs": 99332
+            },
+            {
+              "hops": 4,
+              "purity": 0.11015325523458346,
+              "pairs": 132560
+            },
+            {
+              "hops": 5,
+              "purity": 0.11084602974263577,
+              "pairs": 157135
+            }
+          ]
+        },
+        "all/annealed": {
+          "n_layouts": 9,
+          "purity_all": {
+            "mean": 0.36035253772290815,
+            "sd": 0.003407933574014969,
+            "min": 0.3559876543209876,
+            "max": 0.3655185185185186,
+            "permuted_mean": 0.11048615912208504,
+            "permuted_sd": 0.0031382146552894133,
+            "ratio_to_cosine": 0.7229542664971407
+          },
+          "purity_offcell": {
+            "mean": 0.15550754458161864,
+            "sd": 0.01407703218377546,
+            "min": 0.13385185185185183,
+            "max": 0.17577777777777778,
+            "permuted_mean": 0.11040694101508917,
+            "permuted_sd": 0.0029072745975221286
+          },
+          "within_cell_purity": 0.3415425614854538,
+          "within_cell_chance": 0.1111111111111111,
+          "diversity_knn": {
+            "mean": 4.137777777777778,
+            "sd": 0.026478243780318704,
+            "chance": 6.228484671083053
+          },
+          "diversity_directions": {
+            "mean": 4.273744855967077,
+            "sd": 0.07720788667995336,
+            "min": 4.155555555555556,
+            "max": 4.412592592592593,
+            "chance": 4.560568341546852
+          },
+          "occupied_cells": 101,
+          "tokens_per_cell_max": 116,
+          "purity_by_hop": [
+            {
+              "hops": 0,
+              "purity": 0.3415425614854538,
+              "pairs": 25090
+            },
+            {
+              "hops": 1,
+              "purity": 0.1484365369754992,
+              "pairs": 32469
+            },
+            {
+              "hops": 2,
+              "purity": 0.13412790070754946,
+              "pairs": 64799
+            },
+            {
+              "hops": 3,
+              "purity": 0.12273141821922569,
+              "pairs": 103017
+            },
+            {
+              "hops": 4,
+              "purity": 0.1146652746895837,
+              "pairs": 130639
+            },
+            {
+              "hops": 5,
+              "purity": 0.10054812662805794,
+              "pairs": 154672
+            }
+          ]
+        },
+        "all/oracle-continents": {
+          "n_layouts": 9,
+          "purity_all": {
+            "mean": 0.36812482853223594,
+            "sd": 0.0015358521443631207,
+            "min": 0.3652345679012346,
+            "max": 0.37006172839506174,
+            "permuted_mean": 0.11050248285322357,
+            "permuted_sd": 0.0031340728918768978,
+            "ratio_to_cosine": 0.7385473599621318
+          },
+          "purity_offcell": {
+            "mean": 0.24027434842249656,
+            "sd": 0.008550950914198283,
+            "min": 0.22904938271604935,
+            "max": 0.2500864197530864,
+            "permuted_mean": 0.1104048148148148,
+            "permuted_sd": 0.002856571038247937
+          },
+          "within_cell_purity": 0.3415425614854538,
+          "within_cell_chance": 0.1111111111111111,
+          "diversity_knn": {
+            "mean": 4.111851851851852,
+            "sd": 0.035130561888487274,
+            "chance": 6.228484671083053
+          },
+          "diversity_directions": {
+            "mean": 4.031358024691358,
+            "sd": 0.05537377668204428,
+            "min": 3.923703703703704,
+            "max": 4.101481481481481,
+            "chance": 4.560568341546852
+          },
+          "occupied_cells": 101,
+          "tokens_per_cell_max": 116,
+          "purity_by_hop": [
+            {
+              "hops": 0,
+              "purity": 0.3415425614854538,
+              "pairs": 25090
+            },
+            {
+              "hops": 1,
+              "purity": 0.23066705674801893,
+              "pairs": 35535
+            },
+            {
+              "hops": 2,
+              "purity": 0.15171733148510502,
+              "pairs": 66195
+            },
+            {
+              "hops": 3,
+              "purity": 0.11895256964810086,
+              "pairs": 100667
+            },
+            {
+              "hops": 4,
+              "purity": 0.10431072821817707,
+              "pairs": 136225
+            },
+            {
+              "hops": 5,
+              "purity": 0.0993425850061684,
+              "pairs": 149405
+            }
+          ]
+        },
+        "all/shuffled": {
+          "n_layouts": 9,
+          "purity_all": {
+            "mean": 0.3550178326474623,
+            "sd": 0.0028520196032587124,
+            "min": 0.351,
+            "max": 0.35841975308641977,
+            "permuted_mean": 0.11048702331961592,
+            "permuted_sd": 0.0031371865405057466,
+            "ratio_to_cosine": 0.7122515590341418
+          },
+          "purity_offcell": {
+            "mean": 0.10341838134430727,
+            "sd": 0.00952045272746099,
+            "min": 0.09055555555555556,
+            "max": 0.11785185185185186,
+            "permuted_mean": 0.11050796982167353,
+            "permuted_sd": 0.002861338936675298
+          },
+          "within_cell_purity": 0.3415425614854538,
+          "within_cell_chance": 0.1111111111111111,
+          "diversity_knn": {
+            "mean": 4.199670781893004,
+            "sd": 0.029297001234931154,
+            "chance": 6.228484671083053
+          },
+          "diversity_directions": {
+            "mean": 4.527160493827161,
+            "sd": 0.04563978963366523,
+            "min": 4.44962962962963,
+            "max": 4.572592592592593,
+            "chance": 4.560568341546852
+          },
+          "occupied_cells": 101,
+          "tokens_per_cell_max": 116,
+          "purity_by_hop": [
+            {
+              "hops": 0,
+              "purity": 0.3415425614854538,
+              "pairs": 25090
+            },
+            {
+              "hops": 1,
+              "purity": 0.10255051921288932,
+              "pairs": 34910
+            },
+            {
+              "hops": 2,
+              "purity": 0.10001620547903957,
+              "pairs": 62244
+            },
+            {
+              "hops": 3,
+              "purity": 0.10713287048710932,
+              "pairs": 95427
+            },
+            {
+              "hops": 4,
+              "purity": 0.10474163634955692,
+              "pairs": 127547
+            },
+            {
+              "hops": 5,
+              "purity": 0.10586935965877696,
+              "pairs": 154570
+            }
+          ]
+        },
+        "all/random-cells": {
+          "n_layouts": 9,
+          "purity_all": {
+            "mean": 0.11132647462277093,
+            "sd": 0.0031166000417795566,
+            "min": 0.10779012345679014,
+            "max": 0.11696296296296298,
+            "permuted_mean": 0.1104519341563786,
+            "permuted_sd": 0.0035813297118863457,
+            "ratio_to_cosine": 0.22334780909606292
+          },
+          "purity_offcell": {
+            "mean": 0.11017009602194787,
+            "sd": 0.0017096846371090723,
+            "min": 0.10749382716049383,
+            "max": 0.11302469135802469,
+            "permuted_mean": 0.11047976680384086,
+            "permuted_sd": 0.0029492217627928876
+          },
+          "within_cell_purity": 0.11144525991141599,
+          "within_cell_chance": 0.1111111111111111,
+          "diversity_knn": {
+            "mean": 6.224855967078189,
+            "sd": 0.03850090607151995,
+            "chance": 6.228484671083053
+          },
+          "diversity_directions": {
+            "mean": 4.5767901234567905,
+            "sd": 0.01752521209529034,
+            "min": 4.5562962962962965,
+            "max": 4.614814814814815,
+            "chance": 4.560568341546852
+          },
+          "occupied_cells": 110,
+          "tokens_per_cell_max": 19,
+          "purity_by_hop": [
+            {
+              "hops": 0,
+              "purity": 0.11144525991141599,
+              "pairs": 8219
+            },
+            {
+              "hops": 1,
+              "purity": 0.11014868858675499,
+              "pairs": 33120
+            },
+            {
+              "hops": 2,
+              "purity": 0.11038645610262936,
+              "pairs": 66258
+            },
+            {
+              "hops": 3,
+              "purity": 0.10984696918760875,
+              "pairs": 99260
+            },
+            {
+              "hops": 4,
+              "purity": 0.11023500155993154,
+              "pairs": 132457
+            },
+            {
+              "hops": 5,
+              "purity": 0.110642214292184,
+              "pairs": 157230
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "full-die",
+      "width": 17,
+      "height": 12,
+      "cells": 204,
+      "n_chips": 1,
+      "torus": true,
+      "note": "140 functional Tensix on an unharvested die; 204 sites",
+      "n_layouts": 9,
+      "seconds": 118.99491500854492,
+      "qap_cost_start_mean": 86194.71250549212,
+      "qap_cost_end_mean": 82449.50905119578,
+      "verdicts": {
+        "aggregate_purity": "SURVIVES (69% of the cosine headroom survives the squash)",
+        "neighbourhood_sampling": "SUPPORTED (a cell is 103% as register-coherent as a cosine neighbourhood, and 6 neighbouring cells still return 4.18 distinct sources \u2014 89% of the way from one register to chance)",
+        "direction_means_register": "REFUTED (adjacency carries 16% of the cosine headroom; even the label-cheating continent layout reaches only 39%, so the limit is the 2-D squash, not the annealer)",
+        "overall": "NOT VIABLE AS PITCHED (direction_means_register)"
+      },
+      "aggregate_headroom_kept": 0.6894707924844705,
+      "adjacency_headroom_kept": 0.15517891113747717,
+      "adjacency_headroom_oracle_ceiling": 0.3873992985739375,
+      "variants": {
+        "content/annealed": {
+          "n_layouts": 9,
+          "purity_all": {
+            "mean": 0.41080795610425236,
+            "sd": 0.015586617907444849,
+            "min": 0.3872222222222222,
+            "max": 0.4250123456790123,
+            "permuted_mean": 0.1104954183813443,
+            "permuted_sd": 0.003297734811028714,
+            "ratio_to_cosine": 0.7527018739695177
+          },
+          "purity_offcell": {
+            "mean": 0.17251028806584365,
+            "sd": 0.010023687841275712,
+            "min": 0.1552716049382716,
+            "max": 0.1825679012345679,
+            "permuted_mean": 0.11046028806584361,
+            "permuted_sd": 0.0030822672387261726
+          },
+          "within_cell_purity": 0.5608542781309435,
+          "within_cell_chance": 0.1111111111111111,
+          "diversity_knn": {
+            "mean": 3.741152263374486,
+            "sd": 0.05840484870873424,
+            "chance": 6.228484671083053
+          },
+          "diversity_directions": {
+            "mean": 4.184938271604938,
+            "sd": 0.060171223451806456,
+            "min": 4.083703703703704,
+            "max": 4.291851851851852,
+            "chance": 4.560568341546852
+          },
+          "occupied_cells": 174,
+          "tokens_per_cell_max": 70,
+          "purity_by_hop": [
+            {
+              "hops": 0,
+              "purity": 0.5608542781309435,
+              "pairs": 10960
+            },
+            {
+              "hops": 1,
+              "purity": 0.16719465451400625,
+              "pairs": 18681
+            },
+            {
+              "hops": 2,
+              "purity": 0.1694510801061172,
+              "pairs": 38217
+            },
+            {
+              "hops": 3,
+              "purity": 0.144785371127991,
+              "pairs": 54956
+            },
+            {
+              "hops": 4,
+              "purity": 0.1303318498190828,
+              "pairs": 72188
+            },
+            {
+              "hops": 5,
+              "purity": 0.11115673594926857,
+              "pairs": 88443
+            }
+          ]
+        },
+        "content/oracle-continents": {
+          "n_layouts": 9,
+          "purity_all": {
+            "mean": 0.43437997256515776,
+            "sd": 0.01891935811902983,
+            "min": 0.4082716049382715,
+            "max": 0.4499506172839507,
+            "permuted_mean": 0.11051240054869685,
+            "permuted_sd": 0.003326576481189203,
+            "ratio_to_cosine": 0.7958916435436522
+          },
+          "purity_offcell": {
+            "mean": 0.2736584362139918,
+            "sd": 0.011109783871346833,
+            "min": 0.26007407407407407,
+            "max": 0.287962962962963,
+            "permuted_mean": 0.11047781893004115,
+            "permuted_sd": 0.003081692851502023
+          },
+          "within_cell_purity": 0.5608542781309435,
+          "within_cell_chance": 0.1111111111111111,
+          "diversity_knn": {
+            "mean": 3.6776954732510285,
+            "sd": 0.06813249059705714,
+            "chance": 6.228484671083053
+          },
+          "diversity_directions": {
+            "mean": 3.799588477366255,
+            "sd": 0.07626762416223101,
+            "min": 3.6866666666666665,
+            "max": 3.934814814814815,
+            "chance": 4.560568341546852
+          },
+          "occupied_cells": 174,
+          "tokens_per_cell_max": 70,
+          "purity_by_hop": [
+            {
+              "hops": 0,
+              "purity": 0.5608542781309435,
+              "pairs": 10960
+            },
+            {
+              "hops": 1,
+              "purity": 0.2629235525830278,
+              "pairs": 19567
+            },
+            {
+              "hops": 2,
+              "purity": 0.19708328927712884,
+              "pairs": 37754
+            },
+            {
+              "hops": 3,
+              "purity": 0.14789077810440104,
+              "pairs": 55738
+            },
+            {
+              "hops": 4,
+              "purity": 0.11926695669488338,
+              "pairs": 75545
+            },
+            {
+              "hops": 5,
+              "purity": 0.11035080313515694,
+              "pairs": 90219
+            }
+          ]
+        },
+        "content/shuffled": {
+          "n_layouts": 9,
+          "purity_all": {
+            "mean": 0.39738134430727023,
+            "sd": 0.01614109768457225,
+            "min": 0.37320987654320986,
+            "max": 0.4122469135802469,
+            "permuted_mean": 0.11050329218106997,
+            "permuted_sd": 0.003285858699458107,
+            "ratio_to_cosine": 0.7281009973056661
+          },
+          "purity_offcell": {
+            "mean": 0.10491906721536351,
+            "sd": 0.008278314284431777,
+            "min": 0.09071604938271605,
+            "max": 0.11695061728395062,
+            "permuted_mean": 0.1105011522633745,
+            "permuted_sd": 0.0030650088944779866
+          },
+          "within_cell_purity": 0.5608542781309435,
+          "within_cell_chance": 0.1111111111111111,
+          "diversity_knn": {
+            "mean": 3.874320987654321,
+            "sd": 0.07694082310861378,
+            "chance": 6.228484671083053
+          },
+          "diversity_directions": {
+            "mean": 4.545267489711934,
+            "sd": 0.03590385814110026,
+            "min": 4.489629629629629,
+            "max": 4.595555555555555,
+            "chance": 4.560568341546852
+          },
+          "occupied_cells": 174,
+          "tokens_per_cell_max": 70,
+          "purity_by_hop": [
+            {
+              "hops": 0,
+              "purity": 0.5608542781309435,
+              "pairs": 10960
+            },
+            {
+              "hops": 1,
+              "purity": 0.10155489029499172,
+              "pairs": 17691
+            },
+            {
+              "hops": 2,
+              "purity": 0.10042368607093155,
+              "pairs": 36166
+            },
+            {
+              "hops": 3,
+              "purity": 0.10811740726878706,
+              "pairs": 53979
+            },
+            {
+              "hops": 4,
+              "purity": 0.10518928456404644,
+              "pairs": 69747
+            },
+            {
+              "hops": 5,
+              "purity": 0.10547393833132866,
+              "pairs": 87570
+            }
+          ]
+        },
+        "content/random-cells": {
+          "n_layouts": 9,
+          "purity_all": {
+            "mean": 0.11192043895747601,
+            "sd": 0.0032502512483699644,
+            "min": 0.10717283950617283,
+            "max": 0.1180246913580247,
+            "permuted_mean": 0.11046083676268863,
+            "permuted_sd": 0.0035374770623543775,
+            "ratio_to_cosine": 0.2050659508585676
+          },
+          "purity_offcell": {
+            "mean": 0.10950480109739369,
+            "sd": 0.0029647464054206496,
+            "min": 0.10358024691358025,
+            "max": 0.11333333333333333,
+            "permuted_mean": 0.11049879286694103,
+            "permuted_sd": 0.003121258087397609
+          },
+          "within_cell_purity": 0.11353315199764788,
+          "within_cell_chance": 0.1111111111111111,
+          "diversity_knn": {
+            "mean": 6.22724279835391,
+            "sd": 0.0416807017971324,
+            "chance": 6.228484671083053
+          },
+          "diversity_directions": {
+            "mean": 4.571604938271605,
+            "sd": 0.02442198743975478,
+            "min": 4.532592592592593,
+            "max": 4.607407407407408,
+            "chance": 4.560568341546852
+          },
+          "occupied_cells": 204,
+          "tokens_per_cell_max": 14,
+          "purity_by_hop": [
+            {
+              "hops": 0,
+              "purity": 0.11353315199764788,
+              "pairs": 4452
+            },
+            {
+              "hops": 1,
+              "purity": 0.109905341251544,
+              "pairs": 17864
+            },
+            {
+              "hops": 2,
+              "purity": 0.10937667349303366,
+              "pairs": 35745
+            },
+            {
+              "hops": 3,
+              "purity": 0.11031264134601523,
+              "pairs": 53538
+            },
+            {
+              "hops": 4,
+              "purity": 0.1105658575351746,
+              "pairs": 71452
+            },
+            {
+              "hops": 5,
+              "purity": 0.11079370252213722,
+              "pairs": 89352
+            }
+          ]
+        },
+        "all/annealed": {
+          "n_layouts": 9,
+          "purity_all": {
+            "mean": 0.35904389574759943,
+            "sd": 0.012174471992416284,
+            "min": 0.342358024691358,
+            "max": 0.37282716049382714,
+            "permuted_mean": 0.11051325102880658,
+            "permuted_sd": 0.003230388902231777,
+            "ratio_to_cosine": 0.720328814473561
+          },
+          "purity_offcell": {
+            "mean": 0.15817146776406035,
+            "sd": 0.010376409992543202,
+            "min": 0.14546913580246912,
+            "max": 0.17314814814814816,
+            "permuted_mean": 0.11035581618655693,
+            "permuted_sd": 0.0030701550375957193
+          },
+          "within_cell_purity": 0.37260034182007157,
+          "within_cell_chance": 0.1111111111111111,
+          "diversity_knn": {
+            "mean": 4.111604938271605,
+            "sd": 0.049628247631394125,
+            "chance": 6.228484671083053
+          },
+          "diversity_directions": {
+            "mean": 4.257366255144032,
+            "sd": 0.06349460851258279,
+            "min": 4.138518518518518,
+            "max": 4.33925925925926,
+            "chance": 4.560568341546852
+          },
+          "occupied_cells": 164,
+          "tokens_per_cell_max": 113,
+          "purity_by_hop": [
+            {
+              "hops": 0,
+              "purity": 0.37260034182007157,
+              "pairs": 17428
+            },
+            {
+              "hops": 1,
+              "purity": 0.14761717357910295,
+              "pairs": 19965
+            },
+            {
+              "hops": 2,
+              "purity": 0.15307218754454277,
+              "pairs": 39090
+            },
+            {
+              "hops": 3,
+              "purity": 0.13565612962470022,
+              "pairs": 58256
+            },
+            {
+              "hops": 4,
+              "purity": 0.12264187356236594,
+              "pairs": 74321
+            },
+            {
+              "hops": 5,
+              "purity": 0.11086442889426137,
+              "pairs": 90159
+            }
+          ]
+        },
+        "all/oracle-continents": {
+          "n_layouts": 9,
+          "purity_all": {
+            "mean": 0.3845912208504801,
+            "sd": 0.016550890105511838,
+            "min": 0.3627777777777778,
+            "max": 0.40217283950617283,
+            "permuted_mean": 0.11056816186556928,
+            "permuted_sd": 0.0032375518292510888,
+            "ratio_to_cosine": 0.7715829219024344
+          },
+          "purity_offcell": {
+            "mean": 0.259761316872428,
+            "sd": 0.01759951564020158,
+            "min": 0.2357901234567901,
+            "max": 0.27435802469135806,
+            "permuted_mean": 0.11049528120713308,
+            "permuted_sd": 0.0029763332044383706
+          },
+          "within_cell_purity": 0.37260034182007157,
+          "within_cell_chance": 0.1111111111111111,
+          "diversity_knn": {
+            "mean": 4.053744855967078,
+            "sd": 0.05948695965630657,
+            "chance": 6.228484671083053
+          },
+          "diversity_directions": {
+            "mean": 3.7174485596707822,
+            "sd": 0.12901075077282215,
+            "min": 3.5970370370370373,
+            "max": 3.965925925925926,
+            "chance": 4.560568341546852
+          },
+          "occupied_cells": 164,
+          "tokens_per_cell_max": 113,
+          "purity_by_hop": [
+            {
+              "hops": 0,
+              "purity": 0.37260034182007157,
+              "pairs": 17428
+            },
+            {
+              "hops": 1,
+              "purity": 0.2353338875990468,
+              "pairs": 22676
+            },
+            {
+              "hops": 2,
+              "purity": 0.1812652198733823,
+              "pairs": 40221
+            },
+            {
+              "hops": 3,
+              "purity": 0.14146983936770663,
+              "pairs": 60032
+            },
+            {
+              "hops": 4,
+              "purity": 0.11803779602761676,
+              "pairs": 68992
+            },
+            {
+              "hops": 5,
+              "purity": 0.10518590561375202,
+              "pairs": 91326
+            }
+          ]
+        },
+        "all/shuffled": {
+          "n_layouts": 9,
+          "purity_all": {
+            "mean": 0.3461042524005487,
+            "sd": 0.014603339026107802,
+            "min": 0.32714814814814813,
+            "max": 0.36366666666666664,
+            "permuted_mean": 0.11053310013717421,
+            "permuted_sd": 0.0032567713051362642,
+            "ratio_to_cosine": 0.694368763175421
+          },
+          "purity_offcell": {
+            "mean": 0.10155006858710564,
+            "sd": 0.006296414641562418,
+            "min": 0.09035802469135802,
+            "max": 0.1084074074074074,
+            "permuted_mean": 0.11047536351165982,
+            "permuted_sd": 0.0030738938929129223
+          },
+          "within_cell_purity": 0.37260034182007157,
+          "within_cell_chance": 0.1111111111111111,
+          "diversity_knn": {
+            "mean": 4.241152263374485,
+            "sd": 0.07159567841360917,
+            "chance": 6.228484671083053
+          },
+          "diversity_directions": {
+            "mean": 4.530205761316873,
+            "sd": 0.06598808739998081,
+            "min": 4.45925925925926,
+            "max": 4.632592592592593,
+            "chance": 4.560568341546852
+          },
+          "occupied_cells": 164,
+          "tokens_per_cell_max": 113,
+          "purity_by_hop": [
+            {
+              "hops": 0,
+              "purity": 0.37260034182007157,
+              "pairs": 17428
+            },
+            {
+              "hops": 1,
+              "purity": 0.1003694926901419,
+              "pairs": 16750
+            },
+            {
+              "hops": 2,
+              "purity": 0.1009319834129747,
+              "pairs": 35280
+            },
+            {
+              "hops": 3,
+              "purity": 0.11313213503450352,
+              "pairs": 53516
+            },
+            {
+              "hops": 4,
+              "purity": 0.10613055596980701,
+              "pairs": 69023
+            },
+            {
+              "hops": 5,
+              "purity": 0.1063880370926054,
+              "pairs": 86843
+            }
+          ]
+        },
+        "all/random-cells": {
+          "n_layouts": 9,
+          "purity_all": {
+            "mean": 0.11262551440329219,
+            "sd": 0.0036513793632519096,
+            "min": 0.108,
+            "max": 0.11843209876543209,
+            "permuted_mean": 0.11044123456790123,
+            "permuted_sd": 0.0034489213173396205,
+            "ratio_to_cosine": 0.2259539967966183
+          },
+          "purity_offcell": {
+            "mean": 0.10973113854595336,
+            "sd": 0.00224922532158084,
+            "min": 0.106679012345679,
+            "max": 0.11381481481481481,
+            "permuted_mean": 0.11058919067215364,
+            "permuted_sd": 0.0031119270554294514
+          },
+          "within_cell_purity": 0.11470267437636703,
+          "within_cell_chance": 0.1111111111111111,
+          "diversity_knn": {
+            "mean": 6.20888888888889,
+            "sd": 0.06834111167212323,
+            "chance": 6.228484671083053
+          },
+          "diversity_directions": {
+            "mean": 4.579423868312757,
+            "sd": 0.015712514028278703,
+            "min": 4.5562962962962965,
+            "max": 4.605185185185185,
+            "chance": 4.560568341546852
+          },
+          "occupied_cells": 204,
+          "tokens_per_cell_max": 14,
+          "purity_by_hop": [
+            {
+              "hops": 0,
+              "purity": 0.11470267437636703,
+              "pairs": 4414
+            },
+            {
+              "hops": 1,
+              "purity": 0.10959475319398969,
+              "pairs": 17859
+            },
+            {
+              "hops": 2,
+              "purity": 0.1094674866265421,
+              "pairs": 35750
+            },
+            {
+              "hops": 3,
+              "purity": 0.10980360042040614,
+              "pairs": 53589
+            },
+            {
+              "hops": 4,
+              "purity": 0.1103789167600194,
+              "pairs": 71490
+            },
+            {
+              "hops": 5,
+              "purity": 0.11097817879437927,
+              "pairs": 89333
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "4x harvested",
+      "width": 22,
+      "height": 20,
+      "cells": 440,
+      "n_chips": 4,
+      "torus": true,
+      "note": "four harvested dies tiled 2x2, treated as one flat torus (optimistic)",
+      "n_layouts": 9,
+      "seconds": 134.01891779899597,
+      "qap_cost_start_mean": 518136.8774324372,
+      "qap_cost_end_mean": 493573.9357935749,
+      "verdicts": {
+        "aggregate_purity": "SURVIVES (64% of the cosine headroom survives the squash)",
+        "neighbourhood_sampling": "SUPPORTED (a cell is 122% as register-coherent as a cosine neighbourhood, and 6 neighbouring cells still return 3.98 distinct sources \u2014 84% of the way from one register to chance)",
+        "direction_means_register": "REFUTED (adjacency carries 23% of the cosine headroom; even the label-cheating continent layout reaches only 60%, so the limit is the 2-D squash, not the annealer)",
+        "overall": "NOT VIABLE AS PITCHED (direction_means_register)"
+      },
+      "aggregate_headroom_kept": 0.6413278847817527,
+      "adjacency_headroom_kept": 0.23041268570749754,
+      "adjacency_headroom_oracle_ceiling": 0.5965951087622327,
+      "variants": {
+        "content/annealed": {
+          "n_layouts": 9,
+          "purity_all": {
+            "mean": 0.38985185185185184,
+            "sd": 0.010291539742714517,
+            "min": 0.3772716049382716,
+            "max": 0.4075432098765432,
+            "permuted_mean": 0.11050890260631001,
+            "permuted_sd": 0.0033867269104372977,
+            "ratio_to_cosine": 0.7143051031487513
+          },
+          "purity_offcell": {
+            "mean": 0.2052633744855967,
+            "sd": 0.012130550023196162,
+            "min": 0.19003703703703703,
+            "max": 0.23262962962962963,
+            "permuted_mean": 0.11044986282578877,
+            "permuted_sd": 0.0033387031746479907
+          },
+          "within_cell_purity": 0.6432364761502943,
+          "within_cell_chance": 0.1111111111111111,
+          "diversity_knn": {
+            "mean": 3.832181069958848,
+            "sd": 0.06996874778655884,
+            "chance": 6.228484671083053
+          },
+          "diversity_directions": {
+            "mean": 3.979670781893004,
+            "sd": 0.04234405928587122,
+            "min": 3.911111111111111,
+            "max": 4.064444444444445,
+            "chance": 4.560568341546852
+          },
+          "occupied_cells": 296,
+          "tokens_per_cell_max": 64,
+          "purity_by_hop": [
+            {
+              "hops": 0,
+              "purity": 0.6432364761502943,
+              "pairs": 6646
+            },
+            {
+              "hops": 1,
+              "purity": 0.2036473202324477,
+              "pairs": 9672
+            },
+            {
+              "hops": 2,
+              "purity": 0.18595036081442162,
+              "pairs": 19019
+            },
+            {
+              "hops": 3,
+              "purity": 0.1753836996993255,
+              "pairs": 28178
+            },
+            {
+              "hops": 4,
+              "purity": 0.15562264248324414,
+              "pairs": 36186
+            },
+            {
+              "hops": 5,
+              "purity": 0.13703383531489138,
+              "pairs": 45084
+            }
+          ]
+        },
+        "content/oracle-continents": {
+          "n_layouts": 9,
+          "purity_all": {
+            "mean": 0.4499286694101509,
+            "sd": 0.011528286018144568,
+            "min": 0.43562962962962964,
+            "max": 0.463320987654321,
+            "permuted_mean": 0.11047042524005486,
+            "permuted_sd": 0.0034171283205583886,
+            "ratio_to_cosine": 0.8243807053524752
+          },
+          "purity_offcell": {
+            "mean": 0.364761316872428,
+            "sd": 0.018465210309377658,
+            "min": 0.3396913580246914,
+            "max": 0.38039506172839505,
+            "permuted_mean": 0.11044475994513031,
+            "permuted_sd": 0.0033039465176009086
+          },
+          "within_cell_purity": 0.6432364761502943,
+          "within_cell_chance": 0.1111111111111111,
+          "diversity_knn": {
+            "mean": 3.70320987654321,
+            "sd": 0.051317350940443034,
+            "chance": 6.228484671083053
+          },
+          "diversity_directions": {
+            "mean": 3.345432098765432,
+            "sd": 0.02412814440726273,
+            "min": 3.3088888888888888,
+            "max": 3.3866666666666667,
+            "chance": 4.560568341546852
+          },
+          "occupied_cells": 296,
+          "tokens_per_cell_max": 64,
+          "purity_by_hop": [
+            {
+              "hops": 0,
+              "purity": 0.6432364761502943,
+              "pairs": 6646
+            },
+            {
+              "hops": 1,
+              "purity": 0.3688883213324717,
+              "pairs": 11589
+            },
+            {
+              "hops": 2,
+              "purity": 0.2507016078072406,
+              "pairs": 21887
+            },
+            {
+              "hops": 3,
+              "purity": 0.18618768234169905,
+              "pairs": 31217
+            },
+            {
+              "hops": 4,
+              "purity": 0.15715448981564348,
+              "pairs": 40782
+            },
+            {
+              "hops": 5,
+              "purity": 0.14146903380574732,
+              "pairs": 48356
+            }
+          ]
+        },
+        "content/shuffled": {
+          "n_layouts": 9,
+          "purity_all": {
+            "mean": 0.35112208504801096,
+            "sd": 0.010141189010276826,
+            "min": 0.33654320987654324,
+            "max": 0.36185185185185187,
+            "permuted_mean": 0.11049821673525377,
+            "permuted_sd": 0.003398795316041752,
+            "ratio_to_cosine": 0.643342582539108
+          },
+          "purity_offcell": {
+            "mean": 0.10490260631001373,
+            "sd": 0.004941898530923343,
+            "min": 0.09346913580246913,
+            "max": 0.11043209876543209,
+            "permuted_mean": 0.11043979423868312,
+            "permuted_sd": 0.003318112007606237
+          },
+          "within_cell_purity": 0.6432364761502943,
+          "within_cell_chance": 0.1111111111111111,
+          "diversity_knn": {
+            "mean": 4.162551440329219,
+            "sd": 0.06623327349074018,
+            "chance": 6.228484671083053
+          },
+          "diversity_directions": {
+            "mean": 4.554979423868313,
+            "sd": 0.05943351437275537,
+            "min": 4.45925925925926,
+            "max": 4.641481481481481,
+            "chance": 4.560568341546852
+          },
+          "occupied_cells": 296,
+          "tokens_per_cell_max": 64,
+          "purity_by_hop": [
+            {
+              "hops": 0,
+              "purity": 0.6432364761502943,
+              "pairs": 6646
+            },
+            {
+              "hops": 1,
+              "purity": 0.10167735462979259,
+              "pairs": 7985
+            },
+            {
+              "hops": 2,
+              "purity": 0.1057874604216656,
+              "pairs": 16211
+            },
+            {
+              "hops": 3,
+              "purity": 0.10496328591263164,
+              "pairs": 24796
+            },
+            {
+              "hops": 4,
+              "purity": 0.10813193960633798,
+              "pairs": 33064
+            },
+            {
+              "hops": 5,
+              "purity": 0.11084451041792395,
+              "pairs": 41232
+            }
+          ]
+        },
+        "content/random-cells": {
+          "n_layouts": 9,
+          "purity_all": {
+            "mean": 0.10816598079561043,
+            "sd": 0.002535783469033897,
+            "min": 0.10451851851851852,
+            "max": 0.11304938271604938,
+            "permuted_mean": 0.11041128943758574,
+            "permuted_sd": 0.0034854382003883166,
+            "ratio_to_cosine": 0.19818685406361847
+          },
+          "purity_offcell": {
+            "mean": 0.10788614540466393,
+            "sd": 0.00413355742353965,
+            "min": 0.10107407407407408,
+            "max": 0.11253086419753085,
+            "permuted_mean": 0.11048072702331962,
+            "permuted_sd": 0.003462630724100385
+          },
+          "within_cell_purity": 0.10810193663534844,
+          "within_cell_chance": 0.1111111111111111,
+          "diversity_knn": {
+            "mean": 6.268641975308642,
+            "sd": 0.0318755295284023,
+            "chance": 6.228484671083053
+          },
+          "diversity_directions": {
+            "mean": 4.577860082304527,
+            "sd": 0.027677459455783374,
+            "min": 4.532592592592593,
+            "max": 4.614074074074074,
+            "chance": 4.560568341546852
+          },
+          "occupied_cells": 429,
+          "tokens_per_cell_max": 8,
+          "purity_by_hop": [
+            {
+              "hops": 0,
+              "purity": 0.10810193663534844,
+              "pairs": 2045
+            },
+            {
+              "hops": 1,
+              "purity": 0.10800084335363988,
+              "pairs": 8288
+            },
+            {
+              "hops": 2,
+              "purity": 0.10961083240871845,
+              "pairs": 16554
+            },
+            {
+              "hops": 3,
+              "purity": 0.1103690987593386,
+              "pairs": 24893
+            },
+            {
+              "hops": 4,
+              "purity": 0.11016487313395198,
+              "pairs": 33112
+            },
+            {
+              "hops": 5,
+              "purity": 0.10956562685376957,
+              "pairs": 41427
+            }
+          ]
+        },
+        "all/annealed": {
+          "n_layouts": 9,
+          "purity_all": {
+            "mean": 0.35160356652949243,
+            "sd": 0.006032489149032747,
+            "min": 0.3424691358024692,
+            "max": 0.3622345679012346,
+            "permuted_mean": 0.11047048010973938,
+            "permuted_sd": 0.00342919952232982,
+            "ratio_to_cosine": 0.7054017161759768
+          },
+          "purity_offcell": {
+            "mean": 0.19280246913580246,
+            "sd": 0.013275111509191403,
+            "min": 0.1708395061728395,
+            "max": 0.21701234567901231,
+            "permuted_mean": 0.11039651577503429,
+            "permuted_sd": 0.00322103851686456
+          },
+          "within_cell_purity": 0.44078903318193813,
+          "within_cell_chance": 0.1111111111111111,
+          "diversity_knn": {
+            "mean": 4.093168724279836,
+            "sd": 0.06602653348861898,
+            "chance": 6.228484671083053
+          },
+          "diversity_directions": {
+            "mean": 4.010370370370371,
+            "sd": 0.06224646793930613,
+            "min": 3.937777777777778,
+            "max": 4.105185185185185,
+            "chance": 4.560568341546852
+          },
+          "occupied_cells": 266,
+          "tokens_per_cell_max": 60,
+          "purity_by_hop": [
+            {
+              "hops": 0,
+              "purity": 0.44078903318193813,
+              "pairs": 10237
+            },
+            {
+              "hops": 1,
+              "purity": 0.18135643854706687,
+              "pairs": 11530
+            },
+            {
+              "hops": 2,
+              "purity": 0.16502129018782735,
+              "pairs": 20889
+            },
+            {
+              "hops": 3,
+              "purity": 0.1596581021160683,
+              "pairs": 31942
+            },
+            {
+              "hops": 4,
+              "purity": 0.1450728531284525,
+              "pairs": 39197
+            },
+            {
+              "hops": 5,
+              "purity": 0.12969067952757107,
+              "pairs": 47426
+            }
+          ]
+        },
+        "all/oracle-continents": {
+          "n_layouts": 9,
+          "purity_all": {
+            "mean": 0.3978971193415638,
+            "sd": 0.0043514009047508784,
+            "min": 0.3915061728395062,
+            "max": 0.401604938271605,
+            "permuted_mean": 0.11048257887517147,
+            "permuted_sd": 0.0033868224753143177,
+            "ratio_to_cosine": 0.7982777695216393
+          },
+          "purity_offcell": {
+            "mean": 0.31080521262002736,
+            "sd": 0.0025119951356879565,
+            "min": 0.3076543209876543,
+            "max": 0.3146172839506173,
+            "permuted_mean": 0.11038770919067216,
+            "permuted_sd": 0.0032083816347056424
+          },
+          "within_cell_purity": 0.44078903318193813,
+          "within_cell_chance": 0.1111111111111111,
+          "diversity_knn": {
+            "mean": 3.9817283950617286,
+            "sd": 0.045910989207826394,
+            "chance": 6.228484671083053
+          },
+          "diversity_directions": {
+            "mean": 3.445679012345679,
+            "sd": 0.04615534097681296,
+            "min": 3.3866666666666667,
+            "max": 3.502222222222222,
+            "chance": 4.560568341546852
+          },
+          "occupied_cells": 266,
+          "tokens_per_cell_max": 60,
+          "purity_by_hop": [
+            {
+              "hops": 0,
+              "purity": 0.44078903318193813,
+              "pairs": 10237
+            },
+            {
+              "hops": 1,
+              "purity": 0.2949161711245804,
+              "pairs": 12922
+            },
+            {
+              "hops": 2,
+              "purity": 0.2131841164253848,
+              "pairs": 23786
+            },
+            {
+              "hops": 3,
+              "purity": 0.1568104760612999,
+              "pairs": 35028
+            },
+            {
+              "hops": 4,
+              "purity": 0.14120152480133147,
+              "pairs": 45694
+            },
+            {
+              "hops": 5,
+              "purity": 0.1235826738564032,
+              "pairs": 56210
+            }
+          ]
+        },
+        "all/shuffled": {
+          "n_layouts": 9,
+          "purity_all": {
+            "mean": 0.31888751714677643,
+            "sd": 0.00385818984557342,
+            "min": 0.3142098765432099,
+            "max": 0.326246913580247,
+            "permuted_mean": 0.11043561042524005,
+            "permuted_sd": 0.003392280595062814,
+            "ratio_to_cosine": 0.6397654155864886
+          },
+          "purity_offcell": {
+            "mean": 0.1050877914951989,
+            "sd": 0.008405275750060457,
+            "min": 0.09303703703703703,
+            "max": 0.11712345679012344,
+            "permuted_mean": 0.11051425240054871,
+            "permuted_sd": 0.0031809602870991427
+          },
+          "within_cell_purity": 0.44078903318193813,
+          "within_cell_chance": 0.1111111111111111,
+          "diversity_knn": {
+            "mean": 4.351604938271605,
+            "sd": 0.04427436593264767,
+            "chance": 6.228484671083053
+          },
+          "diversity_directions": {
+            "mean": 4.546995884773662,
+            "sd": 0.06372965783854692,
+            "min": 4.4688888888888885,
+            "max": 4.66,
+            "chance": 4.560568341546852
+          },
+          "occupied_cells": 266,
+          "tokens_per_cell_max": 60,
+          "purity_by_hop": [
+            {
+              "hops": 0,
+              "purity": 0.44078903318193813,
+              "pairs": 10237
+            },
+            {
+              "hops": 1,
+              "purity": 0.10091906605176656,
+              "pairs": 8033
+            },
+            {
+              "hops": 2,
+              "purity": 0.10623714386542643,
+              "pairs": 16074
+            },
+            {
+              "hops": 3,
+              "purity": 0.09980907327783563,
+              "pairs": 24240
+            },
+            {
+              "hops": 4,
+              "purity": 0.1065831401144017,
+              "pairs": 32830
+            },
+            {
+              "hops": 5,
+              "purity": 0.10724441826182696,
+              "pairs": 41028
+            }
+          ]
+        },
+        "all/random-cells": {
+          "n_layouts": 9,
+          "purity_all": {
+            "mean": 0.10914951989026062,
+            "sd": 0.0034497583045143645,
+            "min": 0.10477777777777776,
+            "max": 0.11349382716049383,
+            "permuted_mean": 0.1103988477366255,
+            "permuted_sd": 0.003513103826233623,
+            "ratio_to_cosine": 0.21898031186186925
+          },
+          "purity_offcell": {
+            "mean": 0.10868175582990397,
+            "sd": 0.00473871395146409,
+            "min": 0.10138271604938272,
+            "max": 0.11513580246913581,
+            "permuted_mean": 0.11037559670781893,
+            "permuted_sd": 0.003556171160115071
+          },
+          "within_cell_purity": 0.11057906324681827,
+          "within_cell_chance": 0.1111111111111111,
+          "diversity_knn": {
+            "mean": 6.254074074074075,
+            "sd": 0.03973160987230772,
+            "chance": 6.228484671083053
+          },
+          "diversity_directions": {
+            "mean": 4.556213991769547,
+            "sd": 0.03485900356512543,
+            "min": 4.497777777777777,
+            "max": 4.607407407407408,
+            "chance": 4.560568341546852
+          },
+          "occupied_cells": 423,
+          "tokens_per_cell_max": 9,
+          "purity_by_hop": [
+            {
+              "hops": 0,
+              "purity": 0.11057906324681827,
+              "pairs": 2045
+            },
+            {
+              "hops": 1,
+              "purity": 0.10840992495187779,
+              "pairs": 8285
+            },
+            {
+              "hops": 2,
+              "purity": 0.11002324008474774,
+              "pairs": 16577
+            },
+            {
+              "hops": 3,
+              "purity": 0.11016458944318097,
+              "pairs": 24879
+            },
+            {
+              "hops": 4,
+              "purity": 0.11068541741803574,
+              "pairs": 33022
+            },
+            {
+              "hops": 5,
+              "purity": 0.1103035793840816,
+              "pairs": 41433
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "4x full-die",
+      "width": 34,
+      "height": 24,
+      "cells": 816,
+      "n_chips": 4,
+      "torus": true,
+      "note": "four full dies tiled 2x2, treated as one flat torus (optimistic)",
+      "n_layouts": 9,
+      "seconds": 168.75660181045532,
+      "qap_cost_start_mean": 2190807.6460620775,
+      "qap_cost_end_mean": 2077986.1742604168,
+      "verdicts": {
+        "aggregate_purity": "SURVIVES (57% of the cosine headroom survives the squash)",
+        "neighbourhood_sampling": "SUPPORTED (a cell is 131% as register-coherent as a cosine neighbourhood, and 6 neighbouring cells still return 3.97 distinct sources \u2014 83% of the way from one register to chance)",
+        "direction_means_register": "REFUTED (adjacency carries 21% of the cosine headroom; even the label-cheating continent layout reaches only 62%, so the limit is the 2-D squash, not the annealer)",
+        "overall": "NOT VIABLE AS PITCHED (direction_means_register)"
+      },
+      "aggregate_headroom_kept": 0.5702073874785981,
+      "adjacency_headroom_kept": 0.21464096051821965,
+      "adjacency_headroom_oracle_ceiling": 0.6187630747381369,
+      "variants": {
+        "content/annealed": {
+          "n_layouts": 9,
+          "purity_all": {
+            "mean": 0.358877914951989,
+            "sd": 0.011509911774696107,
+            "min": 0.34343209876543207,
+            "max": 0.3778395061728395,
+            "permuted_mean": 0.11051289437585733,
+            "permuted_sd": 0.0035110115710786085,
+            "ratio_to_cosine": 0.6575531829332045
+          },
+          "purity_offcell": {
+            "mean": 0.2061371742112483,
+            "sd": 0.022807874696364923,
+            "min": 0.16241975308641973,
+            "max": 0.23201234567901233,
+            "permuted_mean": 0.11040659807956105,
+            "permuted_sd": 0.003384587524058008
+          },
+          "within_cell_purity": 0.6804780735994241,
+          "within_cell_chance": 0.1111111111111111,
+          "diversity_knn": {
+            "mean": 4.0125925925925925,
+            "sd": 0.09037112932286046,
+            "chance": 6.228484671083053
+          },
+          "diversity_directions": {
+            "mean": 3.966255144032922,
+            "sd": 0.04185695005183876,
+            "min": 3.9207407407407406,
+            "max": 4.054074074074074,
+            "chance": 4.560568341546852
+          },
+          "occupied_cells": 443,
+          "tokens_per_cell_max": 40,
+          "purity_by_hop": [
+            {
+              "hops": 0,
+              "purity": 0.6804780735994241,
+              "pairs": 3813
+            },
+            {
+              "hops": 1,
+              "purity": 0.21693690678041555,
+              "pairs": 5393
+            },
+            {
+              "hops": 2,
+              "purity": 0.2001185233067675,
+              "pairs": 10804
+            },
+            {
+              "hops": 3,
+              "purity": 0.18826906807933164,
+              "pairs": 16236
+            },
+            {
+              "hops": 4,
+              "purity": 0.17945140517298902,
+              "pairs": 20733
+            },
+            {
+              "hops": 5,
+              "purity": 0.16271477909522014,
+              "pairs": 25130
+            }
+          ]
+        },
+        "content/oracle-continents": {
+          "n_layouts": 9,
+          "purity_all": {
+            "mean": 0.4739026063100137,
+            "sd": 0.008837625335378733,
+            "min": 0.4639629629629629,
+            "max": 0.48620987654320985,
+            "permuted_mean": 0.11053139917695473,
+            "permuted_sd": 0.003521800328904518,
+            "ratio_to_cosine": 0.868306892668999
+          },
+          "purity_offcell": {
+            "mean": 0.38216049382716055,
+            "sd": 0.008832500758789458,
+            "min": 0.3700493827160494,
+            "max": 0.3896913580246914,
+            "permuted_mean": 0.1104375720164609,
+            "permuted_sd": 0.0033643466013875854
+          },
+          "within_cell_purity": 0.6804780735994241,
+          "within_cell_chance": 0.1111111111111111,
+          "diversity_knn": {
+            "mean": 3.6079012345679007,
+            "sd": 0.04855949640758253,
+            "chance": 6.228484671083053
+          },
+          "diversity_directions": {
+            "mean": 3.1613168724279834,
+            "sd": 0.05031693486145141,
+            "min": 3.0903703703703704,
+            "max": 3.2274074074074073,
+            "chance": 4.560568341546852
+          },
+          "occupied_cells": 443,
+          "tokens_per_cell_max": 40,
+          "purity_by_hop": [
+            {
+              "hops": 0,
+              "purity": 0.6804780735994241,
+              "pairs": 3813
+            },
+            {
+              "hops": 1,
+              "purity": 0.39365624747325145,
+              "pairs": 7729
+            },
+            {
+              "hops": 2,
+              "purity": 0.27500591354787285,
+              "pairs": 14767
+            },
+            {
+              "hops": 3,
+              "purity": 0.20586054072649487,
+              "pairs": 20656
+            },
+            {
+              "hops": 4,
+              "purity": 0.1685718196488519,
+              "pairs": 26483
+            },
+            {
+              "hops": 5,
+              "purity": 0.14886177507874665,
+              "pairs": 31824
+            }
+          ]
+        },
+        "content/shuffled": {
+          "n_layouts": 9,
+          "purity_all": {
+            "mean": 0.3096433470507544,
+            "sd": 0.012178293428695487,
+            "min": 0.29445679012345677,
+            "max": 0.3255925925925926,
+            "permuted_mean": 0.11049030178326474,
+            "permuted_sd": 0.0034858045562433503,
+            "ratio_to_cosine": 0.5673432661760565
+          },
+          "purity_offcell": {
+            "mean": 0.11264609053497941,
+            "sd": 0.007398263389039454,
+            "min": 0.09871604938271604,
+            "max": 0.12613580246913578,
+            "permuted_mean": 0.1105372839506173,
+            "permuted_sd": 0.0033850377807627657
+          },
+          "within_cell_purity": 0.6804780735994241,
+          "within_cell_chance": 0.1111111111111111,
+          "diversity_knn": {
+            "mean": 4.421893004115226,
+            "sd": 0.09506990505158448,
+            "chance": 6.228484671083053
+          },
+          "diversity_directions": {
+            "mean": 4.542469135802469,
+            "sd": 0.05293576095023075,
+            "min": 4.476296296296296,
+            "max": 4.6214814814814815,
+            "chance": 4.560568341546852
+          },
+          "occupied_cells": 443,
+          "tokens_per_cell_max": 40,
+          "purity_by_hop": [
+            {
+              "hops": 0,
+              "purity": 0.6804780735994241,
+              "pairs": 3813
+            },
+            {
+              "hops": 1,
+              "purity": 0.10698350956976961,
+              "pairs": 4609
+            },
+            {
+              "hops": 2,
+              "purity": 0.11185891878804627,
+              "pairs": 8908
+            },
+            {
+              "hops": 3,
+              "purity": 0.10806636856386051,
+              "pairs": 13579
+            },
+            {
+              "hops": 4,
+              "purity": 0.1091124774595129,
+              "pairs": 18063
+            },
+            {
+              "hops": 5,
+              "purity": 0.1080033394522721,
+              "pairs": 22326
+            }
+          ]
+        },
+        "content/random-cells": {
+          "n_layouts": 9,
+          "purity_all": {
+            "mean": 0.11107818930041152,
+            "sd": 0.0021302557676782033,
+            "min": 0.10795061728395061,
+            "max": 0.11413580246913581,
+            "permuted_mean": 0.1105011111111111,
+            "permuted_sd": 0.003638608915703829,
+            "ratio_to_cosine": 0.20352274098202436
+          },
+          "purity_offcell": {
+            "mean": 0.11152812071330592,
+            "sd": 0.0024346729012379924,
+            "min": 0.10722222222222223,
+            "max": 0.11562962962962964,
+            "permuted_mean": 0.11046658436213991,
+            "permuted_sd": 0.003541464737090726
+          },
+          "within_cell_purity": 0.10661999843095235,
+          "within_cell_chance": 0.1111111111111111,
+          "diversity_knn": {
+            "mean": 6.238847736625514,
+            "sd": 0.04491588100446845,
+            "chance": 6.228484671083053
+          },
+          "diversity_directions": {
+            "mean": 4.557613168724279,
+            "sd": 0.026583661395547218,
+            "min": 4.529629629629629,
+            "max": 4.6177777777777775,
+            "chance": 4.560568341546852
+          },
+          "occupied_cells": 664,
+          "tokens_per_cell_max": 6,
+          "purity_by_hop": [
+            {
+              "hops": 0,
+              "purity": 0.10661999843095235,
+              "pairs": 1109
+            },
+            {
+              "hops": 1,
+              "purity": 0.11270498926157016,
+              "pairs": 4447
+            },
+            {
+              "hops": 2,
+              "purity": 0.10973673917883148,
+              "pairs": 8976
+            },
+            {
+              "hops": 3,
+              "purity": 0.1100528500853163,
+              "pairs": 13392
+            },
+            {
+              "hops": 4,
+              "purity": 0.110569148847168,
+              "pairs": 17958
+            },
+            {
+              "hops": 5,
+              "purity": 0.11037775213925753,
+              "pairs": 22334
+            }
+          ]
+        },
+        "all/annealed": {
+          "n_layouts": 9,
+          "purity_all": {
+            "mean": 0.33620987654320994,
+            "sd": 0.008857237458028218,
+            "min": 0.3254691358024691,
+            "max": 0.34929629629629627,
+            "permuted_mean": 0.11048787379972563,
+            "permuted_sd": 0.0033888677264557287,
+            "ratio_to_cosine": 0.6745182543220886
+          },
+          "purity_offcell": {
+            "mean": 0.1919615912208505,
+            "sd": 0.015778709284463087,
+            "min": 0.1611358024691358,
+            "max": 0.2128395061728395,
+            "permuted_mean": 0.1104857475994513,
+            "permuted_sd": 0.0033446080822716957
+          },
+          "within_cell_purity": 0.47477873333959164,
+          "within_cell_chance": 0.1111111111111111,
+          "diversity_knn": {
+            "mean": 4.158353909465021,
+            "sd": 0.07870939219336051,
+            "chance": 6.228484671083053
+          },
+          "diversity_directions": {
+            "mean": 4.030699588477366,
+            "sd": 0.041834003259127034,
+            "min": 3.965925925925926,
+            "max": 4.093333333333334,
+            "chance": 4.560568341546852
+          },
+          "occupied_cells": 389,
+          "tokens_per_cell_max": 37,
+          "purity_by_hop": [
+            {
+              "hops": 0,
+              "purity": 0.47477873333959164,
+              "pairs": 5646
+            },
+            {
+              "hops": 1,
+              "purity": 0.1853533260916368,
+              "pairs": 6491
+            },
+            {
+              "hops": 2,
+              "purity": 0.17213002293925844,
+              "pairs": 12957
+            },
+            {
+              "hops": 3,
+              "purity": 0.17162587515405822,
+              "pairs": 18595
+            },
+            {
+              "hops": 4,
+              "purity": 0.1642018606337297,
+              "pairs": 23817
+            },
+            {
+              "hops": 5,
+              "purity": 0.14936939110128072,
+              "pairs": 28187
+            }
+          ]
+        },
+        "all/oracle-continents": {
+          "n_layouts": 9,
+          "purity_all": {
+            "mean": 0.42259807956104256,
+            "sd": 0.00853713994187179,
+            "min": 0.4152098765432099,
+            "max": 0.43503703703703706,
+            "permuted_mean": 0.11046493827160493,
+            "permuted_sd": 0.003415737093751693,
+            "ratio_to_cosine": 0.8478338644782396
+          },
+          "purity_offcell": {
+            "mean": 0.3439670781893004,
+            "sd": 0.014013955419582906,
+            "min": 0.32841975308641974,
+            "max": 0.3619012345679012,
+            "permuted_mean": 0.11049672153635118,
+            "permuted_sd": 0.0033625991415995138
+          },
+          "within_cell_purity": 0.47477873333959164,
+          "within_cell_chance": 0.1111111111111111,
+          "diversity_knn": {
+            "mean": 3.8855967078189306,
+            "sd": 0.06544362814799463,
+            "chance": 6.228484671083053
+          },
+          "diversity_directions": {
+            "mean": 3.2179423868312758,
+            "sd": 0.1299154403565728,
+            "min": 3.0192592592592593,
+            "max": 3.3533333333333335,
+            "chance": 4.560568341546852
+          },
+          "occupied_cells": 389,
+          "tokens_per_cell_max": 37,
+          "purity_by_hop": [
+            {
+              "hops": 0,
+              "purity": 0.47477873333959164,
+              "pairs": 5646
+            },
+            {
+              "hops": 1,
+              "purity": 0.35292980470879465,
+              "pairs": 8493
+            },
+            {
+              "hops": 2,
+              "purity": 0.24253174619689594,
+              "pairs": 16655
+            },
+            {
+              "hops": 3,
+              "purity": 0.17697196629716677,
+              "pairs": 24438
+            },
+            {
+              "hops": 4,
+              "purity": 0.1532829852756153,
+              "pairs": 30254
+            },
+            {
+              "hops": 5,
+              "purity": 0.14063721092446174,
+              "pairs": 36719
+            }
+          ]
+        },
+        "all/shuffled": {
+          "n_layouts": 9,
+          "purity_all": {
+            "mean": 0.29638820301783264,
+            "sd": 0.00687416041100016,
+            "min": 0.28404938271604935,
+            "max": 0.30320987654320986,
+            "permuted_mean": 0.11043061728395062,
+            "permuted_sd": 0.003440634564769428,
+            "ratio_to_cosine": 0.5946263546947155
+          },
+          "purity_offcell": {
+            "mean": 0.10844170096021949,
+            "sd": 0.008530544333433103,
+            "min": 0.09376543209876544,
+            "max": 0.119,
+            "permuted_mean": 0.11046857338820301,
+            "permuted_sd": 0.0033673417459353827
+          },
+          "within_cell_purity": 0.47477873333959164,
+          "within_cell_chance": 0.1111111111111111,
+          "diversity_knn": {
+            "mean": 4.484444444444446,
+            "sd": 0.07153807009733373,
+            "chance": 6.228484671083053
+          },
+          "diversity_directions": {
+            "mean": 4.5494650205761324,
+            "sd": 0.047649523202478866,
+            "min": 4.46962962962963,
+            "max": 4.608888888888889,
+            "chance": 4.560568341546852
+          },
+          "occupied_cells": 389,
+          "tokens_per_cell_max": 37,
+          "purity_by_hop": [
+            {
+              "hops": 0,
+              "purity": 0.47477873333959164,
+              "pairs": 5646
+            },
+            {
+              "hops": 1,
+              "purity": 0.10585539109858606,
+              "pairs": 4604
+            },
+            {
+              "hops": 2,
+              "purity": 0.10570143476049693,
+              "pairs": 8944
+            },
+            {
+              "hops": 3,
+              "purity": 0.1082476866440386,
+              "pairs": 13798
+            },
+            {
+              "hops": 4,
+              "purity": 0.10902917873013186,
+              "pairs": 18154
+            },
+            {
+              "hops": 5,
+              "purity": 0.1081640957996875,
+              "pairs": 21969
+            }
+          ]
+        },
+        "all/random-cells": {
+          "n_layouts": 9,
+          "purity_all": {
+            "mean": 0.1111508916323731,
+            "sd": 0.0019021139718809576,
+            "min": 0.10816049382716049,
+            "max": 0.11416049382716048,
+            "permuted_mean": 0.11046879286694102,
+            "permuted_sd": 0.0035484842900273795,
+            "ratio_to_cosine": 0.22299554718933523
+          },
+          "purity_offcell": {
+            "mean": 0.11087928669410152,
+            "sd": 0.002443413688541565,
+            "min": 0.10732098765432098,
+            "max": 0.11480246913580246,
+            "permuted_mean": 0.11043569272976679,
+            "permuted_sd": 0.0035461317867634765
+          },
+          "within_cell_purity": 0.10935087273556023,
+          "within_cell_chance": 0.1111111111111111,
+          "diversity_knn": {
+            "mean": 6.240411522633745,
+            "sd": 0.03278376407170678,
+            "chance": 6.228484671083053
+          },
+          "diversity_directions": {
+            "mean": 4.562139917695474,
+            "sd": 0.0282659436889363,
+            "min": 4.503703703703704,
+            "max": 4.58962962962963,
+            "chance": 4.560568341546852
+          },
+          "occupied_cells": 653,
+          "tokens_per_cell_max": 7,
+          "purity_by_hop": [
+            {
+              "hops": 0,
+              "purity": 0.10935087273556023,
+              "pairs": 1106
+            },
+            {
+              "hops": 1,
+              "purity": 0.11196709130646762,
+              "pairs": 4437
+            },
+            {
+              "hops": 2,
+              "purity": 0.11006851513848204,
+              "pairs": 8951
+            },
+            {
+              "hops": 3,
+              "purity": 0.11122388785444667,
+              "pairs": 13380
+            },
+            {
+              "hops": 4,
+              "purity": 0.11127438214332713,
+              "pairs": 17854
+            },
+            {
+              "hops": 5,
+              "purity": 0.11064815538693684,
+              "pairs": 22342
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
