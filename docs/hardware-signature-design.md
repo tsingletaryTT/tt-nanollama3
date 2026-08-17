@@ -52,6 +52,40 @@ So the achievable claim is not *"impossible to fake"*. It is:
 That survives contact with our own measurement discipline. The stronger claim
 does not.
 
+## The trilemma
+
+Pushing on "CPU can't possibly get it" leads somewhere uncomfortable that is
+better stated up front than discovered late:
+
+**Anything deterministic can be simulated.** If a process replays identically on
+TT, then it is an algorithm plus a state, and a sufficiently determined person
+can reimplement both on a CPU. Reproducibility *is* simulability. So "impossible
+to reach on CPU" and "reproducible" cannot both hold. Pick one:
+
+1. **Unfakeable** — seed from something genuinely physical (unseeded PRNG state,
+   NoC arrival order under contention). No CPU can reproduce it. Neither can the
+   next TT run, which makes it unmeasurable and unloggable. It fails this
+   project's own standards.
+2. **Reproducible** — seeded, deterministic, replayable, loggable in
+   `episod-log.md`. A CPU can match it bit-for-bit given the algorithm and the
+   layout. TT is then the *reference implementation*, not an oracle.
+3. **Expensive to fake** — reproducible in principle, but a CPU reproducing it
+   must simulate 110 core-local memories and their PRNGs per token. Feasible,
+   and roughly two orders of magnitude slower. TT is necessary *in practice*
+   rather than in principle.
+
+The recommendation is **2 with 3's character**: a deterministic process whose
+*definition* is a hardware measurement. The token-to-core mapping would come
+from the QAP layout onto the real harvested 11×10 grid — and that layout is not
+an algorithm anyone can derive, it is a measurement of this silicon
+(`scripts/probe_grid_layout.py`). A CPU can replay it only by importing our
+measured layout, which is precisely what "the hardware is the reference
+implementation" means in practice.
+
+Option 1 stays available as a deliberate, labelled mode — an *unrepeatable
+edition*, valuable exactly because it cannot be reproduced, and never used for
+anything we intend to measure.
+
 ## What is still unmeasured
 
 The design rests on an assumption nobody has tested here: that a Tensix core is
