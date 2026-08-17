@@ -1822,5 +1822,8 @@ Everything needed for adoption is kept:
 `.superpowers/tinystories-reduction-armB-registry.patch`, `artifacts/tokens-lowts/`, and the
 three arm B models.
 
-Suite: **1034 passed, 2 skipped** (the 1028+7 above, now green, plus the five new
-measurement sets adding none). No new dependencies, nothing published to the Hub.
+Suite: **1034 passed, 2 skipped** — 1036 collected, the same 1036 as the entry above, whose
+7 failures were this experiment's uncommitted re-cut of `train/corpus.py` and are green again
+now that the corpus is restored. The measurement sets add no tests. The second skip is not
+mine either (`test_probe_grid_layout` skips without a cached corpus profile; the other is
+`test_sizes` without `TT_METAL_HOME`). No new dependencies, nothing published to the Hub.
