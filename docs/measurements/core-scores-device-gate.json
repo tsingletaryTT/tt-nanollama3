@@ -1,0 +1,13 @@
+{
+  "cores": 110,
+  "exact_matches": 110,
+  "max_abs_delta": 0.0,
+  "reference": "bfloat16(numpy max) compared exactly",
+  "matches_round_to_nearest": 110,
+  "matches_truncation": 110,
+  "max_abs_delta_vs_fp32": 0.0,
+  "pass": true,
+  "layout_digest": "f5a352a191289915ae1ff3164ed65c8c60952582863d2c1ad529e97171cbe53f",
+  "seed": 20260817,
+  "pool": "MAX"
+}

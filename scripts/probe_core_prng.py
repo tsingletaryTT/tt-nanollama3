@@ -62,7 +62,7 @@ import ttnn
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 COMPUTE_KERNEL = REPO_ROOT / "kernels" / "prng_probe_compute.cpp"
-WRITER_KERNEL = REPO_ROOT / "kernels" / "prng_probe_writer.cpp"
+WRITER_KERNEL = REPO_ROOT / "kernels" / "tile_writer.cpp"
 
 TILE = 32
 FLOAT32_BYTES = 4

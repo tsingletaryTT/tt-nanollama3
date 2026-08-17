@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
 //
-// Writer kernel for the per-core PRNG probe.
+// Generic tile writer: drains a CB to DRAM, one tile per page.
 //
 // Drains the intermediate CB filled by prng_probe_compute.cpp and writes each
 // tile straight to DRAM. Every core writes to its OWN page range, handed to it

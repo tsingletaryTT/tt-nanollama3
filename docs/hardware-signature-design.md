@@ -151,6 +151,40 @@ as planned. Structure comes from the measured grid layout; selection comes from
 host-assigned per-core seeds. The claim is "the hardware is the reference
 implementation", and that claim is now backed by measurement rather than hope.
 
+## On-device per-core scoring (2026-08-17)
+
+`docs/measurements/core-scores-device-gate.json` — **110/110 cores exact, zero delta.**
+
+The layout is now physically real. The vocabulary is permuted so each core's ~291
+tokens are contiguous, padded to one 32x32 tile, and handed to one Tensix. Each
+core reduces its own bag out of its own L1 and writes one number. No core reads
+another core's memory, and the token→core assignment is the measured layout.
+
+Reduction is MAX rather than log-sum-exp: a stable log-sum-exp needs max,
+broadcast-subtract, exp, sum and log — four more stages and a second pass — while
+MAX is one reduce and is a legitimate scoring rule on its own. The log-sum-exp
+version is the follow-up.
+
+Three bugs, and what each cost:
+
+1. **Compile failure.** This tt-metal wants compute kernels to define
+   `kernel_main`; the older `namespace NAMESPACE { void MAIN }` does not link.
+2. **A 20-minute hang at 110 cores, and zeros at one core.** Both were the same
+   omission: `compute_kernel_hw_startup()`, which programs the unpacker tile
+   descriptors and the math ALU format registers. Without it the pipeline is
+   unconfigured, the reduce packs zeros *silently*, and at full width it stalls.
+   Bisecting to a single core is what separated the two symptoms — at 110 cores
+   the stall said nothing about which kernel was at fault.
+3. **1-ULP disagreements that were never a device bug.** The Tensix source
+   registers narrow fp32 on the way into the math pipeline, so with arbitrary
+   fp32 inputs the gate was really measuring float narrowing. A hypothesis that
+   the hardware *truncates* where torch rounds was tested and **refuted** —
+   round-to-nearest and truncation matched identically (4/32, then 13/110).
+   Feeding bf16-exact inputs removed the ambiguity and the gate went green.
+
+The third one is the reusable lesson: a gate whose reference is less precise than
+its subject measures the reference.
+
 ## Why not tt-lang
 
 `ttl.call_extern_func` was the obvious route and is a dead end on this box:
