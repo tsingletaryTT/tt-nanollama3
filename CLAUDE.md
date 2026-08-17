@@ -1746,3 +1746,81 @@ worktree with only my two new files added: all 7 pass there, along with all 45 o
 of that agent's work was staged, stashed, reverted or touched — this commit stages five explicit
 paths. My measurement is unaffected by the re-blend either way: it reads a prefix of each
 **per-source** file with an equal word budget, not the blend.
+
+---
+
+## Reducing TinyStories — the fifth intervention, and the first that moved register
+
+**Prompt.** "Does reducing TinyStories move register?" Four interventions had failed to move
+it (sampling, the stratified-split mixture correction, an LR decay tail refuted by a seed
+control, and capacity — a null at 1.03x the floor). The only two things that ever moved this
+model were corpus changes; TinyStories was 31% of training tokens and is literally what the
+register metric measures similarity to. Two arms, three seeds each, at `1024`'s exact shape.
+Full report: `.superpowers/tinystories-reduction.md`.
+
+**Design.** Arm A = the shipped 31% blend (`artifacts/tokens-v3`), reusing
+`checkpoints-tt-tnt-1024a` as seed 5489 plus two new seeds. Arm B = TinyStories at **10%**,
+the freed 21 points redistributed **proportionally** across the six sources with headroom, so
+the ratio of every non-TinyStories source to every other is preserved — that is what makes it
+a single-variable change. `procedural` and `flavour` could not be scaled (a proportional
+share needs 5.10x and 4.53x against the 4x cap) and were pinned; four sources needed a higher
+`upsample` (gc 2→3, wiki 1→2, folklore 2→3, weird 3→4). Shares summed to exactly 1.0,
+strange slices held at 35.5%. Seeds 5489 / 20260815 / 8191, `--ddp 4`, `--model-impl python`,
+10,764 steps — five new runs, ~47 min each.
+
+**Register moved. 1.79x and 1.36x the seed floor, 3/3 seeds, both gates.**
+
+| signal | arm A (sd) | arm B (sd) | delta | ×floor |
+|---|---:|---:|---:|---:|
+| nearest source == tinystories | 0.2192 (0.0149) | 0.1535 (0.0308) | −0.0657 | **1.79x** |
+| tinystories margin | −0.5076 (0.0431) | −0.6090 (0.0449) | −0.1014 | **1.36x** |
+| — lexical-habit collapse | 0.0516 (0.0059) | 0.0352 (0.0142) | −0.0164 | 0.29x — not interpretable |
+
+**It is not a loss trade.** Loss rose +0.3857 nats, but **+0.4288 was predicted from the
+validation-mixture change alone** — the two arms hold out per-source tails of *different*
+blends, and arm B's val set is 10.2% tinystories against arm A's 31%, so a model of identical
+quality already scores ~0.43 worse. The residual is **−0.0431 = 0.22x the loss floor**. The
+null hypothesis for loss in a corpus experiment is not zero, and computing it is what turned
+an uninterpretable number into an interpretable one.
+
+**It IS a termination trade, mechanistically explained.** `termination rate` regresses 1.37x
+the floor (3/3 in direction) and generations run longer (`n_tokens` +0.59, 1.79x).
+`tinystories` supplied **73%** of the blend's document separators, so cutting it left arm B
+with **41.6% fewer `</s>`** — one per 836 tokens against one per 491, counted directly on both
+token arrays. Predicting that count from the share arithmetic gives 468,001 against 466,191
+measured, agreeing to 0.4%. Separator density is a property of document length, not of
+register, so this is separately fixable.
+
+⚠️ **One seed would have got this wrong.** The per-seed effect is monotone — 0.92x, 1.74x,
+2.70x. Seed 5489 alone, the seed every previous single run used, lands inside the floor on
+every signal and would have been written up as a null. The mirror-image error is in the same
+data: the seed-5489 pair reports `4-gram repeat` **worse at 5.32x** and `longest repeat`
+**worse at 6.28x**, which at the arm level are **0.24x** and **0.90x** — noise. Single pairs
+lie in both directions.
+
+⚠️ **"Less like TinyStories" is not "more like spine."** The mass that left tinystories
+(−0.066) went to `gutenberg_children` (+0.031) and `procedural` (+0.024); `spine` gained
+**+0.007**. The model moved onto the *other* simple-narrative backbone. The obvious next
+experiment is therefore not "try 5%" but holding the backbone total fixed and moving share
+into `spine`.
+
+**The confound the brief called the most likely source of a spurious positive is structurally
+absent.** The register profile is fit from `artifacts/corpus/<name>.txt` and the *names* in
+`SOURCES` — never `target_share`, never `upsample`; `blend_corpus.py` writes only `blend.txt`.
+Three proofs: the nine per-source sha256s are identical across the re-blend; re-measured
+availability is byte-identical; and re-scoring `hf-tt-tnt-1024a` **with arm B's registry
+loaded** reproduced the committed numbers **bit-for-bit**, including per-source nearest
+counts. (That last one also means the concurrent commit landing mid-experiment could not have
+perturbed a measurement.)
+
+**Deliberately not adopted.** The corpus was restored to the shipped 31% blend afterwards —
+`blend.txt`'s sha256 reproduces `24f3d112…` exactly, the blend being deterministic. Adopting
+arm B would rewrite `docs/corpus_blend.md` (digest-pinned provenance for the *published*
+model's corpus) and edit three share-pinning test files, as a side effect of an experiment,
+for a corpus no published model trained on. Measuring and shipping are different acts.
+Everything needed for adoption is kept:
+`.superpowers/tinystories-reduction-armB-registry.patch`, `artifacts/tokens-lowts/`, and the
+three arm B models.
+
+Suite: **1034 passed, 2 skipped** (the 1028+7 above, now green, plus the five new
+measurement sets adding none). No new dependencies, nothing published to the Hub.
