@@ -14,14 +14,22 @@
      relative URLs against the page they scraped: a relative path here produces a link
      preview with a missing field and no error message anywhere in the chain, so the
      failure is invisible until someone pastes the link somewhere public.
-     There is deliberately NO og:image. This repository contains no image files at all
-     (`find . -name '*.png' -o -name '*.svg' ...` returns nothing outside .git), and a
-     meta tag pointing at a file that does not exist is worse than an absent one: it
-     fails silently, in exactly the way this page is about not doing. -->
+     This page carried no og:image for as long as the repository had no raster image to
+     point at — the diagrams below are inlined SVG, and a meta tag pointing at a file that
+     does not exist fails silently, in exactly the way this page is about not doing.
+     `brand/tt-tnt-logo.jpg` now exists, so the tag is real and the card is large. -->
 <meta property="og:url" content="https://tsingletarytt.github.io/tt-tnt/">
-<meta name="twitter:card" content="summary">
+<meta property="og:image" content="https://tsingletarytt.github.io/tt-tnt/brand/tt-tnt-logo.jpg">
+<meta property="og:image:width" content="1400">
+<meta property="og:image:height" content="1400">
+<meta property="og:image:alt" content="A hand-drawn figure with TT-TNT on its chest, standing on a grid of Tensix cores.">
+<meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="tt-tnt — a small model built Tenstorrent-native">
+<meta name="twitter:image" content="https://tsingletarytt.github.io/tt-tnt/brand/tt-tnt-logo.jpg">
 <meta name="twitter:description" content="~123M parameters, one epoch, 400M tokens. Trained, packaged and served entirely on Tenstorrent tooling. Not capable — but honestly measured, refuted findings included.">
+
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 
 <style>
 /* ── Design tokens ────────────────────────────────────────────────────────────
@@ -162,6 +170,17 @@ code { background: var(--bg-alt); padding: .08em .3em; border-radius: 3px; }
 
 /* ── Hero ─────────────────────────────────────────────────────────────────── */
 .hero { padding: clamp(3rem, 8vw, 5.5rem) 0 2.5rem; border-bottom: 1px solid var(--rule); }
+/* Logo and text share a row on wide screens and stack on narrow ones. The logo is
+   a light drawing on a pale die, so in dark mode it would otherwise sit on the page
+   as a lit panel; the rule and the slight dimming settle it onto the ground. */
+.hero .wrap.lead { display: grid; gap: clamp(1.5rem, 4vw, 3rem); align-items: center;
+  grid-template-columns: minmax(0, 1fr); max-width: min(100% - 2.5rem, 62rem); }
+@media (min-width: 56rem) { .hero .wrap.lead { grid-template-columns: minmax(0, 1fr) 17rem; } }
+.hero .logo { margin: 0; }
+.hero .logo img { display: block; width: 100%; height: auto; border-radius: 6px;
+  border: 1px solid var(--rule); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .hero .logo img { filter: brightness(.9); } }
+:root[data-theme="dark"] .hero .logo img { filter: brightness(.9); }
 .hero .lede { font-size: clamp(1.05rem, 1rem + .4vw, 1.25rem); color: var(--ink-2); }
 .hero h1 { margin-bottom: 1rem; }
 
@@ -298,7 +317,8 @@ footer a { color: var(--ink-3); }
 <a class="skip" href="#main">Skip to content</a>
 
 <header class="hero">
-  <div class="wrap col">
+  <div class="wrap lead">
+   <div>
     <p class="eyebrow">tenstorrent · tt-tnt</p>
     <h1>A small language model trained on Tenstorrent hardware.</h1>
     <p class="lede">
@@ -312,6 +332,11 @@ footer a { color: var(--ink-3); }
       repeats itself under greedy decoding. The measurements below describe what it does and
       where its limits are.
     </p>
+   </div>
+   <figure class="logo">
+     <img src="brand/tt-tnt-logo.jpg" width="1400" height="1400"
+          alt="tt-tnt: a hand-drawn figure with TT-TNT written on its chest, standing on a grid of Tensix cores and SRAM.">
+   </figure>
   </div>
 </header>
 

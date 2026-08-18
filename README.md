@@ -3,6 +3,8 @@
 
 # tt-tnt
 
+<img src="docs/brand/tt-tnt-logo-small.jpg" alt="tt-tnt: a hand-drawn figure with TT-TNT written on its chest, standing on a grid of Tensix cores." width="260" align="right">
+
 A small Llama-3-style language model trained from random initialization on Blackhole
 hardware with `ttml` (tt-train), packaged with
 [tt-kernel](https://github.com/tenstorrent/tt-kernel-package-manager), and served through the

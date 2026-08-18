@@ -3,45 +3,44 @@
 
 # tt-tnt visual identity
 
-![tt-tnt](tt-tnt-logo.svg)
+![tt-tnt](tt-tnt-logo.jpg)
 
-## What it is
+A hand-drawn figure with `TT-TNT` on its chest, standing on a grid of Tensix cores,
+SRAM and NoC routers, with a hand-lettered *Tenstorrent*. Its skull is open at the
+back and there is a die in it.
 
-A cartoon creature — blocky, googly-eyed, gap-toothed — with `TT-TNT` on its chest,
-drawn in marker on a burned CD-R, standing over the disc's centre hole with crumbs
-around it.
-
-## Where it comes from
-
-Tortoise's *TNT* (1998) is an instrumental record whose sleeve looks like someone
-drew a cartoon on a CD-R — an early master of the album rather than a pressing.
-
-That is the spirit of this model, and not as a pose: tt-tnt is 123M parameters
-trained for one epoch, whose own measurement suite keeps catching it out. It is an
-early master. The disc says so under the creature's feet.
-
-This is an **original homage**, in the manner of `station-to-station.svg` in
-tt-station — the spirit of the reference, never its artwork.
-
-## How Tenstorrent is in it
-
-Structurally rather than applied. CD-R dye is cyan-green and the Tenstorrent
-accent is teal, so the disc's data field simply *is* the brand colour
-(`#4FD1C5`), and the ink is the brand's dark forest (`#08201f`). The creature's
-mouth has gaps where teeth should be — the harvested die is 110 usable cores of
-204 sites, and the mouth is missing the same way.
+Supplied by Taylor Singletary; not generated here. Earlier machine-drawn attempts
+(an SVG homage to Tortoise's *TNT* sleeve) were discarded.
 
 ## Files
 
-| file | use |
-|---|---|
-| `tt-tnt-logo.svg` | 640px, with the "early master" line. README, site header, model card. |
-| `tt-tnt-mark.svg` | 256px, no wordmark. Favicon, avatar, anywhere under ~96px. |
-| `generate_logo.py` | Regenerates both. |
+| file | size | use |
+|---|---|---|
+| `tt-tnt-logo-original.jpg` | 2048px | Untouched original, as supplied. |
+| `tt-tnt-logo-full.jpg` | 1950px | Cropped master. Everything below derives from it. |
+| `tt-tnt-logo.jpg` | 1400px | The site hero, and the Open Graph / Twitter card image. |
+| `tt-tnt-logo-small.jpg` | 520px | The README, displayed at 260px. |
+| `tt-tnt-mark.png` | 512px | Head and shoulders, for avatars. |
+| `../favicon.png`, `../apple-touch-icon.png` | 64 / 180px | Site icons, cut from the same head. |
 
-The hand-drawn wobble comes from a **seeded** generator, so the logo is stable
-across regenerations. A logo that changes every build is not a logo.
+## The two edits
 
-```bash
-python docs/brand/generate_logo.py
-```
+**The crop.** The original carried a stray `TITLE` placeholder in its top-left
+margin. The frame sat inside a uniform 49px border, so cropping to `(49, 49,
+1999, 1999)` removes the placeholder and the empty margin in one move and leaves
+a square. `tt-tnt-logo-original.jpg` is kept unmodified beside it.
+
+**The mark.** The full drawing is a figure on a die at low contrast; below about
+128px the figure dissolves into the grid. The mark is therefore a *different crop*
+rather than the same image scaled — head and shoulders, from `(10, 140, 990,
+1120)` of the master.
+
+## Where it is used
+
+- `docs/index.html` — hero, beside the lede; also `og:image` and `twitter:image`,
+  which is why the card is now `summary_large_image`.
+- `README.md` — right-aligned at 260px.
+
+The drawing is light-on-pale, so on the site's dark theme it is dimmed to
+`brightness(.9)` and given a `--rule` border. Without that it reads as a lit panel
+floating over a dark page.
