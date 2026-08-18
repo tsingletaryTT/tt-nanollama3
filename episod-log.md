@@ -206,3 +206,52 @@ domestic and childlike to the east, confiding to the west, oddly bureaucratic to
 the north, storybook-formal to the south. What changed is where the reaching
 happens: each continuation was selected by a different Tensix core, from its own
 region of a map of this die, using its own random stream.
+
+---
+
+## 2026-08-17 — the decode defect, located and gone
+
+The model did not change. The vLLM plugin did.
+
+On-device generation had degraded into repetition within a few tokens for weeks,
+and nine hypotheses about the mechanism had been raised and refuted. None of them
+had been a bisection: every one was a guess at which component inside the stack
+was at fault, argued without narrowing which half of the stack to look in.
+
+The cut that settled it was running the same weights, the same prompts and greedy
+decoding through `tt_transformers` directly, with no vLLM in the loop. Across six
+prompts the direct path held a median agreement of 12 tokens with the CPU
+reference and a local-repeat rate of 0.000 — it diverges from CPU, sometimes at
+the first token, but it diverges into coherent sentences and finishes its stories.
+The vLLM path on the same weights sat at 4 tokens and 0.222. That located the
+fault in the vLLM layer and cleared the model, the KV cache, position handling
+and sampling in one run.
+
+`vllm-tt-plugin` was then found to be 12 commits behind, among them
+`fix: return None from sample_tokens when no pending forward` — a sampler
+returning a stale token with no pending forward produces exactly the observed
+repetition. Updating the plugin to `c127c17` took the local-repeat rate from
+0.222 to 0.031, against a CPU reference of 0.000.
+
+Agreement with CPU fell to a median of 0 in the same run, which is not a
+regression: greedy paths diverge benignly under bf16, and the direct path does
+the same. Repetition was the defect; agreement length was never the measure of it.
+
+One caveat on the record: the original baseline JSON does not carry the server's
+`max_model_len` or the plugin SHA, so configuration differences between the two
+runs cannot be entirely excluded.
+
+### The model, asked — on device, through vLLM
+
+`artifacts/hf` served as `episod/tt-tnt`, greedy, max_model_len 256.
+
+Before, on the stale plugin:
+
+> girl named Lily. Lily. Lily. Lily. She loved to a time, there was a little, there was a little.
+
+After:
+
+> girl named Lily. She loved to play outside in the park. One day, she saw a big, shiny rock on the g
+
+The second one is a story. The voice is the same one the CPU has always had —
+what changed is that the device can now hold it for more than four tokens.

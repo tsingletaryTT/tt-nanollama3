@@ -1,0 +1,54 @@
+{
+  "comparison": "direct tt_transformers vs recorded vLLM, same artifact/prompts/greedy",
+  "artifact": "artifacts/hf",
+  "direct_agreements": [
+    12,
+    0,
+    13,
+    9,
+    12,
+    12
+  ],
+  "vllm_agreements": [
+    4,
+    4,
+    5,
+    2,
+    1,
+    7
+  ],
+  "direct_median": 12.0,
+  "vllm_median": 4.0,
+  "note": "Direct path runs with tt-tnt's find_grid shim, 1x1 mesh, batch 1, greedy. vLLM figures are from docs/measurements/free_running_accuracy.json.",
+  "local_repeat_rate": {
+    "definition": "fraction of first 40 generated tokens that already appeared in the preceding 4 tokens",
+    "cpu_median": 0.0,
+    "direct_median": 0.0,
+    "vllm_median": 0.2222222222222222,
+    "cpu": [
+      0.0,
+      0.027777777777777776,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "direct": [
+      0.0,
+      0.2,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "vllm": [
+      0.16666666666666666,
+      0.3055555555555556,
+      0.2222222222222222,
+      0.0,
+      0.3611111111111111,
+      0.2222222222222222
+    ]
+  },
+  "reading": "Agreement length alone understates the difference: greedy agreement can break benignly under bf16 drift. The looping metric separates benign divergence from the defect."
+}

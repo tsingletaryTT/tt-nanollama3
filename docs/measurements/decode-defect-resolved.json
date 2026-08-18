@@ -1,0 +1,19 @@
+{
+  "what": "vLLM decode after updating vllm-tt-plugin 3d03d71 -> c127c17 (12 commits)",
+  "artifact": "artifacts/hf",
+  "served_as": "episod/tt-tnt",
+  "max_model_len": 256,
+  "greedy": true,
+  "local_repeat_rate": {
+    "definition": "fraction of first 40 generated tokens already seen in the preceding 4",
+    "cpu_median": 0.0,
+    "vllm_old_median": 0.2222222222222222,
+    "vllm_updated_median": 0.031130268199233715
+  },
+  "agreement_median": {
+    "old": 4.0,
+    "updated": 0.0
+  },
+  "reading": "Looping is gone. Agreement-with-CPU is not the defect metric: it fell because greedy paths diverge benignly under bf16, the same way the direct tt_transformers path diverges. The defect was the repetition, and it is no longer present.",
+  "caveat": "The old baseline JSON does not record the server's max_model_len or plugin SHA, so config differences between the two runs cannot be fully excluded. The qualitative change matches the upstream fix 'return None from sample_tokens when no pending forward'."
+}
