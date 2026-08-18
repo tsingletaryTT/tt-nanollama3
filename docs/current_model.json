@@ -11,25 +11,49 @@
     "never as a side effect of a run, and never by a script. Nothing in this repo writes it."
   ],
   "current": {
-    "label": "tt-tnt-1024a",
-    "hf_model": "artifacts/hf-tt-tnt-1024a",
-    "checkpoints": "artifacts/checkpoints-tt-tnt-1024a",
+    "label": "tt-tnt-1024-dialogue",
+    "hf_model": "artifacts/hf-tt-tnt-1024-dialogue",
+    "checkpoints": "artifacts/checkpoints-1024-dialogue",
     "training_window": 512,
-    "designated": "2026-08-15",
-    "designated_in_commit": "e0495fa",
-    "reason": "At a MATCHED 512-token window it is the lowest-loss checkpoint this project has: capacity is worth -0.2994 nats on average against the 384s512 control and is negative at 22/22 checkpoints (sign test p ~ 4.8e-7, sd 0.0538), where the seed-only control wanders across sign (8/22 negative, sd 0.1944). Final matched-window validation loss 2.9281 vs 384s512's 3.1938.",
+    "designated": "2026-08-18",
+    "designated_in_commit": "PENDING",
+    "reason": "It is the only checkpoint in this project that answers a question in the shape of an answer, and sometimes in fact: under greedy decoding through the served bundle it returns Paris for France and Rome for Italy. Nothing before it had any notion of answering. That capability comes from a 2% dialogue slice (databricks-dolly-15k) funded by taking TinyStories from 31% to 29%. The designation is a choice about what this project is currently optimising for -- a model that can be interrogated -- and not a claim that it is the best checkpoint on every axis. It is not.",
     "evidence": [
-      "artifacts/checkpoints-tt-tnt-1024a/val_losses.jsonl",
-      "artifacts/checkpoints-tt-tnt-384s512/val_losses.jsonl",
-      "artifacts/checkpoints-tt-tnt-v3/val_losses.jsonl",
-      "artifacts/checkpoints-tt-tnt-v5/val_losses.jsonl",
+      "docs/measurements/evaluation-tt-tnt-1024a-vs-tt-tnt-1024-dialogue.md",
+      "docs/measurements/evaluation-tt-tnt-1024a-vs-tt-tnt-1024-2ep.md",
       "docs/measurements/behaviour-tt-tnt-v3-vs-tt-tnt-v5-setB.json",
-      "docs/measurements/behaviour-tt-tnt-384s512-vs-tt-tnt-1024a-setB.json"
+      "docs/measurements/decode-defect-resolved.json",
+      "artifacts/checkpoints-1024-dialogue/val_losses.jsonl",
+      "artifacts/checkpoints-tt-tnt-1024a/val_losses.jsonl"
     ],
-    "qualification": "\"Best\" here is not unqualified. 1024a is trained at a 512 context while v3/v4/v5 are trained at 2048, so 1024a serves a quarter of the context and its loss advantage is only established AT 512 -- the two are not comparable at v3's own window, and this repo has already published one wrong headline by treating a 512-window loss and a 2048-window loss as commensurable. 1024a is also 123.0M parameters against v3's 22M, so it is the slower model to serve. Its register advantage over v3 was substantially CONTEXT, not capacity: the clean capacity leg (384s512 -> 1024a) moves the tinystories margin only 1.03x the seed floor, which is a null by this project's standing rule.",
-    "supersedes": null
+    "qualification": "This designation is not unqualified. It does NOT mean lowest loss: tt-tnt-1024-2ep is better there (matched-window 2.5637 vs 2.7726) and is NOT designated, because it bought that with worse termination at 2.00x the seed floor. Nor does it mean this checkpoint is free of regressions -- its 4-gram repeat rate is WORSE than tt-tnt-1024a at 3.32x the floor, visible in plain output ('the sky is blue because it is blue because it is blue'), and a prediction that short question-answer documents would improve termination was not supported (0.52x the floor, wrong direction). Nine of ten behavioural signals in that comparison came back NOT INTERPRETABLE. No checkpoint here dominates the others; this one was chosen for a capability, with a known cost. And it is a 512-window model: its loss is measured at a 512-token window and is NOT comparable to tt-tnt-v3's, which was trained and measured at 2048. evaluate() windows at cfg.seq_len, so those two numbers are on different scales and comparing them is the error this file exists to prevent.",
+    "supersedes": {
+      "label": "tt-tnt-1024a",
+      "hf_model": "artifacts/hf-tt-tnt-1024a",
+      "checkpoints": "artifacts/checkpoints-tt-tnt-1024a",
+      "training_window": 512,
+      "designated": "2026-08-15",
+      "designated_in_commit": "e0495fa",
+      "reason": "At a MATCHED 512-token window it is the lowest-loss checkpoint this project has: capacity is worth -0.2994 nats on average against the 384s512 control and is negative at 22/22 checkpoints (sign test p ~ 4.8e-7, sd 0.0538), where the seed-only control wanders across sign (8/22 negative, sd 0.1944). Final matched-window validation loss 2.9281 vs 384s512's 3.1938.",
+      "evidence": [
+        "artifacts/checkpoints-tt-tnt-1024a/val_losses.jsonl",
+        "artifacts/checkpoints-tt-tnt-384s512/val_losses.jsonl",
+        "artifacts/checkpoints-tt-tnt-v3/val_losses.jsonl",
+        "artifacts/checkpoints-tt-tnt-v5/val_losses.jsonl",
+        "docs/measurements/behaviour-tt-tnt-v3-vs-tt-tnt-v5-setB.json",
+        "docs/measurements/behaviour-tt-tnt-384s512-vs-tt-tnt-1024a-setB.json"
+      ],
+      "qualification": "\"Best\" here is not unqualified. 1024a is trained at a 512 context while v3/v4/v5 are trained at 2048, so 1024a serves a quarter of the context and its loss advantage is only established AT 512 -- the two are not comparable at v3's own window, and this repo has already published one wrong headline by treating a 512-window loss and a 2048-window loss as commensurable. 1024a is also 123.0M parameters against v3's 22M, so it is the slower model to serve. Its register advantage over v3 was substantially CONTEXT, not capacity: the clean capacity leg (384s512 -> 1024a) moves the tinystories margin only 1.03x the seed floor, which is a null by this project's standing rule.",
+      "supersedes": null
+    }
   },
   "candidates": [
+    {
+      "label": "tt-tnt-1024-dialogue",
+      "hf_model": "artifacts/hf-tt-tnt-1024-dialogue",
+      "training_window": 512,
+      "note": "The current designation. Answers questions in form and sometimes in fact; 4-gram repeat rate worse than tt-tnt-1024a at 3.32x the seed floor."
+    },
     {
       "label": "tt-tnt-v3",
       "hf_model": "artifacts/hf-tt-tnt-v3",
@@ -59,6 +83,12 @@
       "hf_model": "artifacts/hf-tt-tnt-1024a",
       "training_window": 512,
       "note": "Designated current -- see `current` above."
+    },
+    {
+      "label": "tt-tnt-1024-2ep",
+      "hf_model": "artifacts/hf-tt-tnt-1024-2ep",
+      "training_window": 512,
+      "note": "Two epochs on the pre-dialogue corpus. LOWEST matched-window loss here (2.5637 vs 2.7726) and deliberately NOT designated: it bought that with termination worse at 2.00x the seed floor. The right subject for 'does more training help', whose answer was: on loss yes, on behaviour no."
     }
   ]
 }

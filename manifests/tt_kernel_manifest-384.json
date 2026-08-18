@@ -17,7 +17,8 @@
     "arch_name": "LlamaForCausalLM"
   },
   "weights": {
-    "repo": "episod/tt-tnt"
+    "repo": "episod/tt-tnt",
+    "revision": "01bd6a88c4dd"
   },
   "resources": {
     "max_model_len": 2048,

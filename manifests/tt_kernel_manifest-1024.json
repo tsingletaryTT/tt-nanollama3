@@ -1,6 +1,6 @@
 {
   "name": "tt-tnt-1024",
-  "description": "TT-TNT-1024 — a Llama-3-style model sized for Tenstorrent: num_groups=4 so it shards across 1, 2, or 4 chips, and a derived SwiGLU width of 2816 (88 tiles = 8x11) that fits a harvested Blackhole grid at 80%. WEIGHTS NOT YET TRAINED; this manifest exists to exercise the multi-chip packaging path.",
+  "description": "TT-TNT-1024 -- a Llama-3-style model sized for Tenstorrent: num_groups=4 so it shards across 1, 2 or 4 chips, and a derived SwiGLU width of 2816 (88 tiles = 8x11) that fits a harvested Blackhole grid at 80%. Weights are the 'dialogue' run: 123M parameters, 10,764 steps on a corpus carrying a 2% instruction slice. It answers questions in form and sometimes in fact; its 4-gram repeat rate is worse than the tt-tnt-1024a control at 3.32x the seed floor.",
   "platform": {
     "ttnn": ">=0.65,<0.80"
   },
@@ -18,7 +18,8 @@
     "arch_name": "LlamaForCausalLM"
   },
   "weights": {
-    "repo": "episod/tt-tnt-1024"
+    "repo": "episod/tt-tnt-1024",
+    "revision": "780bf109b4e7"
   },
   "resources": {
     "max_model_len": 512,
