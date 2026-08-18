@@ -14,18 +14,20 @@
      relative URLs against the page they scraped: a relative path here produces a link
      preview with a missing field and no error message anywhere in the chain, so the
      failure is invisible until someone pastes the link somewhere public.
-     This page carried no og:image for as long as the repository had no raster image to
-     point at — the diagrams below are inlined SVG, and a meta tag pointing at a file that
-     does not exist fails silently, in exactly the way this page is about not doing.
-     `brand/tt-tnt-logo.jpg` now exists, so the tag is real and the card is large. -->
+     For the same reason the image is `brand/og-card.jpg` and not the logo itself. The
+     card is declared summary_large_image, and every consumer that honours that crops to
+     roughly 1.91:1 — so handing it the square logo would ship a band across the figure's
+     torso with the head and feet cut off, and nothing would report it. The card is
+     therefore composed at 1200x630, the ratio it is actually consumed at, with the logo
+     placed inside it. `docs/brand/generate_og_card.py` rebuilds it. -->
 <meta property="og:url" content="https://tsingletarytt.github.io/tt-tnt/">
-<meta property="og:image" content="https://tsingletarytt.github.io/tt-tnt/brand/tt-tnt-logo.jpg">
-<meta property="og:image:width" content="1400">
-<meta property="og:image:height" content="1400">
-<meta property="og:image:alt" content="A hand-drawn figure with TT-TNT on its chest, standing on a grid of Tensix cores.">
+<meta property="og:image" content="https://tsingletarytt.github.io/tt-tnt/brand/og-card.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="tt-tnt: a small language model trained on Tenstorrent hardware. A hand-drawn figure with TT-TNT on its chest stands on a grid of Tensix cores.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="tt-tnt — a small model built Tenstorrent-native">
-<meta name="twitter:image" content="https://tsingletarytt.github.io/tt-tnt/brand/tt-tnt-logo.jpg">
+<meta name="twitter:image" content="https://tsingletarytt.github.io/tt-tnt/brand/og-card.jpg">
 <meta name="twitter:description" content="~123M parameters, one epoch, 400M tokens. Trained, packaged and served entirely on Tenstorrent tooling. Not capable — but honestly measured, refuted findings included.">
 
 <link rel="icon" type="image/png" href="favicon.png">

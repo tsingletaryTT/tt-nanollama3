@@ -44,3 +44,20 @@ rather than the same image scaled — head and shoulders, from `(10, 140, 990,
 The drawing is light-on-pale, so on the site's dark theme it is dimmed to
 `brightness(.9)` and given a `--rule` border. Without that it reads as a lit panel
 floating over a dark page.
+
+## The link-preview card
+
+`og-card.jpg` (1200×630), built by `generate_og_card.py`.
+
+The card is declared `summary_large_image`, and every consumer that honours that —
+X, Slack, LinkedIn, Discord — crops the image to roughly 1.91:1. Pointing
+`og:image` at the square logo therefore ships a band across the figure's torso
+with the head and the feet cut off, and nothing anywhere reports it. So the card
+is composed at the ratio it is consumed at, with the logo placed inside rather
+than cropped by someone else's server.
+
+Rebuild it after any change to the headline or the logo:
+
+```bash
+python docs/brand/generate_og_card.py
+```
