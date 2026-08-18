@@ -333,9 +333,11 @@ dependence above, why `TT_VISIBLE_DEVICES` must **not** be exported, why the new
 cannot serve on this box, and three separate ways a stale cache or a stale flag will hand you a
 confident wrong answer rather than an error.
 
-Read the guide's known-limitation section before serving this model for generation: **on-device
-generation is degenerate in ways CPU generation is not**, at identical settings, and the cause
-is unknown after nine refuted hypotheses.
+On-device generation through vLLM produces coherent free-running text as of plugin
+`c127c17`, at a local-repeat rate of 0.031 against a CPU reference of 0.000
+(`docs/measurements/decode-defect-resolved.json`). Earlier plugin builds degraded into
+repetition within a few tokens; the fault was in the vLLM layer, not the model. Serving with a
+plugin older than `c127c17` will reproduce it.
 
 [`docs/tt-kernel-conformance.md`](docs/tt-kernel-conformance.md) is the companion findings
 report — what the v4 manifest schema can express, which fields are actually read, and what

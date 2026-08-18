@@ -1319,16 +1319,21 @@ footer a { color: var(--ink-3); }
       always scored on the same one.
     </p>
 
-    <h3>On-device generation is degenerate in ways CPU generation is not</h3>
+    <h3>On-device generation, and the defect that used to be here</h3>
     <p>
-      The same weights, served through the vLLM plugin on a Blackhole chip, produce worse
-      output than they do on CPU. Greedy decoding collapses into a repetition loop where CPU
-      produces coherent prose. Sampling removes the hard loops and shows what is underneath:
-      agrammatical run-ons, and malformed non-words — <em>"Invisers"</em>,
-      <em>"megathering"</em>, <em>"d'Bule"</em> — that never appear in the CPU output at the
-      same settings. Local repetition runs at <strong>1.55×</strong> the CPU rate over the same
-      29 completions. Termination on the frozen set runs 2/15 on device against 5/15 on CPU.
-      The recorded verdict is <em>not usable</em>.
+      This section previously recorded that the same weights served through the vLLM plugin
+      produced worse output on device than on CPU — greedy decoding collapsing into a
+      repetition loop, local repetition at 1.55&times; the CPU rate, verdict <em>not usable</em>.
+      That defect was in the vLLM layer, not the model.
+    </p>
+    <p>
+      Running the same weights, prompts and greedy decoding through <code>tt_transformers</code>
+      directly, with no vLLM, gave a median agreement of 12 tokens with the CPU reference at a
+      local-repeat rate of 0.000, against 4 tokens and 0.222 through vLLM. That located the
+      fault. The plugin was 12 commits behind, including a fix for a sampler returning a stale
+      token when no forward pass was pending — which produces exactly the observed repetition.
+      On plugin <code>c127c17</code> the local-repeat rate is <strong>0.031</strong> against a
+      CPU reference of 0.000, and free-running decode reads as ordinary prose.
     </p>
     <p>
       Because the answer depends on which path is taken and not on the weights, the fault is

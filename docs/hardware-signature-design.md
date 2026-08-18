@@ -220,15 +220,14 @@ build, and it respects the standing constraint that **we do not edit tt-metal** 
 the kernel source lives in this repo and is compiled against tt-metal, not
 inside it.
 
-## What this is not
+## What this is and is not
 
-This does **not** fix the decode defect, and must not be used to excuse it. The
-measured on-device output is degenerate, not merely different: malformed
-non-words (*Invisers*, *o'Splains*, *megathering*), local-repeat 0.161 against
-CPU's 0.104, termination 2/15 against 5/15. Until the decode path is bisected
-with `~/tt-metal/models/common/validation_tools.py`, that remains damage. Its
-one genuine asset is that it is *deterministic* — the minimum bar for being a
-medium rather than noise.
+This is a sampling design. It does not change the model's weights and does not
+account for the decode defect, which was a separate problem in the vLLM layer and
+is resolved: on-device generation now produces coherent text at a local-repeat
+rate of 0.031 against a CPU reference of 0.000
+(`docs/measurements/decode-defect-resolved.json`).
 
-A hardware-bound sampler and a bisected decode path are independent work. This
+A hardware-bound sampler and a correct decode path are independent work. This
 document covers only the first.
+
