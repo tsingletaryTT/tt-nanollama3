@@ -309,3 +309,47 @@ documents cannot carry facts into a 400M-token blend, but they can carry a habit
 The third answer is the one to keep. Asked for a way to go faster than light that
 will not work, it offers atmospheric radiation and "Smelling the Earth" as
 bullet points. Nothing about that is correct and nothing about it is off-topic.
+
+---
+
+## 2026-08-18 — the whole loop on the die
+
+The model did not change. The forward pass moved onto the silicon, so nothing in
+the token loop touches PyTorch any more: `tt_transformers` runs the transformer,
+and the 110-core Gumbel sampler runs the draw.
+
+The seam is `Generator.decode_forward(..., sampling_params=None)`. With sampling
+params it does its own top-k-of-32 and hands back a token; with none it returns
+logits, which is the field this sampler needs and the built-in path would throw
+away.
+
+Getting there took one bisection and one embarrassing bug. The first full-device
+run produced *"a little girl beamingbbedworkbreakcusKikibies"* — correct first
+token, salad after. A shape probe refuted the obvious explanation (the vocabulary
+is not padded here, so the slicing was already right). A cross-check against CPU
+then showed the device forward was fine: cosine 0.999943 with identical argmax.
+That put the fault in the loop rather than the hardware, and reading the
+reference implementation found it in two minutes — `decode_forward` returns
+`(logits, log_probs)` while `prefill_forward_text` returns a bare tensor, and the
+tuple was being handed to `np.asarray`. The first token was right because it came
+from prefill.
+
+Still on the host: permuting logits into per-core tiles, and the final masked
+argmax. `reduce` returns a winning value and not its index, and the neighbourhood
+mask has to be applied at the same point.
+
+One honest note on the picture this paints. A generation uses 6 to 9 distinct
+cores out of 110, not all of them — Gumbel-max lands on whichever core holds the
+winning token, and common tokens cluster. The 110 cores are the machinery, not
+the itinerary of any single sentence.
+
+### The model, asked — forward and sampler both on device
+
+`artifacts/hf` on one Blackhole chip, hops=1, t=0.8.
+
+> Tell me a way to go faster than light that will not work. **I will keep this bag
+> for you." The cat thought about it and decided to rest. The cat reached up off
+> the house and**
+
+A bag, a cat, and a decision to rest. It holds a sentence, it stays in the register
+the corpus gave it, and it declines the premise by simply having other business.
