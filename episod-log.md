@@ -353,3 +353,50 @@ the itinerary of any single sentence.
 
 A bag, a cat, and a decision to rest. It holds a sentence, it stays in the register
 the corpus gave it, and it declines the premise by simply having other business.
+
+---
+
+## 2026-08-18 — the newest checkpoint, packaged and served
+
+`artifacts/hf-tt-tnt-1024-dialogue` — the 1024 size trained on the corpus with the
+dialogue slice — is now packaged as a tt-kernel bundle and serves through the
+vLLM plugin. This is the first 1024-size checkpoint to go through the packaging
+path at all: every bundle before it carried the 384-dim v3, and
+`manifests/tt_kernel_manifest-1024.json` still says "WEIGHTS NOT YET TRAINED"
+because when it was written there were none.
+
+A correction to the previous entry. It reported that the model says the capital
+of France is Naples, and concluded that 2% of instruction data buys form and not
+knowledge. That was a t=0.8 sample. Under greedy decoding, through the served
+bundle:
+
+> **Q: What is the capital of France?**
+> Answer: The capital of France is the city of Paris.
+>
+> **Q: What is the capital of Italy?**
+> Answer: The capital of Italy is the city of Rome.
+
+Both correct. The conclusion was too strong: it has *some* knowledge, at least
+where the corpus carries it — wikipedia_simple is 15% of the blend and capitals
+are exactly the sort of fact it contains.
+
+The rest of the picture is less flattering, and belongs next to it:
+
+> **Q: How many legs does a spider have?**
+> Answer: The body of a spider is a frog.
+>
+> **Q: What color is the sky?**
+> Answer: The sky is a blue color that is blue because it is blue because it is
+> blue because it is blue
+
+The second is the 4-gram repeat regression this corpus measured at 3.32x the seed
+floor, showing up in plain sight rather than in a metric.
+
+### The model, asked
+
+> **Tell me a way to go faster than light that will not work.**
+> Answer: You need to be careful and use a thermometer to see if you are right.
+> You need to be careful and use a thermometer
+
+A thermometer, to check whether you are right. It has learned that a question
+deserves an answer, and it reaches for an instrument.
