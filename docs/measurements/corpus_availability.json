@@ -2,6 +2,7 @@
   "budget": 400000000,
   "upsample_cap": 8,
   "available": {
+    "dialogue": 2821036,
     "flavour": 575391,
     "folklore": 21274911,
     "gutenberg_children": 34255022,
@@ -13,6 +14,7 @@
     "wikipedia_simple": 68469002
   },
   "methods": {
+    "dialogue": "tokenizer",
     "flavour": "tokenizer",
     "folklore": "tokenizer",
     "gutenberg_children": "tokenizer",

@@ -23,6 +23,30 @@ from train.corpus import SOURCES, CorpusSource, get_source  # noqa: E402
 from train.paths import shared_dir  # noqa: E402
 
 #: Column holding the document body, per dataset.
+#: Sources whose rows are not a single text field. A renderer takes one row and returns
+#: the document text, or "" to skip the row. Checked before TEXT_COLUMN.
+#:
+#: dolly-15k rows are (instruction, context, response). Rendered as a plain
+#: question-and-answer exchange with no special tokens or role markers: the tokenizer has
+#: no vocabulary for chat scaffolding, and inventing some here would teach the model a
+#: format nothing else in the blend -- or in serving -- ever uses.
+def _render_dolly(row):
+    instruction = (row.get("instruction") or "").strip()
+    context = (row.get("context") or "").strip()
+    response = (row.get("response") or "").strip()
+    if not instruction or not response:
+        return ""
+    parts = [f"Question: {instruction}"]
+    if context:
+        parts.append(context)
+    parts.append(f"Answer: {response}")
+    return "\n\n".join(parts)
+
+
+RENDERERS = {
+    "databricks/databricks-dolly-15k": _render_dolly,
+}
+
 TEXT_COLUMN = {
     "sedthh/gutenberg_english": "TEXT",
     "roneneldan/TinyStories": "text",
@@ -120,8 +144,9 @@ def iter_source_rows(source: CorpusSource, limit_rows: int = 0) -> Iterator[Dict
     """
     from datasets import load_dataset
 
+    renderer = RENDERERS.get(source.hf_repo)
     column = TEXT_COLUMN.get(source.hf_repo)
-    if column is None:
+    if renderer is None and column is None:
         raise ValueError(
             f"no text column registered for {source.hf_repo}; add it to TEXT_COLUMN"
         )
@@ -146,7 +171,7 @@ def iter_source_rows(source: CorpusSource, limit_rows: int = 0) -> Iterator[Dict
                     continue
             if not isinstance(md, dict) or not matches_source(md, source):
                 continue
-        text = row.get(column)
+        text = renderer(row) if renderer is not None else row.get(column)
         if not isinstance(text, str) or not text.strip():
             continue
         yield {"text": text}

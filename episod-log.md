@@ -255,3 +255,57 @@ After:
 
 The second one is a story. The voice is the same one the CPU has always had —
 what changed is that the device can now hold it for more than four tokens.
+
+---
+
+## 2026-08-18 — a dialogue slice, and the difference between form and knowledge
+
+Two experiments, one negative and one that the metrics could not see.
+
+First, more tokens. The 1024 model trained for two full epochs instead of one
+(21,528 steps, everything else matched to `tt-tnt-1024a`). Loss improved at a
+matched window, 2.7624 to 2.5637. Behaviour did not: nine of ten signals came back
+NOT INTERPRETABLE against the 0.1944-nat seed floor, and the one finding that
+cleared both gates was *termination getting worse* — 0.0542 to 0.0250 at 2.00x the
+floor. A second pass sharpened next-token prediction and taught the model to stop
+less, which is what fitting the continuity of long documents looks like. The
+training budget was not the constraint.
+
+Then the corpus. `databricks-dolly-15k` enters as a new `dialogue` slice at 2%,
+funded by taking TinyStories from 31% to 29%. Share set on measured yield rather
+than preference: 15,011 documents, 131 words each, which supplies 2% at 2.836
+passes and no more. CC-BY-SA-3.0 is share-alike but is the licence
+`wikipedia_simple` already carries, so the blend's two copyleft terms stay two;
+the CC-BY-NC alternatives were rejected because a non-commercial term would
+restrict the whole blend.
+
+The metrics again read null — every signal NOT INTERPRETABLE except 4-gram repeat
+rate, which got worse at 3.32x the floor. A prediction of mine failed here too: I
+expected short documents ending in answers to help termination, and termination
+moved 0.52x the floor in the wrong direction.
+
+But the behavioural suite scores register, collapse and repetition. It has no
+signal for *answering*, and that is what changed.
+
+### The model, asked
+
+`artifacts/hf-tt-tnt-1024-dialogue`, ad-hoc samples.
+
+> **Q: What is the capital of France?**
+> Answer: The capital of France is Naples.
+>
+> **Q: Why do birds sing in the morning?**
+> Answer: Because it is typically a seasonal strain and the night is ty…
+>
+> **Q: Tell me a way to go faster than light that will not work.**
+> Answer: - Atmospheric radiation - Sun form "Smelling the Earth" - Ven…
+
+It has learned the shape of an answer and none of the content. It says
+`Answer:`, it produces answer-shaped clauses, it will even reach for a bulleted
+list — and the capital of France is Naples. Two per cent of instruction data buys
+form, not knowledge, which is exactly the trade the arithmetic predicted: 15,011
+documents cannot carry facts into a 400M-token blend, but they can carry a habit.
+
+The third answer is the one to keep. Asked for a way to go faster than light that
+will not work, it offers atmospheric radiation and "Smelling the Earth" as
+bullet points. Nothing about that is correct and nothing about it is off-topic.

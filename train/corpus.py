@@ -24,6 +24,7 @@ SLICES = frozenset({
     "weird",        # weird fiction and poetry
     "agentic",      # plan -> act -> observe -> report shapes
     "flavour",      # small, upsampled, capped: Stein, I Ching
+    "dialogue",     # question -> answer shapes; the only slice where the corpus is asked
 })
 
 
@@ -109,10 +110,42 @@ class CorpusSource:
 #: no longer resolves is a loud failure at fetch time, which is the intended behaviour:
 #: silently training on different data is the thing being prevented.
 SOURCES: Dict[str, CorpusSource] = {
+    "dialogue": CorpusSource(
+        name="dialogue",
+        slice="dialogue",
+        # Settled on measured yield: 15,011 documents, 1,968,868 words, 131 words/doc.
+        # At upsample 3 that is ~5.9M words (~7.7M tokens), which supplies ~2% of the
+        # blend and no more. 3% would have needed upsample 5.
+        target_share=0.020,
+        hf_repo="databricks/databricks-dolly-15k",
+        hf_revision="bdd27f4d94b9",
+        hf_split="train",
+        license_id="CC-BY-SA-3.0",
+        license_url="https://creativecommons.org/licenses/by-sa/3.0/",
+        attribution="Databricks Dolly 15k, CC-BY-SA-3.0, https://huggingface.co/datasets/databricks/databricks-dolly-15k",
+        share_alike=True,
+        license_note=(
+            "Share-alike, and deliberately the SAME licence already carried by "
+            "wikipedia_simple. This adds share-alike MASS but no new share-alike KIND: the "
+            "blend's two copyleft terms (CDLA-Sharing-1.0, CC-BY-SA-3.0) stay two. "
+            "CC-BY-NC alternatives (no_robots, alpaca) were rejected outright -- a "
+            "non-commercial term would restrict the whole blend in a way no existing source "
+            "does."
+        ),
+        # 3x. The poetry note in this file warns what upsampling a small source does to the
+        # </s> prior, so it was measured here rather than assumed: at upsample 3 this slice
+        # is 0.82% of all document separators against 0.92% of all words -- 0.89x, i.e.
+        # slightly UNDER-represented in separators, not over. The corpus's actual separator
+        # skew is poetry, which supplies 3.08M of 5.49M raw documents at 7 words each.
+        upsample=3,
+    ),
     "tinystories": CorpusSource(
+        # 0.310 -> 0.290 on 2026-08-18 to fund the dialogue slice. TinyStories is the
+        # defensible donor: reducing it is the one corpus change this project has measured
+        # as a real register gain (1.79x the seed floor, 3/3 seeds).
         name="tinystories",
         slice="backbone",
-        target_share=0.31,
+        target_share=0.290,
         hf_repo="roneneldan/TinyStories",
         hf_revision="f54c09fd23315a6f9c86f9dc80f725de7d8f9c64",
         license_id="CDLA-Sharing-1.0",

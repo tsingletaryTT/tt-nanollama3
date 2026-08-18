@@ -1,13 +1,31 @@
 {
   "budget": 400000000,
-  "total_emitted_tokens": 399508203,
-  "total_vs_budget_tokens": -491797,
-  "total_vs_budget_pct": -0.123,
+  "total_emitted_tokens": 399486992,
+  "total_vs_budget_tokens": -513008,
+  "total_vs_budget_pct": -0.128,
   "token_count_method": "tokenizer",
   "token_count_note": "emitted_tokens is counted with the trained tokenizer over exactly the text written for each source, chunked the same way scripts/measure_corpus.py chunks it, so it is directly comparable with available_tokens. repetition_factor is exact (emitted_words / source_file_words). source_tokens_per_word is available_tokens / source_file_words, the measured ratio the emitter sizes its output with.",
   "output": "blend.txt",
-  "sha256": "24f3d112e04696630ff6553dbd9440ce77b54a54204b17b589ee2ec4cfc9f4d1",
+  "sha256": "7f2f6e5ff597bc19e17f59f311a0d0e0fdc4602b634211ab0a267cdaf2039cb1",
   "sources": {
+    "dialogue": {
+      "planned_tokens": 8000000,
+      "emitted_tokens": 7995795,
+      "emitted_tokens_method": "tokenizer",
+      "emitted_words": 5625732,
+      "source_file_words": 1983799,
+      "source_tokens_per_word": 1.422037,
+      "repetition_factor": 2.8358,
+      "declared_upsample": 3,
+      "repetition_within_declared_upsample": true,
+      "target_share": 0.02,
+      "available_tokens": 2821036,
+      "hf_repo": "databricks/databricks-dolly-15k",
+      "hf_revision": "bdd27f4d94b9",
+      "license_id": "CC-BY-SA-3.0",
+      "planned_vs_emitted_error": -0.000526,
+      "achieved_share": 0.020015157339591173
+    },
     "flavour": {
       "planned_tokens": 2000000,
       "emitted_tokens": 1979789,
@@ -24,7 +42,7 @@
       "hf_revision": "28973b04f28fd7be4a6186a042bc26159d4366ca",
       "license_id": "MIT (packaging); public domain (texts)",
       "planned_vs_emitted_error": -0.010105,
-      "achieved_share": 0.0049555653304069955
+      "achieved_share": 0.004955828449102543
     },
     "folklore": {
       "planned_tokens": 32000000,
@@ -42,7 +60,7 @@
       "hf_revision": "28973b04f28fd7be4a6186a042bc26159d4366ca",
       "license_id": "MIT (packaging); public domain (texts)",
       "planned_vs_emitted_error": 0.002452,
-      "achieved_share": 0.08029488195515225
+      "achieved_share": 0.08029914525977858
     },
     "gutenberg_children": {
       "planned_tokens": 60000000,
@@ -60,7 +78,7 @@
       "hf_revision": "28973b04f28fd7be4a6186a042bc26159d4366ca",
       "license_id": "MIT (packaging); public domain (texts)",
       "planned_vs_emitted_error": -0.000265,
-      "achieved_share": 0.15014486198172006
+      "achieved_share": 0.15015283401267793
     },
     "poetry": {
       "planned_tokens": 4000000,
@@ -78,7 +96,7 @@
       "hf_revision": "fcd42e249fed48dbd1d3b9b969528ef9298d3464",
       "license_id": "CC0-1.0",
       "planned_vs_emitted_error": -0.012366,
-      "achieved_share": 0.009888497833923074
+      "achieved_share": 0.009889022869610733
     },
     "procedural": {
       "planned_tokens": 48000000,
@@ -96,7 +114,7 @@
       "hf_revision": "28973b04f28fd7be4a6186a042bc26159d4366ca",
       "license_id": "MIT (packaging); public domain (texts)",
       "planned_vs_emitted_error": -0.000119,
-      "achieved_share": 0.1201333830935131
+      "achieved_share": 0.12013976164710764
     },
     "spine": {
       "planned_tokens": 54000000,
@@ -114,25 +132,25 @@
       "hf_revision": "28973b04f28fd7be4a6186a042bc26159d4366ca",
       "license_id": "MIT (packaging); public domain (texts)",
       "planned_vs_emitted_error": -0.001573,
-      "achieved_share": 0.13495358692296988
+      "achieved_share": 0.13496075236412203
     },
     "tinystories": {
-      "planned_tokens": 124000000,
-      "emitted_tokens": 124030364,
+      "planned_tokens": 116000000,
+      "emitted_tokens": 116013358,
       "emitted_tokens_method": "tokenizer",
-      "emitted_words": 103484618,
+      "emitted_words": 96808191,
       "source_file_words": 373833093,
       "source_tokens_per_word": 1.198246,
-      "repetition_factor": 0.2768,
+      "repetition_factor": 0.259,
       "declared_upsample": 1,
       "repetition_within_declared_upsample": true,
-      "target_share": 0.31,
+      "target_share": 0.29,
       "available_tokens": 447943902,
       "hf_repo": "roneneldan/TinyStories",
       "hf_revision": "f54c09fd23315a6f9c86f9dc80f725de7d8f9c64",
       "license_id": "CDLA-Sharing-1.0",
-      "planned_vs_emitted_error": 0.000245,
-      "achieved_share": 0.31045761530959104
+      "planned_vs_emitted_error": 0.000115,
+      "achieved_share": 0.29040584630600436
     },
     "weird": {
       "planned_tokens": 16000000,
@@ -150,7 +168,7 @@
       "hf_revision": "28973b04f28fd7be4a6186a042bc26159d4366ca",
       "license_id": "MIT (packaging); public domain (texts)",
       "planned_vs_emitted_error": -0.001378,
-      "achieved_share": 0.0399940724120751
+      "achieved_share": 0.03999619592119285
     },
     "wikipedia_simple": {
       "planned_tokens": 60000000,
@@ -168,7 +186,7 @@
       "hf_revision": "b04c8d1ceb2f5cd4588862100d08de323dccfbaa",
       "license_id": "CC-BY-SA-3.0",
       "planned_vs_emitted_error": -0.006706,
-      "achieved_share": 0.1491775351606485
+      "achieved_share": 0.14918545583081214
     }
   }
 }

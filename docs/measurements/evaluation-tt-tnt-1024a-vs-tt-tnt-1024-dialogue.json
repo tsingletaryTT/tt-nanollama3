@@ -1,0 +1,436 @@
+{
+  "kind": "tt-tnt/evaluation/1",
+  "mode": "comparison",
+  "started_utc": "2026-08-18T15:43:48+00:00",
+  "baseline": {
+    "kind": "tt-tnt/evaluation/1",
+    "mode": "single",
+    "started_utc": "2026-08-18T15:40:58+00:00",
+    "model": {
+      "path": "artifacts/hf-tt-tnt-1024a",
+      "label": "tt-tnt-1024a",
+      "max_position_embeddings": 512,
+      "training_window": 512,
+      "hidden_size": 1024,
+      "num_hidden_layers": 8,
+      "checkpoint_dir": "artifacts/checkpoints-tt-tnt-1024a"
+    },
+    "comparability": {
+      "eval_window": 512,
+      "model_max_position_embeddings": 512,
+      "training_window": 512,
+      "tokens": {
+        "path": "artifacts/tokens-v3/val_ids.npy",
+        "size_bytes": 156768736,
+        "n_tokens": 39192152
+      },
+      "prompt_set": "b",
+      "num_samples": 32,
+      "n_windows": 256,
+      "seed": 0
+    },
+    "window_loss": 2.7624130380206373,
+    "instruments": [
+      {
+        "name": "behaviour",
+        "argv": [
+          "/home/ttuser/.tenstorrent-venv/bin/python",
+          "/home/ttuser/code/tt-tnt/scripts/score_behaviour.py",
+          "--hf-model",
+          "artifacts/hf-tt-tnt-1024a",
+          "--label",
+          "tt-tnt-1024a",
+          "--prompt-set",
+          "b",
+          "--num-samples",
+          "32",
+          "--max-new-tokens",
+          "60",
+          "--seed",
+          "0",
+          "--out",
+          "/home/ttuser/code/tt-tnt/docs/measurements/evaluation-tt-tnt-1024a/behaviour-setB.md",
+          "--json-out",
+          "/home/ttuser/code/tt-tnt/docs/measurements/evaluation-tt-tnt-1024a/behaviour-setB.json"
+        ],
+        "json": "docs/measurements/evaluation-tt-tnt-1024a/behaviour-setB.json",
+        "markdown": "docs/measurements/evaluation-tt-tnt-1024a/behaviour-setB.md",
+        "status": "ok"
+      },
+      {
+        "name": "context",
+        "argv": [
+          "/home/ttuser/.tenstorrent-venv/bin/python",
+          "/home/ttuser/code/tt-tnt/scripts/probe_context_use.py",
+          "--hf-model",
+          "artifacts/hf-tt-tnt-1024a",
+          "--tokens",
+          "artifacts/tokens-v3/val_ids.npy",
+          "--seq-len",
+          "512",
+          "--n-windows",
+          "256",
+          "--seed",
+          "0",
+          "--out",
+          "/home/ttuser/code/tt-tnt/docs/measurements/evaluation-tt-tnt-1024a/context-use.md",
+          "--json-out",
+          "/home/ttuser/code/tt-tnt/docs/measurements/evaluation-tt-tnt-1024a/context-use.json"
+        ],
+        "json": "docs/measurements/evaluation-tt-tnt-1024a/context-use.json",
+        "markdown": "docs/measurements/evaluation-tt-tnt-1024a/context-use.md",
+        "status": "ok"
+      }
+    ],
+    "designation": {
+      "label": "tt-tnt-1024a",
+      "hf_model": "/home/ttuser/code/tt-tnt/artifacts/hf-tt-tnt-1024a",
+      "reason": "At a MATCHED 512-token window it is the lowest-loss checkpoint this project has: capacity is worth -0.2994 nats on average against the 384s512 control and is negative at 22/22 checkpoints (sign test p ~ 4.8e-7, sd 0.0538), where the seed-only control wanders across sign (8/22 negative, sd 0.1944). Final matched-window validation loss 2.9281 vs 384s512's 3.1938.",
+      "qualification": "\"Best\" here is not unqualified. 1024a is trained at a 512 context while v3/v4/v5 are trained at 2048, so 1024a serves a quarter of the context and its loss advantage is only established AT 512 -- the two are not comparable at v3's own window, and this repo has already published one wrong headline by treating a 512-window loss and a 2048-window loss as commensurable. 1024a is also 123.0M parameters against v3's 22M, so it is the slower model to serve. Its register advantage over v3 was substantially CONTEXT, not capacity: the clean capacity leg (384s512 -> 1024a) moves the tinystories margin only 1.03x the seed floor, which is a null by this project's standing rule.",
+      "evidence": [
+        "artifacts/checkpoints-tt-tnt-1024a/val_losses.jsonl",
+        "artifacts/checkpoints-tt-tnt-384s512/val_losses.jsonl",
+        "artifacts/checkpoints-tt-tnt-v3/val_losses.jsonl",
+        "artifacts/checkpoints-tt-tnt-v5/val_losses.jsonl",
+        "docs/measurements/behaviour-tt-tnt-v3-vs-tt-tnt-v5-setB.json",
+        "docs/measurements/behaviour-tt-tnt-384s512-vs-tt-tnt-1024a-setB.json"
+      ],
+      "designated": "2026-08-15",
+      "source": "docs/current_model.json"
+    }
+  },
+  "candidate": {
+    "kind": "tt-tnt/evaluation/1",
+    "mode": "single",
+    "started_utc": "2026-08-18T15:43:48+00:00",
+    "model": {
+      "path": "artifacts/hf-tt-tnt-1024-dialogue",
+      "label": "tt-tnt-1024-dialogue",
+      "max_position_embeddings": 512,
+      "training_window": 512,
+      "hidden_size": 1024,
+      "num_hidden_layers": 8,
+      "checkpoint_dir": "artifacts/checkpoints-1024-dialogue"
+    },
+    "comparability": {
+      "eval_window": 512,
+      "model_max_position_embeddings": 512,
+      "training_window": 512,
+      "tokens": {
+        "path": "artifacts/tokens-v3/val_ids.npy",
+        "size_bytes": 156768736,
+        "n_tokens": 39192152
+      },
+      "prompt_set": "b",
+      "num_samples": 32,
+      "n_windows": 256,
+      "seed": 0
+    },
+    "window_loss": 2.7726293141245186,
+    "instruments": [
+      {
+        "name": "behaviour",
+        "argv": [
+          "/home/ttuser/.tenstorrent-venv/bin/python",
+          "/home/ttuser/code/tt-tnt/scripts/score_behaviour.py",
+          "--hf-model",
+          "artifacts/hf-tt-tnt-1024-dialogue",
+          "--label",
+          "tt-tnt-1024-dialogue",
+          "--prompt-set",
+          "b",
+          "--num-samples",
+          "32",
+          "--max-new-tokens",
+          "60",
+          "--seed",
+          "0",
+          "--out",
+          "/home/ttuser/code/tt-tnt/docs/measurements/evaluation-tt-tnt-1024-dialogue/behaviour-setB.md",
+          "--json-out",
+          "/home/ttuser/code/tt-tnt/docs/measurements/evaluation-tt-tnt-1024-dialogue/behaviour-setB.json"
+        ],
+        "json": "docs/measurements/evaluation-tt-tnt-1024-dialogue/behaviour-setB.json",
+        "markdown": "docs/measurements/evaluation-tt-tnt-1024-dialogue/behaviour-setB.md",
+        "status": "ok"
+      },
+      {
+        "name": "context",
+        "argv": [
+          "/home/ttuser/.tenstorrent-venv/bin/python",
+          "/home/ttuser/code/tt-tnt/scripts/probe_context_use.py",
+          "--hf-model",
+          "artifacts/hf-tt-tnt-1024-dialogue",
+          "--tokens",
+          "artifacts/tokens-v3/val_ids.npy",
+          "--seq-len",
+          "512",
+          "--n-windows",
+          "256",
+          "--seed",
+          "0",
+          "--out",
+          "/home/ttuser/code/tt-tnt/docs/measurements/evaluation-tt-tnt-1024-dialogue/context-use.md",
+          "--json-out",
+          "/home/ttuser/code/tt-tnt/docs/measurements/evaluation-tt-tnt-1024-dialogue/context-use.json"
+        ],
+        "json": "docs/measurements/evaluation-tt-tnt-1024-dialogue/context-use.json",
+        "markdown": "docs/measurements/evaluation-tt-tnt-1024-dialogue/context-use.md",
+        "status": "ok"
+      }
+    ],
+    "designation": {
+      "label": "tt-tnt-1024a",
+      "hf_model": "/home/ttuser/code/tt-tnt/artifacts/hf-tt-tnt-1024a",
+      "reason": "At a MATCHED 512-token window it is the lowest-loss checkpoint this project has: capacity is worth -0.2994 nats on average against the 384s512 control and is negative at 22/22 checkpoints (sign test p ~ 4.8e-7, sd 0.0538), where the seed-only control wanders across sign (8/22 negative, sd 0.1944). Final matched-window validation loss 2.9281 vs 384s512's 3.1938.",
+      "qualification": "\"Best\" here is not unqualified. 1024a is trained at a 512 context while v3/v4/v5 are trained at 2048, so 1024a serves a quarter of the context and its loss advantage is only established AT 512 -- the two are not comparable at v3's own window, and this repo has already published one wrong headline by treating a 512-window loss and a 2048-window loss as commensurable. 1024a is also 123.0M parameters against v3's 22M, so it is the slower model to serve. Its register advantage over v3 was substantially CONTEXT, not capacity: the clean capacity leg (384s512 -> 1024a) moves the tinystories margin only 1.03x the seed floor, which is a null by this project's standing rule.",
+      "evidence": [
+        "artifacts/checkpoints-tt-tnt-1024a/val_losses.jsonl",
+        "artifacts/checkpoints-tt-tnt-384s512/val_losses.jsonl",
+        "artifacts/checkpoints-tt-tnt-v3/val_losses.jsonl",
+        "artifacts/checkpoints-tt-tnt-v5/val_losses.jsonl",
+        "docs/measurements/behaviour-tt-tnt-v3-vs-tt-tnt-v5-setB.json",
+        "docs/measurements/behaviour-tt-tnt-384s512-vs-tt-tnt-1024a-setB.json"
+      ],
+      "designated": "2026-08-15",
+      "source": "docs/current_model.json"
+    }
+  },
+  "eval_window": 512,
+  "seed_floor": {
+    "provenance": "derived-live",
+    "behaviour": {
+      "collapse_rate": 0.05416666666666667,
+      "frame_collapse_rate": 0.003472222222222222,
+      "lexical_collapse_rate": 0.05625,
+      "termination_rate": 0.014583333333333334,
+      "repeat_rate": 0.0022186568206833106,
+      "longest_repeat": 0.05763888888888889,
+      "tinystories_margin": 0.07454077771002197,
+      "register_tinystories_share": 0.03680555555555556,
+      "engagement": 0.006623677248677251,
+      "n_tokens": 0.3277777777777778
+    },
+    "behaviour_source": "docs/measurements/behaviour-tt-tnt-v3-vs-tt-tnt-v5-setB.json",
+    "behaviour_prompt_set": "b",
+    "loss_sd": 0.1944021805232848,
+    "loss_mean": 0.041335227272727225,
+    "loss_sign": {
+      "n": 22,
+      "n_negative": 8,
+      "n_positive": 14,
+      "n_zero": 0,
+      "p_two_sided": 0.28627872467041016
+    },
+    "loss_window": null,
+    "loss_sources": [
+      "artifacts/checkpoints-tt-tnt-v3/val_losses.jsonl",
+      "artifacts/checkpoints-tt-tnt-v5/val_losses.jsonl"
+    ],
+    "notes": []
+  },
+  "seed_floor_problems": [],
+  "floor_ratio_threshold": 1.2,
+  "matched_window_loss_delta": 0.010216276103881317,
+  "behaviour": [
+    {
+      "signal": "collapse_rate",
+      "title": "genre collapse rate (any marker)",
+      "better": "lower",
+      "baseline": 0.06805555555555555,
+      "candidate": 0.06458333333333334,
+      "delta": -0.003472222222222222,
+      "ci95": [
+        -0.0277252209549741,
+        0.02078077651052966
+      ],
+      "min_detectable": 0.02425299873275188,
+      "ci_verdict": "no change",
+      "seed_floor": 0.05416666666666667,
+      "floor_ratio": 0.0641025641025641,
+      "label": "NOT INTERPRETABLE"
+    },
+    {
+      "signal": "frame_collapse_rate",
+      "title": "\u2014 story-frame collapse",
+      "better": "lower",
+      "baseline": 0.014583333333333334,
+      "candidate": 0.011805555555555555,
+      "delta": -0.002777777777777778,
+      "ci95": [
+        -0.007862314948252087,
+        0.0023067593926965313
+      ],
+      "min_detectable": 0.005084537170474309,
+      "ci_verdict": "no change",
+      "seed_floor": 0.003472222222222222,
+      "floor_ratio": 0.8,
+      "label": "NOT INTERPRETABLE"
+    },
+    {
+      "signal": "lexical_collapse_rate",
+      "title": "\u2014 lexical-habit collapse",
+      "better": "lower",
+      "baseline": 0.05763888888888889,
+      "candidate": 0.05625,
+      "delta": -0.001388888888888889,
+      "ci95": [
+        -0.02506738601498185,
+        0.022289608237204075
+      ],
+      "min_detectable": 0.023678497126092962,
+      "ci_verdict": "no change",
+      "seed_floor": 0.05625,
+      "floor_ratio": 0.024691358024691357,
+      "label": "NOT INTERPRETABLE"
+    },
+    {
+      "signal": "termination_rate",
+      "title": "termination rate (</s>)",
+      "better": "higher",
+      "baseline": 0.05416666666666667,
+      "candidate": 0.04652777777777778,
+      "delta": -0.007638888888888889,
+      "ci95": [
+        -0.02712055150198726,
+        0.011842773724209481
+      ],
+      "min_detectable": 0.01948166261309837,
+      "ci_verdict": "no change",
+      "seed_floor": 0.014583333333333334,
+      "floor_ratio": 0.5238095238095238,
+      "label": "NOT INTERPRETABLE"
+    },
+    {
+      "signal": "repeat_rate",
+      "title": "4-gram repeat rate",
+      "better": "lower",
+      "baseline": 0.02922038178280421,
+      "candidate": 0.03658425358311578,
+      "delta": 0.0073638718003115645,
+      "ci95": [
+        0.0009569144307056141,
+        0.013770829169917516
+      ],
+      "min_detectable": 0.0064069573696059505,
+      "ci_verdict": "worse",
+      "seed_floor": 0.0022186568206833106,
+      "floor_ratio": 3.319067523946137,
+      "label": "worse"
+    },
+    {
+      "signal": "longest_repeat",
+      "title": "longest repeated span (words)",
+      "better": "lower",
+      "baseline": 3.5083333333333333,
+      "candidate": 3.7472222222222222,
+      "delta": 0.2388888888888889,
+      "ci95": [
+        -0.0060427022900839955,
+        0.4838204800678618
+      ],
+      "min_detectable": 0.2449315911789729,
+      "ci_verdict": "no change",
+      "seed_floor": 0.05763888888888889,
+      "floor_ratio": 4.144578313253012,
+      "label": "below paired detection"
+    },
+    {
+      "signal": "tinystories_margin",
+      "title": "tinystories margin (nats/word)",
+      "better": "lower",
+      "baseline": -0.5264019651982961,
+      "candidate": -0.5542566700030361,
+      "delta": -0.027854704804740185,
+      "ci95": [
+        -0.1028915389850347,
+        0.04718212937555433
+      ],
+      "min_detectable": 0.07503683418029451,
+      "ci_verdict": "no change",
+      "seed_floor": 0.07454077771002197,
+      "floor_ratio": 0.3736841184177118,
+      "label": "NOT INTERPRETABLE"
+    },
+    {
+      "signal": "register_tinystories_share",
+      "title": "nearest source == tinystories",
+      "better": "lower",
+      "baseline": 0.22361111111111112,
+      "candidate": 0.18680555555555556,
+      "delta": -0.03680555555555556,
+      "ci95": [
+        -0.08255350671266151,
+        0.008942395601550392
+      ],
+      "min_detectable": 0.04574795115710595,
+      "ci_verdict": "no change",
+      "seed_floor": 0.03680555555555556,
+      "floor_ratio": 1.0,
+      "label": "NOT INTERPRETABLE"
+    },
+    {
+      "signal": "engagement",
+      "title": "prompt engagement",
+      "better": "higher",
+      "baseline": 0.20665702160493826,
+      "candidate": 0.21730213844797178,
+      "delta": 0.010645116843033505,
+      "ci95": [
+        -0.01631761084572065,
+        0.037607844531787664
+      ],
+      "min_detectable": 0.026962727688754157,
+      "ci_verdict": "no change",
+      "seed_floor": 0.006623677248677251,
+      "floor_ratio": 1.6071309702113483,
+      "label": "below paired detection"
+    },
+    {
+      "signal": "n_tokens",
+      "title": "generated tokens before </s>",
+      "better": null,
+      "baseline": 58.734722222222224,
+      "candidate": 58.85347222222222,
+      "delta": 0.11875,
+      "ci95": [
+        -0.5440033720751406,
+        0.7815033720751406
+      ],
+      "min_detectable": 0.6627533720751406,
+      "ci_verdict": "n/a",
+      "seed_floor": 0.3277777777777778,
+      "floor_ratio": 0.3622881355932203,
+      "label": "NOT INTERPRETABLE"
+    }
+  ],
+  "trajectory": {
+    "window": 512,
+    "n_steps": 11,
+    "final_step": 10764,
+    "final_delta": -0.02382812500000009,
+    "mean_delta": 0.020525568181818207,
+    "sd_delta": 0.09481642220399773,
+    "baseline_final": 2.928125,
+    "candidate_final": 2.904296875,
+    "sign_test": {
+      "n": 11,
+      "n_negative": 7,
+      "n_positive": 4,
+      "n_zero": 0,
+      "p_two_sided": 0.548828125
+    },
+    "seed_floor_sd": 0.1944021805232848,
+    "seed_floor_sign_test": {
+      "n": 22,
+      "n_negative": 8,
+      "n_positive": 14,
+      "n_zero": 0,
+      "p_two_sided": 0.28627872467041016
+    },
+    "seed_floor_window": null,
+    "floor_ratio": 0.12257128462170741,
+    "label": "NOT INTERPRETABLE"
+  },
+  "trajectory_refusal": null
+}
