@@ -1,0 +1,9 @@
+{
+  "cores": 110,
+  "max_exact": 110,
+  "index_exact": 110,
+  "ties_in_data": 0,
+  "pass": true,
+  "seed": 20260818,
+  "note": "Index is gated on exact equality. NumPy argmax returns the first maximal index and this kernel returns the last; ties are counted so a tie can never be mistaken for a failure."
+}
