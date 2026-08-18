@@ -118,6 +118,66 @@ EXPECTED_VOCAB_SIZE = 32000
 EXPECTED_PARAM_COUNT = 22_025_088
 PROMPT = "Once upon a time, there was a little"
 
+# ---------------------------------------------------------------------------
+# PUBLICATION TARGETS
+#
+# The constants above describe ``episod/tt-tnt`` and exist to stop a downgrade of
+# that LIVE, PUBLIC repo -- they are not a general policy. A second model with a
+# different shape needs its own invariants, not a loosening of these, so targets
+# are declared per repo and ``--repo-id`` selects one. The default is unchanged.
+#
+# Adding a target is a deliberate act: state the artifact and the four properties
+# a serving stack would otherwise get wrong silently, and the same assertions run
+# against it as against v3.
+# ---------------------------------------------------------------------------
+
+TARGETS = {
+    "episod/tt-tnt": {
+        # None means "whatever HF_DIR is at call time" -- resolved in target_for. A
+        # snapshot here would silently defeat the wrong-context-length guard, whose test
+        # patches HF_DIR to point at a bad artifact.
+        "hf_dir": None,
+        "max_position_embeddings": EXPECTED_MAX_POSITION_EMBEDDINGS,
+        "tie_word_embeddings": EXPECTED_TIE_WORD_EMBEDDINGS,
+        "vocab_size": EXPECTED_VOCAB_SIZE,
+        "param_count": EXPECTED_PARAM_COUNT,
+        "card": CARD_PATH,
+        "note": "tt-tnt-v3, 384-dim at a 2048 context. The protected baseline.",
+    },
+    "episod/tt-tnt-1024": {
+        "hf_dir": ROOT / "artifacts" / "hf-tt-tnt-1024-dialogue",
+        "max_position_embeddings": 512,
+        "tie_word_embeddings": True,
+        "vocab_size": 32000,
+        "param_count": 122962944,
+        "card": ROOT / "docs" / "model-card-1024.md",
+        "note": (
+            "tt-tnt-1024 trained on the corpus carrying the dialogue slice. "
+            "Answers questions in form and sometimes in fact (Paris, Rome); "
+            "4-gram repeat rate is WORSE than tt-tnt-1024a at 3.32x the seed "
+            "floor, and termination is unimproved. See "
+            "docs/measurements/evaluation-tt-tnt-1024a-vs-tt-tnt-1024-dialogue.md."
+        ),
+    },
+}
+
+
+def target_for(repo_id):
+    """Invariants for a publication target. Unknown repos are refused, not guessed."""
+    try:
+        target = dict(TARGETS[repo_id])
+    except KeyError:
+        known = ", ".join(sorted(TARGETS))
+        raise SystemExit(
+            f"no publication target declared for {repo_id!r}. Declare one in TARGETS "
+            f"with the artifact and its invariants -- this script does not guess what "
+            f"it is uploading. Known targets: {known}"
+        )
+    if target["hf_dir"] is None:
+        target["hf_dir"] = HF_DIR
+    return target
+
+
 # PRIVACY, False since 2026-08-14. The repo was created private (as this script still does
 # for any repo it has to create fresh) and was later flipped public out-of-band, with
 # explicit authorization -- not through this script, which has no code path that can do
@@ -128,14 +188,15 @@ PROMPT = "Once upon a time, there was a little"
 EXPECTED_PRIVATE = False
 
 
-def _artifact_files() -> list[Path]:
+def _artifact_files(hf_dir=None) -> list[Path]:
     """Files ``upload_folder`` would send, in a stable order for printing and testing."""
-    if not HF_DIR.is_dir():
-        raise FileNotFoundError(f"{HF_DIR} does not exist -- run scripts/convert_checkpoint.py first")
-    return sorted(p for p in HF_DIR.iterdir() if p.is_file())
+    hf_dir = HF_DIR if hf_dir is None else hf_dir
+    if not hf_dir.is_dir():
+        raise FileNotFoundError(f"{hf_dir} does not exist -- run scripts/convert_checkpoint.py first")
+    return sorted(p for p in hf_dir.iterdir() if p.is_file())
 
 
-def _assert_local_artifact_is_publishable() -> None:
+def _assert_local_artifact_is_publishable(hf_dir=None, expected=None) -> None:
     """Refuse to upload a local artifact whose context length isn't what we claim to ship.
 
     ``--verify`` checks the artifact *after* it is on the Hub, which is too late to prevent
@@ -152,16 +213,19 @@ def _assert_local_artifact_is_publishable() -> None:
     """
     import json
 
-    config_path = HF_DIR / "config.json"
+    hf_dir = HF_DIR if hf_dir is None else hf_dir
+    config_path = hf_dir / "config.json"
     if not config_path.is_file():
-        raise FileNotFoundError(f"{config_path} does not exist -- {HF_DIR} is not an HF model dir")
+        raise FileNotFoundError(f"{config_path} does not exist -- {hf_dir} is not an HF model dir")
 
+    want = (EXPECTED_MAX_POSITION_EMBEDDINGS if expected is None
+            else expected["max_position_embeddings"])
     config = json.loads(config_path.read_text())
     actual = config.get("max_position_embeddings")
-    if actual != EXPECTED_MAX_POSITION_EMBEDDINGS:
+    if actual != want:
         raise ValueError(
-            f"{config_path} has max_position_embeddings={actual!r}, but this script "
-            f"publishes {EXPECTED_MAX_POSITION_EMBEDDINGS}-context weights. Refusing to "
+            f"{config_path} has max_position_embeddings={actual!r}, but this target "
+            f"publishes {want}-context weights. Refusing to "
             f"upload: this is how a shorter-context model silently replaces a longer one "
             f"under the same repo id. Point HF_DIR at the right artifact, or update "
             f"EXPECTED_MAX_POSITION_EMBEDDINGS if the published context really is changing."
@@ -170,12 +234,14 @@ def _assert_local_artifact_is_publishable() -> None:
 
 def _print_upload_plan(repo_id: str) -> int:
     """Print the file list and total size that would be uploaded. Returns the total bytes."""
-    files = _artifact_files()
+    target = target_for(repo_id)
+    files = _artifact_files(target["hf_dir"])
     total = 0
     print(f"repo:    {repo_id} (private=True if newly created -- per huggingface_hub, "
           f"ignored if it already exists, so this cannot silently re-privatize an existing "
           f"public repo; license={LICENSE})")
-    print(f"card:    {CARD_PATH.relative_to(ROOT)}")
+    print(f"card:    {target["card"].relative_to(ROOT)}")
+    print(f"source:  {target["hf_dir"].relative_to(ROOT)}")
     print("files:")
     for f in files:
         size = f.stat().st_size
@@ -185,7 +251,7 @@ def _print_upload_plan(repo_id: str) -> int:
     return total
 
 
-def _load_card_for_hub():
+def _load_card_for_hub(card_path=None):
     """Load ``docs/model-card.md`` as a ``ModelCard`` fit to push to the Hub.
 
     ``docs/model-card.md`` intentionally leads with an HTML-comment explanation (SPDX
@@ -203,20 +269,21 @@ def _load_card_for_hub():
     """
     from huggingface_hub import ModelCard
 
-    raw = CARD_PATH.read_text()
+    card_path = CARD_PATH if card_path is None else card_path
+    raw = card_path.read_text()
     stripped = raw.lstrip()
     if stripped.startswith("---"):
         content = stripped
     else:
         idx = raw.find("\n---")
         if idx == -1:
-            raise ValueError(f"{CARD_PATH}: no YAML front-matter fence ('---') found; "
+            raise ValueError(f"{card_path}: no YAML front-matter fence ('---') found; "
                               "refusing to push a card with no metadata")
         content = raw[idx + 1:]
 
     card = ModelCard(content)
     if card.data.license is None:
-        raise ValueError(f"{CARD_PATH}: parsed card has no `license` in front matter after "
+        raise ValueError(f"{card_path}: parsed card has no `license` in front matter after "
                           "stripping leading comments -- refusing to push what looks like an "
                           "empty card")
     return card
@@ -229,8 +296,8 @@ def _set_license(repo_id: str) -> None:
     metadata_update(repo_id, {"license": LICENSE}, repo_type="model", overwrite=True)
 
 
-def _push_card(repo_id: str) -> None:
-    card = _load_card_for_hub()
+def _push_card(repo_id: str, card_path=None) -> None:
+    card = _load_card_for_hub(card_path)
     card.push_to_hub(repo_id, repo_type="model")
 
 
@@ -249,10 +316,13 @@ def _report_card_state(repo_id: str) -> None:
 
 
 def cmd_publish(repo_id: str, dry_run: bool, yes: bool) -> int:
+    # Resolve the target FIRST: an undeclared repo is refused here rather than
+    # uploaded with whatever the module constants happen to say.
+    target = target_for(repo_id)
     """Create the repo (private), set the license, upload the artifact, apply the card."""
     # Before the plan is even printed, so a wrong HF_DIR is reported by --dry-run too --
     # the preview is worth nothing if it happily previews an upload that must not happen.
-    _assert_local_artifact_is_publishable()
+    _assert_local_artifact_is_publishable(target["hf_dir"], target)
     _print_upload_plan(repo_id)
 
     if dry_run:
@@ -275,16 +345,16 @@ def cmd_publish(repo_id: str, dry_run: bool, yes: bool) -> int:
     print(f"setting repo-level license={LICENSE} ...")
     _set_license(repo_id)
 
-    print(f"uploading {HF_DIR.relative_to(ROOT)} -> {repo_id} ...")
+    print(f"uploading {target["hf_dir"].relative_to(ROOT)} -> {repo_id} ...")
     api.upload_folder(
         repo_id=repo_id,
         repo_type="model",
-        folder_path=str(HF_DIR),
+        folder_path=str(target["hf_dir"]),
         commit_message="Upload tt-tnt HF artifact (config, weights, tokenizer)",
     )
 
-    print(f"applying model card from {CARD_PATH.relative_to(ROOT)} ...")
-    _push_card(repo_id)
+    print(f"applying model card from {target["card"].relative_to(ROOT)} ...")
+    _push_card(repo_id, target["card"])
 
     print("re-asserting repo-level license (belt-and-suspenders after the card push) ...")
     _set_license(repo_id)
@@ -295,9 +365,10 @@ def cmd_publish(repo_id: str, dry_run: bool, yes: bool) -> int:
 
 
 def cmd_restore_card(repo_id: str, dry_run: bool, yes: bool) -> int:
-    """Re-apply docs/model-card.md, for use after a tt-kernel push damages front matter."""
+    """Re-apply the target's card, for use after a tt-kernel push damages front matter."""
+    target = target_for(repo_id)
     print(f"repo:    {repo_id}")
-    print(f"card:    {CARD_PATH.relative_to(ROOT)}")
+    print(f"card:    {target["card"].relative_to(ROOT)}")
 
     if dry_run:
         print(f"[dry-run] would push card from {CARD_PATH.relative_to(ROOT)} to {repo_id}, "

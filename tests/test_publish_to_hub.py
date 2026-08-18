@@ -219,3 +219,50 @@ def test_verify_requires_no_other_flags(capsys):
     rc = publish_to_hub.main(["--verify", "--dry-run"])
     assert rc != 0
     assert "read-only" in capsys.readouterr().err
+
+
+def test_upload_reads_the_same_directory_the_guard_validated(monkeypatch, tmp_path):
+    """The bytes uploaded must come from the directory the assertions checked.
+
+    This is the invariant that was missing when episod/tt-tnt-1024 was first
+    published: ``_assert_local_artifact_is_publishable`` and the printed upload
+    plan were routed through the per-repo target, but ``upload_folder`` still read
+    the module-level ``HF_DIR``. The guard validated a 1024-dim artifact while the
+    uploader sent the 384-dim one, and every existing test passed, because none of
+    them related the two.
+    """
+
+
+    seen = {}
+
+    class FakeApi:
+        def create_repo(self, *a, **k):
+            pass
+
+        def upload_folder(self, *, repo_id, repo_type, folder_path, commit_message):
+            seen["folder"] = Path(folder_path)
+
+        def upload_file(self, *a, **k):
+            pass
+
+        def model_info(self, *a, **k):
+            class I:
+                private = False
+            return I()
+
+    # HfApi is imported inside the function, so patch it at its source module.
+    import huggingface_hub
+    monkeypatch.setattr(huggingface_hub, "HfApi", lambda *a, **k: FakeApi())
+    monkeypatch.setattr(publish_to_hub, "_set_license", lambda *a, **k: None)
+    monkeypatch.setattr(publish_to_hub, "_push_card", lambda *a, **k: None)
+    monkeypatch.setattr(publish_to_hub, "_assert_local_artifact_is_publishable",
+                        lambda *a, **k: None)
+
+    for repo_id in sorted(publish_to_hub.TARGETS):
+        seen.clear()
+        publish_to_hub.cmd_publish(repo_id, dry_run=False, yes=True)
+        expected = publish_to_hub.target_for(repo_id)["hf_dir"]
+        assert seen["folder"] == expected, (
+            f"{repo_id}: uploaded {seen['folder']}, but its declared artifact is "
+            f"{expected}. The uploader and the guard must read one directory."
+        )
