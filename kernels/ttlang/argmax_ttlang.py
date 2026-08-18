@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
-"""The per-core argmax in tt-lang. DOES NOT COMPILE on tt-lang 1.1.6.
+"""The per-core argmax in tt-lang. Compiles further on main than on the wheel.
 
 Kept as a reproduction, not as dead code pretending to work. The shipping kernel
 is kernels/core_argmax_compute.cpp, gated at 110/110 exact.
@@ -11,13 +11,21 @@ is kernels/core_argmax_compute.cpp, gated at 110/110 exact.
       note: operand defined here (op in the same block)
       --> m = ttl.math.reduce_max(f_blk, dims=[-1])
 
-tt-lang 1.1.6 will not let an elementwise op consume a reduce_max result inside
-the same compute block: the reduce lowers into a stage whose value is not visible
-to the ops that follow it. The argmax algorithm is inherently two-stage --
-reduce, compare against the reduced value, mask, reduce again -- so it cannot be
-one block under this restriction. Splitting it across two operations (one to
-emit the max, one to consume it) would work at the cost of a second dispatch, and
-is untried.
+That is the failure on tt-lang 1.1.6, the newest PyPI wheel. It does NOT occur on
+1.1.9.dev12 built from main: the handling landed in v1.1.8 via 711fcb38b, which
+added a compute-planning pass that models this exact case. PyPI stops at 1.1.6,
+so the fix has been released for three versions and is installable by nobody.
+
+On main the port reaches a different, narrower error:
+
+    error: dataflow buffer 1 requires incompatible unpack modes in one kernel
+      --> sel = ttl.mul(hit, i_blk)
+      note: operand 0 establishes the conflicting unpack mode
+      --> m = ttl.math.reduce_max(f_blk, dims=[-1])
+
+`hit` descends from the reduce and carries its unpack mode; `i_blk` is a plain
+user DFB. Untried: CompilerOptions.reuse_user_dfbs / compiler_dfbs, or staging
+the index through an intermediate.
 
 Everything else about the port was fine: sub, mul, eq and reduce_max all exist in
 1.1.6, and eq removes the need for the (1 - abs(sign(d))) trick a C++ version
