@@ -590,8 +590,67 @@ def restore_patches():
 
 # Applied at import time: the plugin imports this module to resolve ``main_class``, which
 # happens before any ModelArgs is constructed, so the shims are in place before first use.
+
+
+# ---------------------------------------------------------------------------
+# Check 3 -- refuse to serve quietly on a plugin that predates the decode fix.
+#
+# THE PROBLEM THIS SOLVES
+# On vllm-tt-plugin builds older than c127c17, free-running decode degrades into
+# repetition within a few tokens: measured local-repeat rate 0.222 against a CPU
+# reference of 0.000, median agreement with CPU 4 tokens instead of 12. The cause
+# was upstream, in `fix: return None from sample_tokens when no pending forward`
+# (#26) and the device-state-slot fixes around it. See
+# docs/measurements/decode-defect-resolved.json.
+#
+# WHY NOT A VERSION PIN
+# tt-kernel manifests can carry a ``runtime.plugin_version`` range, and
+# tt_kernel/metal.py resolves the installed plugin version for exactly that. It
+# does not help here: vllm-tt-plugin has reported "0.1.0" for its entire history
+# -- 0.0.0 -> 0.1.0 once, at b4325e0, and never since. The broken build and the
+# fixed build report the same string, so a version range would be false comfort.
+#
+# WHAT IS ACTUALLY DETECTABLE
+# `src/vllm_tt_plugin/engine.py` (798 lines) was deleted between the stale build
+# and the fixed one. Its presence is a structural marker of a plugin that
+# predates the fix, and needs no version string. This is a proxy rather than a
+# direct test of the defect -- if upstream reinstates that module the check will
+# report a false positive, which is why it warns rather than refuses.
+# ---------------------------------------------------------------------------
+
+#: Module deleted upstream between the last plugin that showed the decode defect
+#: and the first that did not.
+_STALE_PLUGIN_MARKER = "vllm_tt_plugin.engine"
+
+
+def plugin_predates_decode_fix():
+    """True when the installed plugin still carries the pre-fix module layout."""
+    import importlib.util
+
+    try:
+        return importlib.util.find_spec(_STALE_PLUGIN_MARKER) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def _check_plugin_freshness():
+    if not plugin_predates_decode_fix():
+        return
+    _warn_once(
+        "tt-tnt: this vllm-tt-plugin build appears to predate the decode fix "
+        "(%s is still present, and it was removed upstream before c127c17). "
+        "Free-running decode on such builds degrades into repetition within a "
+        "few tokens -- measured local-repeat 0.222 against a CPU reference of "
+        "0.000. Generation will look broken and the model is not at fault. "
+        "Update the plugin. Note that its reported version is 0.1.0 either way, "
+        "so a version check cannot tell you this.",
+        _STALE_PLUGIN_MARKER,
+    )
+
+
 _patch_find_grid()
 _patch_weight_cache_path()
+_check_plugin_freshness()
 
 from models.tt_transformers.tt.generator_vllm import (  # noqa: E402
     LlamaForCausalLM as _StockLlamaForCausalLM,
