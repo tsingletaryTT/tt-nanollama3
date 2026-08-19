@@ -329,8 +329,7 @@ def test_ttml_cxx_header_fields_passes_validate_header():
     header = build_header(
         step=1000, model_config_path="m.yaml", tokenizer_dir="tok",
         corpus_tokens=1_000, batch_size=64, seq_len=512,
-        extra={"transformer_config": {}, **ttml_cxx_header_fields(SIZES["1024"])},
-    )
+        extra={"transformer_config": {}, **ttml_cxx_header_fields(SIZES["1024"])}, seed=0, tokens_dir="artifacts/tokens-test", optimizer={"type": "AdamW"}, ddp=1)
     validate_header(header)  # must not raise
     assert header["intermediate_dim"] == 2816
 

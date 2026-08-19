@@ -25,7 +25,7 @@ from train.config import SEQ_LEN, VOCAB_SIZE
 
 #: Our header schema version, independent of ttml's own on-disk FORMAT_VERSION.
 #: Bump when a field's meaning changes, not when one is added.
-CHECKPOINT_FORMAT = 1
+CHECKPOINT_FORMAT = 2
 
 #: Fields every checkpoint header must carry. `extra` may not shadow any of these.
 #:
@@ -36,11 +36,36 @@ CHECKPOINT_FORMAT = 1
 #: checkpoints (127.6M corpus vs 49.2M actually trained on at step 3000). `batch_size` makes
 #: `tokens_seen = step * batch_size * seq_len` derivable from the header alone, without
 #: guessing at a value nothing else records.
-_REQUIRED = (
+_REQUIRED_V1 = (
     "format", "step", "vocab_size", "seq_len",
     "model_config_path", "tokenizer_dir",
     "corpus_tokens", "batch_size", "tokens_seen", "created_at",
 )
+
+#: Format 2 adds the fields that make a checkpoint COMPARABLE to another one, not
+#: merely loadable. Added 2026-08-19 after two training runs were compared against a
+#: baseline trained on a different corpus and read as a 1.3-nat optimizer regression:
+#: the baseline directory held val_losses.jsonl and nothing else, so establishing what
+#: it had trained on took mtime forensics on .npy files plus a throughput argument, and
+#: the seed was never recoverable at all.
+#:
+#: `corpus_tokens` above was ALMOST enough -- it is what finally proved the corpus, by
+#: summing to exactly one token set's train+val. But "almost" cost a day, and a sum is
+#: an inference where a path is a fact.
+#:
+#: These live in the HEADER rather than in a sibling run_manifest.json (train/run.py
+#: writes one of those too) because the header travels with the artifact: a checkpoint
+#: moved, renamed, or copied out of its directory keeps them, and that is exactly when
+#: provenance is most often lost.
+_REQUIRED_V2_ADDED = ("seed", "tokens_dir", "optimizer", "ddp")
+
+_REQUIRED_BY_FORMAT = {
+    1: _REQUIRED_V1,
+    2: _REQUIRED_V1 + _REQUIRED_V2_ADDED,
+}
+
+#: Kept as the name older code imports. Always the CURRENT format's requirement set.
+_REQUIRED = _REQUIRED_BY_FORMAT[CHECKPOINT_FORMAT]
 
 
 def build_header(
@@ -50,6 +75,10 @@ def build_header(
     tokenizer_dir: str,
     corpus_tokens: int,
     batch_size: int,
+    seed: int,
+    tokens_dir: str,
+    optimizer: Dict[str, Any],
+    ddp: int,
     seq_len: int = SEQ_LEN,
     extra: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
@@ -92,6 +121,13 @@ def build_header(
         "batch_size": int(batch_size),
         "tokens_seen": int(step) * int(batch_size) * int(seq_len),
         "created_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+        # Format 2. Required, not optional, and not routed through `extra`: a caller
+        # that forgets them should fail at write time rather than produce a checkpoint
+        # that cannot be compared to anything later.
+        "seed": int(seed),
+        "tokens_dir": str(tokens_dir),
+        "optimizer": dict(optimizer),
+        "ddp": int(ddp),
     }
     if extra:
         clashes = sorted(set(extra) & set(_REQUIRED))
@@ -102,11 +138,20 @@ def build_header(
 
 
 def validate_header(header: Dict[str, Any]) -> None:
-    """Raise ``ValueError`` if ``header`` is not a checkpoint header this code can read."""
-    missing = [f for f in _REQUIRED if f not in header]
+    """Raise ``ValueError`` if ``header`` is not a checkpoint header this code can read.
+
+    Requirements are checked PER FORMAT. A format-1 checkpoint on disk predates the
+    provenance fields and must stay readable -- there are many of them here and they are
+    evidence of real runs. Demanding format-2 fields of them would make the upgrade
+    retroactively invalidate history, which is the opposite of the point.
+    """
+    fmt = header.get("format")
+    if fmt is None:
+        raise ValueError("checkpoint header missing required field(s): format")
+    required = _REQUIRED_BY_FORMAT.get(fmt, _REQUIRED_V1)
+    missing = [f for f in required if f not in header]
     if missing:
         raise ValueError(f"checkpoint header missing required field(s): {', '.join(missing)}")
-    fmt = header["format"]
     if fmt > CHECKPOINT_FORMAT:
         raise ValueError(
             f"checkpoint header format {fmt} is newer than this code understands "

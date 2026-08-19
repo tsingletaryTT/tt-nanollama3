@@ -997,6 +997,14 @@ def main() -> int:
                     tokenizer_dir=str(ROOT / "artifacts" / "tokenizer"),
                     corpus_tokens=int(len(train_ids) + len(val_ids)),
                     batch_size=args.batch_size,
+                    # Format 2 provenance. corpus_tokens above proved the corpus once,
+                    # by summing to exactly one token set's train+val -- but that is an
+                    # inference, and it took a day to make. tokens_dir is the fact.
+                    # seed is the one nothing on disk could recover at all.
+                    seed=int(yaml_config["training_config"]["seed"]),
+                    tokens_dir=str(args.tokens_dir),
+                    optimizer=yaml_config["training_config"]["optimizer"],
+                    ddp=int(args.ddp),
                     # Explicit, not the build_header default: seq_len is now a CLI flag
                     # (--seq-len), so the header must record what THIS run actually used,
                     # not train.config.SEQ_LEN's current value. See build_header's

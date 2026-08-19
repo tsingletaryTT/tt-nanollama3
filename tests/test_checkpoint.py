@@ -24,7 +24,7 @@ def _header(**kw):
         batch_size=64,
     )
     base.update(kw)
-    return build_header(**base)
+    return build_header(**base, seed=0, tokens_dir="artifacts/tokens-test", optimizer={"type": "AdamW"}, ddp=1)
 
 
 def test_header_carries_format_version():
@@ -454,3 +454,82 @@ def test_optimizer_tensors_walks_nested_state(monkeypatch):
         "optimizer/exp_avg/llama/fc/weight": exp_avg,
         "optimizer/inner/exp_avg_sq/llama/fc/weight": nested,
     }
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint format 2: provenance that travels with the artifact
+# ---------------------------------------------------------------------------
+# Added 2026-08-19. Two training runs were compared against a baseline trained on
+# a different corpus and read as a 1.3-nat optimizer regression. The baseline
+# directory held val_losses.jsonl and nothing else; identifying its corpus took
+# mtime forensics plus a throughput argument, and its seed was never recoverable.
+# corpus_tokens ALMOST sufficed -- it is what finally proved the corpus, by
+# summing to exactly one token set's train+val -- but a sum is an inference where
+# a path is a fact.
+
+
+def _v2_kwargs(**over):
+    base = dict(
+        model_config_path="m.yaml", tokenizer_dir="tok", corpus_tokens=391823393,
+        batch_size=64, seq_len=512, seed=5489, tokens_dir="artifacts/tokens-v4",
+        optimizer={"type": "AdamW", "lr": 3e-4, "beta2": 0.999}, ddp=4,
+    )
+    base.update(over)
+    return base
+
+
+def test_new_headers_carry_the_provenance_fields():
+    h = build_header(2000, **_v2_kwargs())
+    assert h["format"] == 2
+    assert h["seed"] == 5489
+    assert h["tokens_dir"] == "artifacts/tokens-v4"
+    assert h["ddp"] == 4
+    assert h["optimizer"]["beta2"] == 0.999
+    validate_header(h)
+
+
+def test_provenance_fields_are_required_not_optional():
+    """A caller that forgets them must fail at WRITE time.
+
+    Optional provenance is provenance that is missing exactly when it matters --
+    the baseline that caused this was written by code that simply never recorded
+    the seed.
+    """
+    kwargs = _v2_kwargs()
+    for missing in ("seed", "tokens_dir", "optimizer", "ddp"):
+        bad = {k: v for k, v in kwargs.items() if k != missing}
+        with pytest.raises(TypeError):
+            build_header(2000, **bad, seed=0, tokens_dir="artifacts/tokens-test", optimizer={"type": "AdamW"}, ddp=1)
+
+
+def test_format_1_checkpoints_remain_readable():
+    """The upgrade must not retroactively invalidate history.
+
+    There are many format-1 checkpoints on disk and they are evidence of real
+    runs. Requiring format-2 fields of them would make an improvement in
+    record-keeping destroy the records.
+    """
+    v1 = {
+        "format": 1, "step": 2000, "vocab_size": 32000, "seq_len": 512,
+        "model_config_path": "m.yaml", "tokenizer_dir": "tok",
+        "corpus_tokens": 391823393, "batch_size": 64, "tokens_seen": 65536000,
+        "created_at": "2026-08-18T15:01:08+00:00",
+    }
+    validate_header(v1)  # must not raise
+    assert all(f not in v1 for f in ("seed", "tokens_dir", "optimizer", "ddp"))
+
+
+def test_a_format_2_header_missing_provenance_is_rejected():
+    v1_fields = {
+        "format": 2, "step": 2000, "vocab_size": 32000, "seq_len": 512,
+        "model_config_path": "m.yaml", "tokenizer_dir": "tok",
+        "corpus_tokens": 1, "batch_size": 64, "tokens_seen": 1,
+        "created_at": "2026-08-19T00:00:00+00:00",
+    }
+    with pytest.raises(ValueError, match="seed"):
+        validate_header(v1_fields)
+
+
+def test_extra_still_cannot_shadow_the_new_required_fields():
+    with pytest.raises(ValueError, match="seed"):
+        build_header(2000, **_v2_kwargs(), extra={"seed": 999})
