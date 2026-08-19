@@ -118,7 +118,7 @@ SOURCES: Dict[str, CorpusSource] = {
         # blend and no more. 3% would have needed upsample 5.
         target_share=0.020,
         hf_repo="databricks/databricks-dolly-15k",
-        hf_revision="bdd27f4d94b9",
+        hf_revision="bdd27f4d94b9c1f951818a7da7fd7aeea5dbff1a",
         hf_split="train",
         license_id="CC-BY-SA-3.0",
         license_url="https://creativecommons.org/licenses/by-sa/3.0/",

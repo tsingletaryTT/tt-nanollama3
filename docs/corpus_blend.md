@@ -12,9 +12,13 @@ The manifest is authoritative. It is written by the blend itself. The figures be
 copied from it and `tests/test_corpus_blend_doc.py` holds them to it, so this page cannot
 drift from the artifact it describes.
 
+The artifact these figures describe is `artifacts/corpus/blend.txt`, sha256
+`7f2f6e5ff597bc19e17f59f311a0d0e0fdc4602b634211ab0a267cdaf2039cb1`.
+A page that quotes numbers without naming the file they came from cannot be checked against anything; the digest is what makes "this blend" a claim rather than a phrase.
+
 ## The headline number
 
-399,508,203 tokens against a **400,000,000** budget — **491,797 short, −0.123%**.
+399,486,992 tokens against a **400,000,000** budget — **513,008 short, −0.128%**.
 
 That is the real count from the trained tokenizer, not an estimate. Each source's emitted
 text is counted as it is written, chunked into paragraphs exactly the way
@@ -30,13 +34,14 @@ nine times over. It is not a share problem: every slice is within 0.083 points o
 
 | Source | Emitted tokens | Achieved share | Target | Real repetition | Declared `upsample` | tokens/word |
 |---|---:|---:|---:|---:|---:|---:|
+| `dialogue` | 7,995,795 | 2.002% | 2% | 2.8358x | 3x | 1.422037 |
 | `flavour` | 1,979,789 | 0.496% | 0.5% | 3.4759x | 4x | 1.412325 |
 | `folklore` | 32,078,464 | 8.029% | 8% | 1.5041x | 2x | 1.357543 |
 | `gutenberg_children` | 59,984,104 | 15.014% | 15% | 1.7516x | 2x | 1.322577 |
 | `poetry` | 3,950,536 | 0.989% | 1% | 0.1305x | 1x | 1.392825 |
 | `procedural` | 47,994,272 | 12.013% | 12% | 3.9109x | 4x | 1.340927 |
 | `spine` | 53,915,065 | 13.495% | 13.5% | 2.061x | 3x | 1.33756 |
-| `tinystories` | 124,030,364 | 31.046% | 31% | 0.2768x | 1x | 1.198246 |
+| `tinystories` | 116,013,358 | 29.041% | 29% | 0.259x | 1x | 1.198246 |
 | `weird` | 15,977,960 | 3.999% | 4% | 2.2724x | 3x | 1.31158 |
 | `wikipedia_simple` | 59,597,649 | 14.918% | 15% | 0.8763x | 1x | 1.561208 |
 
@@ -118,16 +123,17 @@ exactly, on a line boundary, at the exact declared word count).
 
 | Source | Separators in the blend | Documents in the prepared file | Documents/file-documents | Word-based `repetition_factor` |
 |---|---:|---:|---:|---:|
+| `dialogue` | 42,582 | 15,011 | 2.84x | 2.8358x |
 | `flavour` | 26 | 7 | 3.71x | 3.4759x |
 | `folklore` | 308 | 199 | 1.55x | 1.5041x |
 | `gutenberg_children` | 1,016 | 583 | 1.74x | 1.7516x |
 | `poetry` | 6,002 | 48,205 | 0.12x | 0.1305x |
 | `procedural` | 702 | 180 | 3.90x | 3.9109x |
 | `spine` | 494 | 241 | 2.05x | 2.0610x |
-| `tinystories` | 584,456 | 2,119,489 | 0.28x | 0.2768x |
+| `tinystories` | 546,554 | 2,119,489 | 0.26x | 0.259x |
 | `weird` | 117 | 55 | 2.13x | 2.2724x |
 | `wikipedia_simple` | 205,650 | 241,787 | 0.85x | 0.8763x |
-| **total** | **798,771** | **2,410,746** | | |
+| **total** | **803,451** | **2,425,757** | | |
 
 The last two columns are close but not equal, and should not be expected to be: repetition is
 measured in **words**, and documents are not uniform in length. A source used fractionally
@@ -143,26 +149,39 @@ were split into ordinary subwords.
 
 ## A second count: tokenizing the finished file
 
-The headline number above (399,508,203) is **not** the only token count this project has for
+The headline number above (399,486,992) is **not** the only token count this project has for
 this corpus, and the other one was missing from this page until now — which is exactly how a
 reviewer came to flag it as unverifiable. Recorded here so it stops being a number that only
 exists in a training run's own header.
 
 `train/tokenization.py` runs the retrained tokenizer once over the finished, concatenated
-`artifacts/corpus/blend.txt` and splits the result into train/val arrays. Over the corpus as
-rebuilt on 2026-08-14 (with document separators), written to `artifacts/tokens-v3/`:
+`artifacts/corpus/blend.txt` and splits the result into train/val arrays. Over the corpus
+described on this page — the one that includes `dialogue` — written to
+`artifacts/tokens-v4/` on 2026-08-18:
 
 | | Tokens |
 |---|---:|
-| Total | **391,921,555** |
-| Train split | **352,729,403** |
-| Val split | **39,192,152** |
-| of which id 2 (`</s>`) | **798,771** |
+| Total | **391,823,393** |
+| Train split | **352,641,058** |
+| Val split | **39,182,335** |
+| of which id 2 (`</s>`) | **803,451** |
 | Vocabulary | 32,000 |
 
-This is directly checkable on disk: `artifacts/tokens-v3/train_ids.npy` and
-`artifacts/tokens-v3/val_ids.npy` are `uint32` arrays of shape `(352729403,)` and
-`(39192152,)`. The split is stratified per source — see `_tokenize_stratified` — and the
+The `</s>` count is a cross-check, not a restatement. Walking `blend.txt` and counting
+`DOCUMENT_SEPARATOR` lines gives **803,451**, and counting id 2 in the two token arrays
+gives **803,451**. The separator survives tokenization exactly, and the agreement is what
+establishes that `tokens-v4` is the tokenization of *this* blend rather than a neighbouring
+one — a question that turned out to matter: two training runs were once compared against a
+baseline trained on a different token set, and nothing on disk said so.
+
+`artifacts/tokens-v3/` holds the previous corpus, before the `dialogue` slice was added:
+391,921,555 total (352,729,403 train / 39,192,152 val), 798,771 separators. It is still the
+frozen **evaluation** array `scripts/evaluate.py` measures against, deliberately — an eval
+set that moves with the training corpus cannot compare two models.
+
+This is directly checkable on disk: `artifacts/tokens-v4/train_ids.npy` and
+`artifacts/tokens-v4/val_ids.npy` are `uint32` arrays of shape `(352641058,)` and
+`(39182335,)`. The split is stratified per source — see `_tokenize_stratified` — and the
 per-source token counts it reports are in the run's `TokenStats`.
 
 The older arrays are a different corpus and are kept. `artifacts/tokens/` (353,495,970 /
@@ -174,7 +193,7 @@ actually trained on, which is why `tokenize_corpus` refuses to overwrite them an
 rebuild went to a new directory instead. Both contain **zero** occurrences of id 2 — that is
 the regression, still visible on disk.
 
-Why this differs from the manifest's 399,508,203. They are two different measurements of
+Why this differs from the manifest's 399,486,992. They are two different measurements of
 two different things, not two attempts at the same number:
 
 - The manifest's figure is a **sum of nine separate tokenizer calls**, one per source, each
@@ -188,7 +207,7 @@ BPE merges do not cross an `encode()` call, so tokenizing nine chunks separately
 tokenizing their concatenation as one string can legitimately merge (or fail to merge) a
 different set of byte pairs at every join — the boundary between `flavour`'s last paragraph
 and `folklore`'s first, for instance, is a real encode-time seam in one measurement and
-invisible in the other. The difference is **7,586,648 tokens, or 1.90%** of 399,508,203.
+invisible in the other. The difference is **7,663,599 tokens, or 1.92%** of 399,486,992.
 
 That magnitude is the point, and an earlier version of this paragraph got it wrong twice — it
 quoted 0.42% and attributed the gap to the eight *source-to-source* seams. Eight seams cannot
@@ -197,8 +216,8 @@ produce 7.6M tokens; they would produce dozens. The real mechanism is that
 so every chunk boundary — millions of them, one per document or paragraph, not eight — is an
 encode-time seam where a merge can differ. Same phenomenon, five orders of magnitude more of it,
 which is why 1.90% is unremarkable rather than alarming. Neither count is wrong. **Treat
-399,508,203 as the per-source provenance figure (how the blend was assembled) and
-391,921,555/352,729,403/39,192,152 as the tokenized-training-data figure (what
+399,486,992 as the per-source provenance figure (how the blend was assembled) and
+391,823,393/352,641,058/39,182,335 as the tokenized-training-data figure (what
 `train/run.py` actually reads token-by-token)** — use whichever one answers the question being
 asked, and do not average them or treat the smaller one as a correction to the larger one.
 

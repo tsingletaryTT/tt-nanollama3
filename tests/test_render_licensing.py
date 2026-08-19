@@ -49,6 +49,21 @@ def test_a_fractional_share_renders_with_its_fraction_intact():
 
 
 def test_whole_percentages_are_not_padded_with_a_pointless_decimal():
-    """Keeping fractions must not make the common case noisier."""
+    """Keeping fractions must not make the common case noisier.
+
+    The whole-number shares are DERIVED from SOURCES rather than hardcoded. This
+    test previously asserted ``| 31% |`` because tinystories was 31% when it was
+    written; adding the dialogue slice moved tinystories to 29% and the test began
+    failing on a share change it was never about. A formatting test that breaks
+    when a number changes is testing the wrong thing.
+    """
     out = render_licensing()
-    assert "| 31% |" in out and "| 31.0% |" not in out
+    whole = sorted({
+        round(src.target_share * 100)
+        for src in SOURCES.values()
+        if abs(src.target_share * 100 - round(src.target_share * 100)) < 1e-9
+    })
+    assert whole, "expected at least one whole-percentage source to check formatting against"
+    for pct in whole:
+        assert f"| {pct}% |" in out, f"{pct}% should render without a decimal"
+        assert f"| {pct}.0% |" not in out, f"{pct}% must not render as {pct}.0%"
