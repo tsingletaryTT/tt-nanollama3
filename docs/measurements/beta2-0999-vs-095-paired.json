@@ -1,0 +1,168 @@
+{
+  "dir_a": "artifacts/checkpoints-v077-beta2-control",
+  "dir_b": "artifacts/checkpoints-v077",
+  "n_a": 22,
+  "n_b": 22,
+  "matched": 22,
+  "only_in_a": [],
+  "only_in_b": [],
+  "points": [
+    {
+      "step": 500,
+      "a": 4.628515625,
+      "b": 4.70078125,
+      "delta": -0.0723
+    },
+    {
+      "step": 1000,
+      "a": 4.10078125,
+      "b": 4.087109375,
+      "delta": 0.0137
+    },
+    {
+      "step": 1500,
+      "a": 3.70859375,
+      "b": 3.691015625,
+      "delta": 0.0176
+    },
+    {
+      "step": 2000,
+      "a": 3.56796875,
+      "b": 3.559375,
+      "delta": 0.0086
+    },
+    {
+      "step": 2500,
+      "a": 3.293359375,
+      "b": 3.3015625,
+      "delta": -0.0082
+    },
+    {
+      "step": 3000,
+      "a": 3.08515625,
+      "b": 3.141796875,
+      "delta": -0.0566
+    },
+    {
+      "step": 3500,
+      "a": 3.252734375,
+      "b": 3.269140625,
+      "delta": -0.0164
+    },
+    {
+      "step": 4000,
+      "a": 3.101953125,
+      "b": 3.10546875,
+      "delta": -0.0035
+    },
+    {
+      "step": 4500,
+      "a": 3.121484375,
+      "b": 3.15703125,
+      "delta": -0.0355
+    },
+    {
+      "step": 5000,
+      "a": 3.043359375,
+      "b": 3.083984375,
+      "delta": -0.0406
+    },
+    {
+      "step": 5500,
+      "a": 3.018359375,
+      "b": 3.13828125,
+      "delta": -0.1199
+    },
+    {
+      "step": 6000,
+      "a": 2.958984375,
+      "b": 3.06328125,
+      "delta": -0.1043
+    },
+    {
+      "step": 6500,
+      "a": 2.998046875,
+      "b": 3.04453125,
+      "delta": -0.0465
+    },
+    {
+      "step": 7000,
+      "a": 2.97578125,
+      "b": 3.03125,
+      "delta": -0.0555
+    },
+    {
+      "step": 7500,
+      "a": 2.92578125,
+      "b": 2.994921875,
+      "delta": -0.0691
+    },
+    {
+      "step": 8000,
+      "a": 2.920703125,
+      "b": 2.99453125,
+      "delta": -0.0738
+    },
+    {
+      "step": 8500,
+      "a": 2.808984375,
+      "b": 2.904296875,
+      "delta": -0.0953
+    },
+    {
+      "step": 9000,
+      "a": 2.822265625,
+      "b": 2.86953125,
+      "delta": -0.0473
+    },
+    {
+      "step": 9500,
+      "a": 2.876953125,
+      "b": 2.946875,
+      "delta": -0.0699
+    },
+    {
+      "step": 10000,
+      "a": 2.878515625,
+      "b": 2.92265625,
+      "delta": -0.0441
+    },
+    {
+      "step": 10500,
+      "a": 2.782421875,
+      "b": 2.8484375,
+      "delta": -0.066
+    },
+    {
+      "step": 10764,
+      "a": 2.928515625,
+      "b": 3.004296875,
+      "delta": -0.0758
+    }
+  ],
+  "mean_delta": -0.0482,
+  "sd": 0.0378,
+  "se": 0.0081,
+  "signs": "-+++------------------",
+  "within_run_floor": 0.0762,
+  "design": "paired",
+  "design_reason": "forced on the command line",
+  "t_like": -5.98,
+  "verdict": "better (A lower) -- |mean| is 6.0 standard errors from zero, 19/22 signs agree",
+  "manifest_notes": [
+    "NO run_manifest.json for B. Comparability CANNOT be verified -- these runs predate the manifest (added 2026-08-19). This is the exact situation that produced a 1.3-nat false regression: check the tokens dir by hand before trusting any number below."
+  ],
+  "comparability_mismatches": [],
+  "_what": "beta2 0.999 vs 0.95 on tt-metal v0.77.0, everything else identical",
+  "_result": "beta2 0.999 is BETTER by 0.048 nats mean across 22 matched steps, 6.0 standard errors from zero, 19 of 22 signs agreeing. Final full-corpus validation: 2.9570 (0.999) vs 3.0512 (0.95).",
+  "_why_this_is_the_first_trustworthy_optimizer_comparison_here": "Both arms ran on the SAME tt-metal (v0.77.0), the SAME corpus (tokens-v4, proven from the checkpoint header, not inferred), the SAME seed (5489) and the same mesh, differing in exactly one line of one config. Every earlier comparison today moved the optimizer and the toolchain together, or the corpus without noticing.",
+  "_the_paired_design_is_the_whole_reason_this_is_readable": "Sharing a seed means identical data order, so the large shared oscillation (within-run wobble median 0.076) is common to both curves and cancels in the delta. That is why se is 0.0081 -- an order of magnitude below the wobble -- and why a 0.048 effect is detectable at all. Judged by the unpaired wobble floor the same data reads NOT INTERPRETABLE, which is what this script printed on its first real use before the paired path was added.",
+  "_consequence": {
+    "revert_beta2_to_0.999": "YES. Upstream's 0.95 came from TinyLlama benchmarks and does not transfer to this model.",
+    "keep_weight_decay_skip_1d": "YES, unchanged -- it fixes a real defect (weight decay on 13 RMSNorm gammas) and is not implicated here.",
+    "warmup": "Unaffected by this run; separately measured as no-effect.",
+    "designated_model": "tt-tnt-1024-dialogue still current. Neither v0.77.0 run has been evaluated behaviourally."
+  },
+  "_honest_size": "0.048 nats. The behavioural eval suite's seed-only floor is 0.1944 nats, so this is very likely invisible downstream. It is a real training-curve effect and a cheap config fix, not a capability change.",
+  "_what_is_still_not_established": "Whether tt-metal v0.77.0 itself changed training. Both arms here are v0.77.0, so this comparison cannot see it. The dialogue baseline is the only pre-v0.77.0 curve available and its seed is unknown, so it cannot answer the question either."
+}

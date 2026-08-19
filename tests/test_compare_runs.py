@@ -156,3 +156,98 @@ def test_no_overlap_fails_rather_than_reporting_nothing(tmp_path):
     r = _invoke(a, b)
     assert r.returncode != 0
     assert "no matched steps" in (r.stdout + r.stderr)
+
+
+# --- paired vs unpaired ------------------------------------------------------
+# Added after the tool's FIRST REAL USE returned a wrong verdict. A paired
+# comparison with mean -0.0482, se 0.0081 (six standard errors) and 19 of 22
+# signs agreeing was stamped NOT INTERPRETABLE, because |mean| fell under the
+# within-run wobble floor. The floor was the wrong instrument for the design:
+# the two runs shared a seed, so their oscillation is common to both curves and
+# cancels in the delta, which is exactly why se was an order of magnitude below
+# the wobble. Judging a paired design by an unpaired floor throws away most of
+# its sensitivity.
+
+
+def _paired_curves(tmp_path, offset: float, seed_a=5489, seed_b=5489, jitter=0.012):
+    """Two curves that oscillate TOGETHER, offset by *offset* plus small jitter.
+
+    This is what same-seed runs look like: identical data order, so a large shared
+    wobble, with the treatment effect as a small shift underneath it and a little
+    independent scatter on top.
+
+    The jitter is not decoration. Without it the deltas are mathematically
+    identical, sd is exactly 0, and the test exercises a degenerate branch instead
+    of the path real curves take. The first version of these tests made that
+    mistake and "failed" against a tool that was behaving correctly.
+    """
+    wobbly = {s: 3.0 + (0.15 if (s // 500) % 2 else -0.15) for s in range(500, 11000, 500)}
+    a = {s: v + offset + (jitter if (s // 500) % 3 == 0 else -jitter / 2)
+         for s, v in wobbly.items()}
+    return (_run_dir(tmp_path, "a", a, _manifest(seed=seed_a)),
+            _run_dir(tmp_path, "b", wobbly, _manifest(seed=seed_b)))
+
+
+def test_paired_detects_a_small_consistent_offset_the_floor_would_hide(tmp_path):
+    """The regression. A steady -0.05 under a +/-0.15 wobble must be found."""
+    a, b = _paired_curves(tmp_path, offset=-0.05)
+    r = _invoke(a, b)
+    assert "design            PAIRED" in r.stdout, r.stdout
+    assert "better (A lower)" in r.stdout, r.stdout
+    assert "standard errors from zero" in r.stdout
+
+
+def test_pairing_is_auto_detected_from_matching_seeds(tmp_path):
+    a, b = _paired_curves(tmp_path, offset=-0.05)
+    r = _invoke(a, b)
+    assert "auto: both manifests report seed 5489" in r.stdout, r.stdout
+
+
+def test_different_seeds_fall_back_to_the_conservative_floor(tmp_path):
+    """Different data order means the oscillations do not cancel; stay conservative."""
+    a, b = _paired_curves(tmp_path, offset=-0.05, seed_a=1, seed_b=2)
+    r = _invoke(a, b)
+    assert "design            UNPAIRED" in r.stdout, r.stdout
+    assert "NOT INTERPRETABLE" in r.stdout
+
+
+def test_missing_manifest_falls_back_to_unpaired(tmp_path):
+    """Cannot confirm the seeds match, so must not claim the sensitivity."""
+    wobbly = {s: 3.0 + (0.15 if (s // 500) % 2 else -0.15) for s in range(500, 11000, 500)}
+    a = _run_dir(tmp_path, "a", {s: v - 0.05 for s, v in wobbly.items()}, _manifest())
+    b = _run_dir(tmp_path, "b", wobbly)  # no manifest
+    r = _invoke(a, b)
+    assert "design            UNPAIRED" in r.stdout, r.stdout
+
+
+def test_paired_still_reports_not_interpretable_when_it_should(tmp_path):
+    """Pairing raises sensitivity; it must not manufacture findings from nothing."""
+    a, b = _paired_curves(tmp_path, offset=0.0005)
+    r = _invoke(a, b)
+    assert "NOT INTERPRETABLE" in r.stdout, r.stdout
+
+
+def test_paired_can_be_forced_and_overrides_autodetect(tmp_path):
+    a, b = _paired_curves(tmp_path, offset=-0.05, seed_a=1, seed_b=2)
+    r = _invoke(a, b, "--paired")
+    assert "forced on the command line" in r.stdout
+    assert "better (A lower)" in r.stdout
+
+
+def test_zero_scatter_is_reported_without_dividing_by_zero(tmp_path):
+    """A perfectly constant offset has se == 0 and no t statistic.
+
+    Degenerate, but it must not crash and must not be silently swallowed: the
+    answer is obvious and should be stated as what it is.
+    """
+    a, b = _paired_curves(tmp_path, offset=-0.05, jitter=0.0)
+    r = _invoke(a, b)
+    assert r.returncode == 0, r.stderr
+    assert "constant offset" in r.stdout, r.stdout
+    assert "better (A lower)" in r.stdout
+
+
+def test_identical_curves_are_not_interpretable(tmp_path):
+    a, b = _paired_curves(tmp_path, offset=0.0, jitter=0.0)
+    r = _invoke(a, b)
+    assert "identical" in r.stdout, r.stdout

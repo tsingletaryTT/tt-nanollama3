@@ -155,6 +155,11 @@ def main() -> None:
     p.add_argument("dir_b", type=Path, help="baseline checkpoint dir")
     p.add_argument("--allow-mismatch", action="store_true",
                    help="compare even when manifests disagree on training inputs")
+    p.add_argument("--paired", dest="paired", action="store_true", default=None,
+                   help="force the paired test (runs share a seed, so data order and its "
+                        "oscillation are common to both curves and cancel in the delta)")
+    p.add_argument("--unpaired", dest="paired", action="store_false",
+                   help="force the wobble-floor test (runs have different seeds)")
     p.add_argument("--json", type=Path, default=None)
     args = p.parse_args()
 
@@ -196,17 +201,61 @@ def main() -> None:
     print(f"signs             {signs}  ({signs.count('+')}+ / {signs.count('-')}-)")
     print(f"within-run floor  {floor:.4f}   (median consecutive move, both runs pooled)")
 
-    # The verdict uses this project's vocabulary. NOT INTERPRETABLE is the common
-    # case and is not a hedge -- it is the correct answer when the difference is
-    # smaller than the instrument's own scatter.
-    if abs(mean) <= floor:
-        verdict = ("NOT INTERPRETABLE -- |mean| is inside the runs' own "
-                   "point-to-point scatter")
-    elif abs(mean) <= 2 * se:
-        verdict = "NOT INTERPRETABLE -- |mean| is within 2 standard errors of zero"
+    # PAIRED vs UNPAIRED. This distinction was missing in the first version of this
+    # script and it produced a wrong verdict on its first real use: mean -0.0482 at
+    # se 0.0081 (six standard errors, 19 of 22 signs agreeing) was stamped NOT
+    # INTERPRETABLE because |mean| fell under the within-run wobble floor.
+    #
+    # The wobble floor is right for runs with DIFFERENT seeds: their data order
+    # differs, so each curve oscillates independently and a small mean difference
+    # really can be an artefact of where the oscillations happened to land.
+    #
+    # It is far too conservative for runs that SHARE a seed. Identical data order
+    # means the oscillation is common to both curves and subtracts out, so the
+    # paired deltas are much tighter than either curve is on its own -- which is
+    # exactly what se = 0.0081 against a 0.0762 wobble is telling you. Judging a
+    # paired design by an unpaired floor discards most of its sensitivity.
+    if args.paired is not None:
+        paired = args.paired
+        how = "forced on the command line"
+    elif ma and mb and ma.get("seed") is not None and ma.get("seed") == mb.get("seed"):
+        paired = True
+        how = f"auto: both manifests report seed {ma.get('seed')}"
     else:
-        verdict = ("better (A lower)" if mean < 0 else "worse (A higher)") + \
-                  " -- exceeds both the floor and 2 se"
+        paired = False
+        how = ("auto: seeds could not be confirmed equal from manifests, so the "
+               "conservative unpaired floor is used")
+    print(f"design            {'PAIRED' if paired else 'UNPAIRED'}  ({how})")
+
+    if paired:
+        # se == 0 means every delta is identical -- either the curves are the same
+        # (mean 0) or they are offset by a constant. Both are degenerate for a
+        # t-like statistic, which would divide by zero, and both have an obvious
+        # correct answer that must not be reached through the division.
+        agree = signs.count('-' if mean < 0 else '+')
+        if se == 0:
+            verdict = ("NOT INTERPRETABLE -- the curves are identical" if mean == 0
+                       else (("better (A lower)" if mean < 0 else "worse (A higher)") +
+                             f" -- every one of {len(deltas)} deltas is exactly {mean:+.4f}; "
+                             f"a constant offset with zero scatter"))
+        elif abs(mean) <= 2 * se:
+            verdict = "NOT INTERPRETABLE -- |mean| is within 2 standard errors of zero"
+        else:
+            verdict = (("better (A lower)" if mean < 0 else "worse (A higher)") +
+                       f" -- |mean| is {abs(mean)/se:.1f} standard errors from zero, "
+                       f"{agree}/{len(deltas)} signs agree")
+    else:
+        if abs(mean) <= floor:
+            verdict = ("NOT INTERPRETABLE -- |mean| is inside the runs' own "
+                       "point-to-point scatter")
+        elif se == 0:
+            verdict = (("better (A lower)" if mean < 0 else "worse (A higher)") +
+                       f" -- constant offset of {mean:+.4f} with zero scatter")
+        elif abs(mean) <= 2 * se:
+            verdict = "NOT INTERPRETABLE -- |mean| is within 2 standard errors of zero"
+        else:
+            verdict = ("better (A lower)" if mean < 0 else "worse (A higher)") + \
+                      " -- exceeds both the floor and 2 se"
     print(f"\nVERDICT: {verdict}")
 
     if args.json:
@@ -218,6 +267,8 @@ def main() -> None:
                        for s in matched],
             "mean_delta": round(mean, 4), "sd": round(sd, 4), "se": round(se, 4),
             "signs": signs, "within_run_floor": round(floor, 4),
+            "design": "paired" if paired else "unpaired", "design_reason": how,
+            "t_like": round(mean / se, 2) if se else None,  # None when deltas are constant
             "verdict": verdict, "manifest_notes": notes,
             "comparability_mismatches": mismatches,
         }, indent=2))
