@@ -1,0 +1,41 @@
+{
+  "what": "First end-to-end serve of tt-tnt on tt-metal v0.77.0 + vllm-tt-plugin bd150c7",
+  "date": "2026-08-18",
+  "stack": {
+    "tt_metal": "v0.77.0",
+    "plugin": "bd150c7",
+    "vllm": "upstream in venv-vllm-standalone (NOT the tenstorrent/vllm fork)",
+    "mesh": "P300, both chips of one board"
+  },
+  "served": "episod/tt-tnt-1024 (heads=16, kv=4, 8 blocks, d_model 1024, ctx 512)",
+  "result": "Server starts, answers, generates. This pairing had never been run.",
+
+  "finding_1_the_384_model_cannot_be_served_here": {
+    "what": "episod/tt-tnt (the 384 model) cannot run on this box at all.",
+    "why": "It has n_kv_heads=3. A P300 board's minimum topology is 2 chips, so num_devices=2, and the plugin asserts n_kv_heads must be divisible by num_devices. 3 is not.",
+    "and_one_chip_is_not_an_escape": "Exposing a single chip fails earlier: tt_cluster.cpp:281 classifies a 1-chip P300 as ClusterType::CUSTOM and TT_FATALs demanding a custom fabric mesh graph descriptor. 1 is not a P300 topology; 2 and 4 are. This is why gozer expands a 1-chip request to the whole board.",
+    "consequence": "Every recorded free_running baseline in this directory is for episod/tt-tnt and CANNOT be reproduced on this hardware. They are not a baseline we can compare against any more.",
+    "design_note": "kv head counts should be chosen divisible by 2 and 4 if the model is ever to be served on P300 or P300_X2. kv=4 works; kv=3 is a dead end here."
+  },
+
+  "finding_2_the_device_repeats_and_its_own_cpu_reference_does_not": {
+    "metric": "local repeat rate -- fraction of the first 40 generated tokens already seen in the preceding 4. This is the defect metric, per decode-defect-resolved.json; agreement-with-CPU is not.",
+    "cpu_median": 0.0125,
+    "device_median": 0.1125,
+    "device_per_prompt": [0.075, 0.125, 0.800, 0.05, 0.1, 0.125],
+    "worst_prompt": "'The cat sat on the mat and looked at the' -> 0.80, i.e. 'The cat. The cat. The cat.'",
+    "why_this_comparison_is_valid": "Same model, same weights, same prompts, same greedy settings. It is a CPU-vs-device gap, not a cross-model one.",
+    "why_it_is_NOT_a_regression_claim": "The recorded post-fix figure of 0.0311 is for the 384 model, which this box cannot serve. Comparing 0.1125 against it would compare two different models. No regression is claimed.",
+    "status": "OPEN. The model does not loop on CPU. The device does. Cause unknown."
+  },
+
+  "finding_3_the_plugin_is_exonerated": {
+    "method": "A/B: served the same model, same prompts, on plugin bd150c7 and on c127c17, restarting the server between.",
+    "result": "Byte-identical. Every per-prompt repeat rate, every agreement count, every first-divergence index.",
+    "reading": "bd150c7 is not the cause and does not affect this path -- it fixes state-slot remapping for CO-BATCHED requests, and this measurement issues one request at a time. It also shows the serving path is deterministic across restarts.",
+    "what_it_leaves": "tt-metal v0.77.0's device path, or something older that was never measured on this model."
+  },
+
+  "agreement_with_cpu": {"median": 2.0, "min": 1, "max": 7, "of": 40,
+    "note": "Recorded for completeness only. Greedy free-running paths diverge benignly under bf16; this project already established agreement is not the defect metric."}
+}
