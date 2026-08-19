@@ -3,14 +3,65 @@
   "date": "2026-08-19",
   "why": "train/run.py defaults --tokens-dir to artifacts/tokens. That default is the OLDEST corpus in the directory. Two v0.77.0 runs were launched without the flag and compared against a baseline trained on a different corpus; the resulting ~1.3 nat 'gap' was nearly attributed to beta2 0.95 and nearly cost a working config.",
   "token_sets": [
-    {"dir": "artifacts/tokens",             "built": "2026-08-14 06:40", "train": 353495970, "val": 39277330, "note": "The DEFAULT --tokens-dir, and the oldest. This is the trap."},
-    {"dir": "artifacts/tokens-tinystories-v2","built": "2026-08-14 08:26", "train": 114872301, "val": 12763588, "note": "TinyStories only; the v1/v2 era."},
-    {"dir": "artifacts/tokens-stratified",   "built": "2026-08-14 10:01", "train": 353495973, "val": 39277327},
-    {"dir": "artifacts/tokens-v3",           "built": "2026-08-14 11:41", "train": 352729403, "val": 39192152, "note": "The frozen EVALUATION set used by scripts/evaluate.py comparisons, which is a separate role from training data."},
-    {"dir": "artifacts/tokens-lowts",        "built": "2026-08-17 06:34", "train": 350964883, "val": 38996094},
-    {"dir": "artifacts/tokens-v4",           "built": "2026-08-18 07:54", "train": 352641058, "val": 39182335, "note": "THE DIALOGUE CORPUS. Built seven minutes before checkpoints-1024-dialogue's first checkpoint. This is what the current designated model trained on, and what any comparison against it must use."}
+    {
+      "dir": "artifacts/tokens",
+      "built": "2026-08-14 06:40",
+      "train": 353495970,
+      "val": 39277330,
+      "note": "The DEFAULT --tokens-dir, and the oldest. This is the trap."
+    },
+    {
+      "dir": "artifacts/tokens-tinystories-v2",
+      "built": "2026-08-14 08:26",
+      "train": 114872301,
+      "val": 12763588,
+      "note": "TinyStories only; the v1/v2 era."
+    },
+    {
+      "dir": "artifacts/tokens-stratified",
+      "built": "2026-08-14 10:01",
+      "train": 353495973,
+      "val": 39277327
+    },
+    {
+      "dir": "artifacts/tokens-v3",
+      "built": "2026-08-14 11:41",
+      "train": 352729403,
+      "val": 39192152,
+      "note": "The frozen EVALUATION set used by scripts/evaluate.py comparisons, which is a separate role from training data."
+    },
+    {
+      "dir": "artifacts/tokens-lowts",
+      "built": "2026-08-17 06:34",
+      "train": 350964883,
+      "val": 38996094
+    },
+    {
+      "dir": "artifacts/tokens-v4",
+      "built": "2026-08-18 07:54",
+      "train": 352641058,
+      "val": 39182335,
+      "note": "THE DIALOGUE CORPUS. Built seven minutes before checkpoints-1024-dialogue's first checkpoint. This is what the current designated model trained on, and what any comparison against it must use."
+    }
   ],
   "how_tokens-v4_was_identified": "By mtime against the baseline's checkpoint timestamps, corroborated by throughput: the dialogue run reached step 2000 in about six minutes, which requires ddp 4 at ~5.3 it/s, and a matched ddp-4 rerun reproduces that rate. No run log survives for that baseline -- only val_losses.jsonl -- which is itself the underlying problem.",
   "the_actual_lesson": "A run that does not record its own --tokens-dir cannot be compared to anything later. checkpoints-1024-dialogue has no train.log; checkpoints-ts10-b-s5489 does, which is the only reason its config was knowable at all.",
-  "suggested_fix": "train/run.py should write a run manifest into --checkpoint-dir next to val_losses.jsonl: tokens dir and token counts, resolved optimizer block, seed, ddp, steps, batch, seq_len, tt-metal version. Not implemented yet."
+  "suggested_fix": "train/run.py should write a run manifest into --checkpoint-dir next to val_losses.jsonl: tokens dir and token counts, resolved optimizer block, seed, ddp, steps, batch, seq_len, tt-metal version. Not implemented yet.",
+  "PROOF_2026-08-19": {
+    "claim": "checkpoints-1024-dialogue trained on artifacts/tokens-v4.",
+    "was": "Inferred from mtime (tokens-v4 built seven minutes before the first checkpoint) plus a throughput argument. Circumstantial.",
+    "now": "PROVEN from the checkpoint's own header: tt_tnt_step00002000.pkl carries corpus_tokens = 391,823,393, and tokens-v4 is 352,641,058 train + 39,182,335 val = 391,823,393 exactly. No other token set in the directory sums to that.",
+    "also_confirmed_from_the_header": {
+      "batch_size": 64,
+      "seq_len": 512,
+      "weight_tying": true,
+      "created_at": "2026-08-18T15:01:08Z"
+    },
+    "still_unknown": "The SEED. The checkpoint header does not record it and the directory has no run_manifest.json. So whether that baseline shared data order with the v0.77.0 runs -- which is what makes matched-step deltas sensitive rather than noisy -- cannot be established. Every comparison against it inherits that gap.",
+    "why_it_matters_concretely": "The beta2 control run shows that two same-seed runs differing in one optimizer knob stay within +/-0.072 at any matched step. This morning's v077-vs-dialogue deltas reached +/-0.18. If the seeds matched, that scatter was real signal from the combined change; if they did not, it was data-order noise. The two readings have opposite consequences and cannot be told apart."
+  },
+  "suggested_fix_upgraded": {
+    "was": "train/run.py should write a run manifest into --checkpoint-dir.  [DONE 2026-08-19]",
+    "better": "train/checkpoint.py already writes a rich header into every .pkl -- vocab, seq_len, batch, corpus_tokens, model config, tokenizer dir, weights dtype. It is nearly a manifest already and it TRAVELS WITH THE ARTIFACT, surviving directory moves and renames in a way a sibling json does not. Adding seed, tokens_dir, the resolved optimizer block and ddp to that header would make every checkpoint self-describing. Not implemented."
+  }
 }
