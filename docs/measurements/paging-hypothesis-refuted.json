@@ -1,0 +1,22 @@
+{
+  "what": "Is the vLLM-layer looping gap caused by paged attention?",
+  "date": "2026-08-19",
+  "answer": "Not by multi-block page-table traversal. Refuted.",
+  "background": "decode-bisection-v077.json localised the looping to the vLLM layer: direct tt_transformers scores 0.0000 local repeat, vLLM 0.1125, CPU reference 0.0125, same model and prompts. The plugin was already exonerated by a byte-identical A/B across c127c17 and bd150c7. Paged attention was the leading remaining hypothesis because the direct arm runs paged_attention_config=None and vLLM cannot.",
+  "the_test": "Serve identically but with block_size 512 instead of 64. With max_model_len 512 that is ONE block per sequence: no page-table traversal, no cross-block reads. Prefix caching also disabled. If traversal were the cause, the repeat should collapse toward the direct path's 0.0000.",
+  "result": {
+    "block_size_512_one_block": {"median": 0.1500, "per_prompt": [0.0, 0.1, 0.6, 0.2, 0.675, 0.025]},
+    "block_size_64_eight_blocks": {"median": 0.1125, "per_prompt": [0.075, 0.125, 0.8, 0.05, 0.1, 0.125]},
+    "cpu_reference": 0.0125,
+    "direct_tt_transformers": 0.0000
+  },
+  "reading": "One block per sequence does not help. It is nominally worse, but with n=6 prompts and per-prompt values ranging 0.0 to 0.675 the two vLLM configurations are not distinguishable from each other, and no such claim is made. What IS unambiguous is that neither comes near 0.0000, so the number of blocks is not the lever.",
+  "what_this_refutes_PRECISELY": "Multi-block page-table traversal as the cause. It does NOT refute paged attention itself: block_size 512 still executes the paged code path (paged_fill_cache, the paged attention op), merely with a single block. Distinguishing those two needs the direct arm to run WITH paging, which currently throws ShapeBase[] index out of range inside paged_fill_cache -- a harness limitation recorded in decode-bisection-v077.json, not a finding.",
+  "what_is_still_standing_in_the_vllm_layer": [
+    "The paged attention op itself, exercised even at one block.",
+    "The scheduler and batching machinery, though this measurement issues one request at a time.",
+    "The upstream vLLM version in venv-vllm-standalone, which the plugin A/B says nothing about -- it varied the plugin, not vLLM."
+  ],
+  "incidental": "Agreement-with-CPU rose from median 2.0 to 3.0 across the same change. Not reported as an improvement: this project already established agreement is not the defect metric, and n=6 cannot support it either.",
+  "cost": "One serve and one 6-prompt comparison, roughly ten minutes of hardware."
+}
