@@ -77,6 +77,26 @@ def _default_tt_metal_home() -> str:
     return os.environ.get("TT_METAL_HOME", os.path.expanduser("~/tt-metal"))
 
 
+def _describe_tt_metal(tt_metal_home: str) -> str:
+    """``git describe`` of the tt-metal tree, for the run manifest.
+
+    The tree, not the installed package metadata: tt-metal is usually installed
+    editable, and an editable install records its version once at ``pip install -e``
+    time and never revisits it. Reading the metadata after an in-place upgrade
+    reports a version from months ago -- the same trap that made
+    ``tt-kernel serve`` advise upgrading a tree that had just been upgraded.
+    """
+    import subprocess
+    try:
+        out = subprocess.run(
+            ["git", "-C", tt_metal_home, "describe", "--tags", "--always", "--dirty"],
+            capture_output=True, text=True, timeout=10, check=True,
+        )
+        return out.stdout.strip() or "unknown"
+    except Exception:
+        return "unknown"
+
+
 def _prepare_env(tt_metal_home: str, arch: str) -> None:
     """ttml needs all three of these before import; it aborts without RUNTIME_ROOT."""
     os.environ.setdefault("TT_METAL_HOME", tt_metal_home)
@@ -996,6 +1016,49 @@ def main() -> int:
                 model_params=model.parameters(), optimizer=optimizer,
             )
             print(f"  checkpoint saved: {path}")
+
+        # Record what this run IS, next to what it produced.
+        #
+        # This exists because of a specific, expensive failure on 2026-08-19. Two
+        # v0.77.0 training runs were compared against `checkpoints-1024-dialogue`
+        # and read as a 1.3-nat regression in the optimizer. They were not: they had
+        # trained on `artifacts/tokens` (the DEFAULT --tokens-dir, and the OLDEST of
+        # six token sets) while the baseline had trained on `artifacts/tokens-v4`.
+        # Identifying that took mtime forensics on .npy files plus a throughput
+        # argument, because the baseline directory contains `val_losses.jsonl` and
+        # nothing else. The correct config was nearly discarded on the strength of
+        # the broken comparison.
+        #
+        # A curve without its inputs is not a measurement, it is a number. Anything
+        # that writes a curve must write the inputs beside it, in the same directory,
+        # so a later comparison can establish comparability instead of inferring it.
+        tc = yaml_config["training_config"]
+        _manifest = {
+            "written": "at run start, before training",
+            "tokens_dir": str(args.tokens_dir),
+            "train_tokens": int(train_ids.shape[0]),
+            "val_tokens": int(val_ids.shape[0]),
+            "size": args.size,
+            "model_config": tc["model_config"],
+            "seed": tc["seed"],
+            "steps": args.steps,
+            "start_step": start_step,
+            "batch_size": tc["batch_size"],
+            "seq_len": tc["seq_len"],
+            "gradient_accumulation_steps": tc["gradient_accumulation_steps"],
+            "ddp": args.ddp,
+            "model_impl": args.model_impl,
+            "optimizer": tc["optimizer"],
+            "optimizer_override_file": args.config,
+            "lr_schedule": args.lr_schedule,
+            "warmup_frac": args.warmup_frac,
+            "lr_decay_start_frac": args.lr_decay_start_frac,
+            "tt_metal": _describe_tt_metal(args.tt_metal_home),
+        }
+        _mpath = Path(args.checkpoint_dir) / "run_manifest.json"
+        _mpath.parent.mkdir(parents=True, exist_ok=True)
+        _mpath.write_text(json.dumps(_manifest, indent=2, default=str))
+        print(f"  run manifest: {_mpath}")
 
         # train() takes exactly (cfg, model, optim, train_ids, use_ddp, use_tp) — no val_ids.
         # ttml's train() has no checkpoint hook of its own, so we call it in chunks (of

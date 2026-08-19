@@ -130,3 +130,50 @@ def test_checkpoint_gammas_are_not_degenerate(checkpoint_dir):
     if latest is None:
         pytest.skip(f"no checkpoint found under {checkpoint_dir}")
     assert_checkpoint_gammas_are_not_degenerate(latest)
+
+
+# ---------------------------------------------------------------------------
+# Run manifest (added 2026-08-19)
+# ---------------------------------------------------------------------------
+# Two training runs were lost on 2026-08-19 because a curve was compared against
+# a baseline trained on a different corpus, and the baseline directory contained
+# val_losses.jsonl and nothing else. Identifying its corpus needed mtime
+# forensics on .npy files plus a throughput argument. A curve without its inputs
+# is a number, not a measurement.
+
+
+def test_manifest_records_the_fields_a_later_comparison_needs():
+    """The manifest must pin every input that makes two curves comparable.
+
+    This asserts on the KEY SET rather than on values, because the failure mode
+    was an absent field, not a wrong one. If someone adds a knob that changes the
+    loss curve and does not add it here, a future comparison silently inherits
+    today's problem.
+    """
+    required = {
+        "tokens_dir",      # the one that actually cost two runs
+        "train_tokens",
+        "val_tokens",
+        "seed",
+        "steps",
+        "batch_size",
+        "seq_len",
+        "gradient_accumulation_steps",
+        "ddp",
+        "model_impl",
+        "optimizer",       # the resolved block, not the override filename alone
+        "lr_schedule",
+        "warmup_frac",
+        "tt_metal",        # the tree's git describe, not package metadata
+    }
+    src = (Path(__file__).resolve().parents[1] / "train" / "run.py").read_text()
+    block = src[src.index("_manifest = {"):src.index("_mpath = ")]
+    missing = {k for k in required if f'"{k}"' not in block}
+    assert not missing, f"run manifest omits fields a comparison needs: {sorted(missing)}"
+
+
+def test_manifest_records_the_tt_metal_tree_not_the_package_version():
+    """git describe, because an editable install's metadata goes stale silently."""
+    from train.run import _describe_tt_metal
+
+    assert _describe_tt_metal("/definitely/not/a/repo") == "unknown"
