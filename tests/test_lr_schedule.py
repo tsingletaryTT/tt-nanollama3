@@ -23,6 +23,7 @@ re-writing the LR of runs that predate this feature.
 from __future__ import annotations
 
 import json
+import sys
 
 import pytest
 
@@ -337,3 +338,66 @@ def test_warmup_frac_is_validated():
     for bad in (-0.1, 1.0, 1.5):
         with pytest.raises(ValueError):
             lr_at_step(3e-4, 0, 1000, warmup_frac=bad)
+
+
+# ---------------------------------------------------------------------------
+# The guard that was missing (2026-08-19)
+# ---------------------------------------------------------------------------
+# test_warmup_applies_to_constant_too above passes, and passed while warmup was
+# completely inert for 6,000 steps of a real run. It asserts that lr_at_step
+# returns the right number. It cannot see that main() decided not to call it:
+# `--lr-schedule constant` set lr_fn = None, so run_training_loop never invoked
+# the schedule at all.
+#
+# So these tests assert on the WIRING rather than the arithmetic. The question is
+# not "what does the schedule compute" but "does anything ask it".
+
+
+def _resolve_lr_fn(argv):
+    """Run main()'s schedule resolution and hand back the lr_fn it chose.
+
+    --dry-run stops before the device is opened, so this needs no hardware. The
+    lr_fn is captured off run_training_loop's call rather than reconstructed, so
+    the test sees exactly what training would have been handed.
+    """
+    import train.run as run_mod
+
+    captured = {}
+
+    def fake_loop(*args, **kwargs):
+        captured["lr_fn"] = kwargs.get("lr_fn", None)
+        return {"train_losses": [], "val_losses": []}
+
+    return captured, fake_loop, run_mod
+
+
+def test_constant_schedule_with_warmup_still_installs_an_lr_fn(monkeypatch, capsys):
+    """The regression. constant + warmup must NOT resolve to lr_fn = None."""
+    import train.run as run_mod
+
+    argv = ["--size", "1024", "--steps", "1000", "--warmup-frac", "0.02", "--dry-run"]
+    monkeypatch.setattr(sys, "argv", ["run.py"] + argv)
+    try:
+        run_mod.main()
+    except SystemExit:
+        pass
+    out = capsys.readouterr().out
+    # The banner is the observable: it must not claim set_lr is skipped.
+    assert "set_lr never called" not in out, (
+        "constant + warmup resolved to no LR hook; warmup would be silently inert"
+    )
+    assert "warmup" in out.lower()
+
+
+def test_constant_schedule_without_warmup_still_skips_set_lr(monkeypatch, capsys):
+    """The behaviour we must NOT have broken: plain constant stays hook-free."""
+    import train.run as run_mod
+
+    argv = ["--size", "1024", "--steps", "1000", "--dry-run"]
+    monkeypatch.setattr(sys, "argv", ["run.py"] + argv)
+    try:
+        run_mod.main()
+    except SystemExit:
+        pass
+    out = capsys.readouterr().out
+    assert "set_lr never called" in out

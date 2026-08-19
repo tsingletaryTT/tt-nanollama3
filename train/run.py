@@ -809,8 +809,25 @@ def main() -> int:
     base_lr = float(yaml_config["training_config"]["optimizer"]["lr"])
     lr_min = base_lr * 0.1 if args.lr_min is None else args.lr_min
     lr_fn = None
-    if args.lr_schedule == "constant":
+    # `constant` normally means "never touch the LR", which is why set_lr is skipped
+    # entirely -- but warmup is a change to the LR, so a constant schedule WITH warmup
+    # still needs the hook. Getting this wrong is not theoretical: the first v0.77.0
+    # training run (2026-08-19) was launched with --warmup-frac 0.02 against the
+    # default constant schedule, this branch set lr_fn = None, and the warmup silently
+    # did not happen for 6,000 steps. tests/test_lr_schedule.py had a passing test
+    # named test_warmup_applies_to_constant_too -- it exercised lr_at_step, which
+    # returned the right number that nobody asked for. The guard was one layer too low.
+    if args.lr_schedule == "constant" and args.warmup_frac <= 0.0:
         print(f"  lr schedule: constant at {base_lr:.3e} (set_lr never called)")
+    elif args.lr_schedule == "constant":
+        warm_steps = int(args.warmup_frac * args.steps)
+        def lr_fn(position: float) -> float:  # noqa: E306
+            """Warmup, then flat. `constant` contributes the flat part."""
+            return lr_at_step(base_lr, position, args.steps, schedule="constant",
+                              warmup_frac=args.warmup_frac)
+        print(f"  lr schedule: constant at {base_lr:.3e}, warmup 0 -> {base_lr:.3e} "
+              f"over the first {args.warmup_frac:.1%} of {args.steps} steps "
+              f"(~{warm_steps} steps); set_lr called once per chunk")
     else:
         held = args.lr_decay_start_frac
         def lr_fn(position: float) -> float:  # noqa: E306 — paired with the branch above
