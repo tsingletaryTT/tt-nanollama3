@@ -1,0 +1,24 @@
+{
+  "what": "Gumbel-max device sampler, TV distance against its bootstrap floor, across five independent seeds",
+  "why": "A single seed cannot distinguish a correct sampler from a lucky one. The gate's verdict was hostage to one draw, and the historical 0.1064 was read as quality when it was one sample of a scattered quantity.",
+  "tt_metal": "v0.77.0",
+  "rng": "SFPU RNG with #52024 correlation fix; per-core separation via rand_tile_init(seed, stream_id)",
+  "cores": 110,
+  "draws_per_seed": 400,
+  "note": "The target distribution is regenerated per seed, so the bootstrap floor moves with it. Each row must be read against its own floor, not a shared one.",
+  "runs": [
+    {"seed": 20260817, "tv_distance": 0.1411, "floor_mean": 0.1284, "floor_p95": 0.1512, "distinct_cores_drawn": 65, "below_floor_mean": false, "under_p95": true},
+    {"seed": 11111,    "tv_distance": 0.1414, "floor_mean": 0.1474, "floor_p95": 0.1730, "distinct_cores_drawn": 70, "below_floor_mean": true,  "under_p95": true},
+    {"seed": 424242,   "tv_distance": 0.1528, "floor_mean": 0.1715, "floor_p95": 0.1938, "distinct_cores_drawn": 78, "below_floor_mean": true,  "under_p95": true},
+    {"seed": 98765,    "tv_distance": 0.1502, "floor_mean": 0.1621, "floor_p95": 0.1872, "distinct_cores_drawn": 83, "below_floor_mean": true,  "under_p95": true},
+    {"seed": 7000003,  "tv_distance": 0.1595, "floor_mean": 0.1504, "floor_p95": 0.1727, "distinct_cores_drawn": 71, "below_floor_mean": false, "under_p95": true}
+  ],
+  "summary": {
+    "seeds": 5,
+    "below_floor_mean": 3,
+    "under_p95": 5,
+    "over_p95": 0,
+    "verdict": "PASS across all five. TV scatters around the floor mean rather than sitting under it, which is what a correctly-distributed sampler looks like."
+  },
+  "what_this_does_not_show": "It does not show that stream_id beats the host-side 7919 stride it replaced. Both schemes' single-run numbers fall inside this spread, so the sweep cannot separate them. stream_id is preferred because it is the hardware's own mechanism with a known-equidistributed constant (2^32/phi), not because it measured better."
+}

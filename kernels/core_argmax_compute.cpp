@@ -94,7 +94,7 @@ void kernel_main() {
     tile_regs_acquire();
 
     // d = tile - M, broadcasting M from element [0][0] of cb_max.
-    sub_tiles_bcast_scalar_init_short(cb_in, cb_max);
+    sub_bcast_scalar_init(cb_in, cb_max);
     sub_tiles_bcast_scalar(cb_in, cb_max, 0, 0, 0);
 
     // m = (d == 0): exactly 1 where the maximum sits.

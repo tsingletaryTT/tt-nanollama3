@@ -76,12 +76,15 @@ WRITER_KERNEL = ROOT / "kernels" / "tile_writer.cpp"
 
 CB_PERTURBED, CB_OUT = 2, 16
 
-#: Same spacing as the PRNG probe: adjacent seeds in a weak LFSR can produce
-#: correlated streams, which here would couple neighbouring cores' draws.
-SEED_STRIDE = 7919
+#: Per-core separation used to happen here, by spacing each core's seed 7919
+#: apart, because the Tensix PRNG carries no intrinsic core identity. Since
+#: tt-metal v0.77.0 the hardware does it: rand_tile_init(seed, stream_id) seeds
+#: as seed + stream_id*0x9E3779B9. So every core in a draw now gets the SAME
+#: seed and separates itself by its index, and the stride is gone rather than
+#: layered on top -- two separations would just obscure which one was working.
 
 
-def build_program(logits_tensor, scaler_tensor, output, cores, seeds):
+def build_program(logits_tensor, scaler_tensor, output, cores, draw_seed):
     core_set = ttnn.CoreRangeSet([ttnn.CoreRange(c, c) for c in cores])
 
     def cb(index):
@@ -107,7 +110,8 @@ def build_program(logits_tensor, scaler_tensor, output, cores, seeds):
             (core, [logits_tensor.buffer_address(), scaler_tensor.buffer_address(), idx])
         )
         writer_rt.append((core, [output.buffer_address(), idx, 1]))
-        compute_rt.append((core, [int(seeds[idx])]))
+        # arg 0: this draw's seed, shared. arg 1: this core's stream id.
+        compute_rt.append((core, [int(draw_seed), idx]))
 
     compute_config = ttnn.ComputeConfigDescriptor()
     compute_config.math_approx_mode = False
@@ -206,11 +210,8 @@ def main() -> None:
         )
 
         def one_draw(draw_index: int) -> int:
-            seeds = [
-                args.seed + draw_index * 1_000_003 + c * SEED_STRIDE
-                for c in range(layout.n_cells)
-            ]
-            program = build_program(logits_tensor, scaler_tensor, output, cores, seeds)
+            draw_seed = args.seed + draw_index * 1_000_003
+            program = build_program(logits_tensor, scaler_tensor, output, cores, draw_seed)
             result = ttnn.generic_op([logits_tensor, scaler_tensor, output], program)
             tiles = ttnn.to_torch(result).float().numpy().reshape(layout.n_cells, TILE, TILE)
             return int(np.argmax(tiles[:, 0, 0]))

@@ -36,13 +36,13 @@ void kernel_main() {
 
     // This core's slice of the vocabulary.
     cb_reserve_back(cb_logits, 1);
-    noc_async_read_tile(tile_index, logits, get_write_ptr(cb_logits));
+    noc_async_read_page(tile_index, logits, get_write_ptr(cb_logits));
 
     // The scaler is one shared tile of 1.0 and every core reads page 0 of it.
     // reduce_tile takes it for all pool types; for MAX it does not affect the
     // result, but the API still requires the operand.
     cb_reserve_back(cb_scaler, 1);
-    noc_async_read_tile(0, scaler, get_write_ptr(cb_scaler));
+    noc_async_read_page(0, scaler, get_write_ptr(cb_scaler));
 
     noc_async_read_barrier();
     cb_push_back(cb_logits, 1);

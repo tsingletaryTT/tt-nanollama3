@@ -30,8 +30,25 @@
 // Padding: unowned slots arrive as a large negative value. Adding a Gumbel
 // variate (order 1) leaves them hugely negative, so they still cannot win.
 //
+// Per-core randomness, and where it comes from
+// --------------------------------------------
+// Every core must draw from an INDEPENDENT stream, or the Gumbel-max argument
+// above collapses: correlated noise across cores biases which region wins.
+//
+// The Tensix PRNG carries no intrinsic core identity -- we measured that -- so
+// the separation has to be supplied. It used to be supplied by the host, which
+// spaced each core's seed by a stride of 7919. tt-metal v0.77.0 does it properly:
+// `rand_tile_init(seed, stream_id)` seeds as `seed + stream_id * 0x9E3779B9`,
+// and that constant is 2^32/phi, whose equidistribution is a known property
+// rather than a prime we picked.
+//
+// So the host now sends one seed per DRAW, shared by every core, and each core
+// separates itself by its own index. One knob for "which draw", one for "which
+// core", and the second is the hardware's own.
+//
 // Compile-time args:  0: logits CB   1: scaler CB   2: intermediate CB   3: out CB
-// Runtime args:       0: this core's PRNG seed
+// Runtime args:       0: this draw's seed (same on every core)
+//                     1: this core's stream id (its linear index)
 
 #include "api/compute/compute_kernel_api.h"
 #include "api/compute/reduce.h"
@@ -50,6 +67,7 @@ void kernel_main() {
     constexpr uint32_t cb_out = get_compile_time_arg_val(3);
 
     const uint32_t seed = get_arg_val<uint32_t>(0);
+    const uint32_t stream_id = get_arg_val<uint32_t>(1);
 
     union {
         float f;
@@ -64,7 +82,7 @@ void kernel_main() {
     compute_kernel_hw_startup(cb_logits, cb_perturbed);
     copy_tile_init(cb_logits);
     init_sfpu(cb_logits, cb_perturbed);
-    rand_tile_init(seed);
+    rand_tile_init(seed, stream_id);
 
     cb_reserve_back(cb_perturbed, 1);
     tile_regs_acquire();

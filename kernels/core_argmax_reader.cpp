@@ -30,11 +30,11 @@ void kernel_main() {
     const auto index = TensorAccessor(index_args, index_addr, get_tile_size(cb_index));
 
     cb_reserve_back(cb_in, 1);
-    noc_async_read_tile(tile_index, in, get_write_ptr(cb_in));
+    noc_async_read_page(tile_index, in, get_write_ptr(cb_in));
     cb_reserve_back(cb_scaler, 1);
-    noc_async_read_tile(0, scaler, get_write_ptr(cb_scaler));
+    noc_async_read_page(0, scaler, get_write_ptr(cb_scaler));
     cb_reserve_back(cb_index, 1);
-    noc_async_read_tile(0, index, get_write_ptr(cb_index));
+    noc_async_read_page(0, index, get_write_ptr(cb_index));
 
     noc_async_read_barrier();
     cb_push_back(cb_in, 1);
