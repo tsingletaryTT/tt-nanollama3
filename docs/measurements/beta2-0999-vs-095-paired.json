@@ -164,5 +164,6 @@
     "designated_model": "tt-tnt-1024-dialogue still current. Neither v0.77.0 run has been evaluated behaviourally."
   },
   "_honest_size": "0.048 nats. The behavioural eval suite's seed-only floor is 0.1944 nats, so this is very likely invisible downstream. It is a real training-curve effect and a cheap config fix, not a capability change.",
-  "_what_is_still_not_established": "Whether tt-metal v0.77.0 itself changed training. Both arms here are v0.77.0, so this comparison cannot see it. The dialogue baseline is the only pre-v0.77.0 curve available and its seed is unknown, so it cannot answer the question either."
+  "_what_is_still_not_established": "Whether tt-metal v0.77.0 itself changed training. Both arms here are v0.77.0, so this comparison cannot see it. The dialogue baseline is the only pre-v0.77.0 curve available and its seed is unknown, so it cannot answer the question either.",
+  "_how_to_reproduce_the_control_arm": "train/configs/tt-tnt-v077-beta2-control.yaml existed only for this experiment and was deleted on 2026-08-19 once its config became identical to train/configs/tt-tnt-v077.yaml (beta2 reverted to 0.999). To re-run the control arm, copy tt-tnt-v077.yaml and set beta2: 0.95 -- that one line IS the experiment. The full command was: train/run.py --size 1024 --steps 10764 --batch-size 64 --seq-len 512 --seed 5489 --tokens-dir artifacts/tokens-v4 --ddp 4 --warmup-frac 0.02 --save-every 2000 --val-every 500, under gozer run --chips all."
 }
