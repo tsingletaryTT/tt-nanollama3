@@ -6,16 +6,20 @@
 # WHAT CHANGED FROM nanollama3_bpe_v2.yaml, AND WHY
 # =================================================
 # tt-metal v0.77.0 landed #48716, "[tt-train] Improve training stability and
-# introduce new training (scheduler/optimizer) knobs". Upstream benchmarked those
-# changes AS A SET against training_shakespeare_tinyllama.yaml, so they are adopted
-# here as a set. The consequence is stated plainly rather than hidden: if the next
-# run is better, this file cannot tell you WHICH of the three did it. Attribution
-# would need three runs, and one run of this model is hours.
+# introduce new training (scheduler/optimizer) knobs". They were adopted as a set,
+# then measured individually, and the set did not survive intact: one of the three
+# helps, one is neutral, and one was actively worse and has been reverted. What
+# follows records which is which, because "upstream benchmarked it" turned out not
+# to transfer from TinyLlama to a 123M model at this batch and step count.
 #
-#   1. beta2: 0.999 -> 0.95
-#      Upstream's change. AdamW's second-moment horizon: 0.999 averages over
-#      ~1000 steps, which is a long memory for a run of ~10k steps at batch 64,
-#      and slow to adapt when the gradient scale shifts early.
+#   1. beta2: KEPT AT 0.999 -- upstream's 0.95 was tried and MEASURED WORSE.
+#      Adopted on 2026-08-19 and reverted the same day. A paired control run
+#      (same corpus, same seed 5489, same mesh, same tt-metal, one line
+#      different) put 0.999 ahead by 0.048 nats mean across 22 matched steps,
+#      6.0 standard errors from zero, 19 of 22 signs agreeing; final full-corpus
+#      validation 2.9570 against 3.0512.
+#      See docs/measurements/beta2-0999-vs-095-paired.json.
+#      Upstream benchmarked 0.95 on TinyLlama. It does not transfer here.
 #
 #   2. weight_decay_skip_1d: true                        <-- the one that matters
 #      This is not a tuning preference, it is a bug we have been shipping. Every
@@ -81,7 +85,7 @@ training_config:
     type: AdamW
     lr: 0.0003
     beta1: 0.9
-    beta2: 0.95              # was 0.999 (upstream #48716)
+    beta2: 0.999             # upstream's 0.95 measured WORSE here; see header note 1
     epsilon: 1.0e-8
     weight_decay: 0.01
     weight_decay_skip_1d: true   # was absent -> the 13 RMSNorm gammas were decayed
