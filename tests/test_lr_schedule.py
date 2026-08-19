@@ -286,3 +286,54 @@ def test_the_planned_v4_schedule_holds_v3s_lr_for_the_first_half():
     decaying = optimizer.lrs[len(held):]
     assert all(b < a for a, b in zip(decaying, decaying[1:]))
     assert decaying[-1] == pytest.approx(3e-5, rel=0.05)
+
+
+# ---------------------------------------------------------------------------
+# Warmup (added 2026-08-19, prompted by tt-metal v0.77.0 / #48716)
+# ---------------------------------------------------------------------------
+# Upstream's stability set switches to a `warmup_linear` scheduler. We do NOT
+# adopt ttml's scheduler for it: run.py sets the LR itself once per chunk from
+# lr_at_step, so a device-side scheduler would be a second authority over the
+# same number. Warmup belongs here, where it stays pure arithmetic and testable
+# with no board attached.
+#
+# Every run of this model so far has started at full 3e-4 on step 0, when AdamW's
+# second-moment estimate is still meaningless -- the least trustworthy updates
+# are also the largest.
+
+
+def test_no_warmup_by_default_so_existing_runs_are_unchanged():
+    assert lr_at_step(3e-4, 0, 1000) == 3e-4
+    assert lr_at_step(3e-4, 0, 1000, schedule="cosine") == 3e-4
+
+
+def test_warmup_ramps_from_zero_to_base_lr():
+    # 10% of 1000 steps = 100 steps of warmup.
+    assert lr_at_step(3e-4, 0, 1000, warmup_frac=0.1) == pytest.approx(0.0)
+    assert lr_at_step(3e-4, 50, 1000, warmup_frac=0.1) == pytest.approx(1.5e-4)
+    assert lr_at_step(3e-4, 100, 1000, warmup_frac=0.1) == pytest.approx(3e-4)
+
+
+def test_warmup_applies_to_constant_too():
+    """`constant` short-circuits before the decay maths; warmup must still run.
+
+    Otherwise --lr-schedule constant --warmup-frac 0.02 would silently do nothing,
+    which is the exact shape of bug this project keeps finding.
+    """
+    assert lr_at_step(3e-4, 0, 1000, schedule="constant", warmup_frac=0.1) == pytest.approx(0.0)
+    assert lr_at_step(3e-4, 50, 1000, schedule="constant", warmup_frac=0.1) == pytest.approx(1.5e-4)
+    assert lr_at_step(3e-4, 500, 1000, schedule="constant", warmup_frac=0.1) == pytest.approx(3e-4)
+
+
+def test_after_warmup_the_decay_is_unaffected():
+    """Warmup must not reshape what follows it -- decay still lands on min_lr."""
+    no_warm = lr_at_step(3e-4, 1000, 1000, schedule="cosine", min_lr=1e-5)
+    warmed = lr_at_step(3e-4, 1000, 1000, schedule="cosine", min_lr=1e-5, warmup_frac=0.1)
+    assert warmed == pytest.approx(no_warm)
+    assert warmed == pytest.approx(1e-5)
+
+
+def test_warmup_frac_is_validated():
+    for bad in (-0.1, 1.0, 1.5):
+        with pytest.raises(ValueError):
+            lr_at_step(3e-4, 0, 1000, warmup_frac=bad)

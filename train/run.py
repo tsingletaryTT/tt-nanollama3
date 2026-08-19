@@ -269,6 +269,7 @@ def lr_at_step(
     schedule: str = "constant",
     min_lr: float = 0.0,
     decay_start_frac: float = 0.0,
+    warmup_frac: float = 0.0,
 ) -> float:
     """The learning rate a ``schedule`` prescribes at ``step`` of a ``total_steps`` run.
 
@@ -311,6 +312,9 @@ def lr_at_step(
         total_steps: Length of the run the schedule spans. ``<= 0`` yields ``base_lr``.
         schedule: One of :data:`LR_SCHEDULES`.
         min_lr: LR at the end of the decay. Never returned before the run's final step.
+        warmup_frac: Fraction of the run spent ramping linearly from 0 to ``base_lr``
+            before anything else happens. 0 (the default) disables warmup entirely, so
+            every pre-existing call site is unchanged. Applies to ``constant`` too.
         decay_start_frac: Fraction of the run held at ``base_lr`` before decay begins, in
             ``[0.0, 1.0]``. ``>= 1.0`` means "never decay" and yields ``base_lr`` throughout.
 
@@ -322,6 +326,26 @@ def lr_at_step(
     """
     if schedule not in LR_SCHEDULES:
         raise ValueError(f"unknown lr schedule {schedule!r}; expected one of {LR_SCHEDULES}")
+    if not 0.0 <= warmup_frac < 1.0:
+        raise ValueError(f"warmup_frac must be in [0, 1), got {warmup_frac!r}")
+
+    # Warmup is applied BEFORE the `constant` short-circuit below, deliberately.
+    # `--lr-schedule constant --warmup-frac 0.02` has to mean "ramp up, then hold",
+    # not "silently ignore the warmup" -- a flag that is quietly inert is the exact
+    # shape of defect this project keeps finding in its own tooling.
+    #
+    # The ramp is linear from 0 to base_lr over the first `warmup_frac` of the run.
+    # It exists because AdamW's second-moment estimate is near-meaningless for the
+    # first handful of steps, so the least trustworthy updates are also the largest.
+    # Adopted from tt-metal v0.77.0's stability set (#48716), which switches to a
+    # `warmup_linear` scheduler -- but implemented HERE rather than by enabling
+    # ttml's scheduler, because run_training_loop sets the LR itself once per chunk
+    # and two authorities over one number is worse than either alone.
+    if warmup_frac > 0.0 and total_steps > 0:
+        warmup_steps = warmup_frac * total_steps
+        if step < warmup_steps:
+            return base_lr * (step / warmup_steps) if warmup_steps > 0 else base_lr
+
     if schedule == "constant" or total_steps <= 0 or decay_start_frac >= 1.0:
         return base_lr
 
@@ -653,6 +677,15 @@ def main() -> int:
                    help="Learning rate at the end of the decay (ignored by 'constant'). "
                         "Defaults to one tenth of the configured LR, the conventional 10x "
                         "decay. Reported explicitly at startup either way.")
+    p.add_argument("--warmup-frac", type=float, default=0.0,
+                   help="Fraction of the run spent ramping the LR linearly from 0 to its "
+                        "base value before anything else. 0 (default) disables warmup, so "
+                        "runs recorded before 2026-08-19 reproduce exactly. Applies to "
+                        "--lr-schedule constant too. Adopted from tt-metal v0.77.0's "
+                        "stability set (#48716), implemented host-side in lr_at_step "
+                        "rather than by enabling ttml's scheduler, because this loop "
+                        "already sets the LR once per chunk and two authorities over one "
+                        "number is worse than either.")
     p.add_argument("--lr-decay-start-frac", type=float, default=0.0,
                    help="Fraction of the run to hold at the full LR before decay begins, in "
                         "[0.0, 1.0) (default: 0.0 — decay across the whole run). A non-zero "
@@ -662,6 +695,9 @@ def main() -> int:
                         "different LR trajectory from step 1.")
     args = p.parse_args()
 
+    if not 0.0 <= args.warmup_frac < 1.0:
+        print(f"error: --warmup-frac must be in [0, 1), got {args.warmup_frac}", file=sys.stderr)
+        return 2
     if not 0.0 <= args.lr_decay_start_frac < 1.0:
         print(f"ERROR: --lr-decay-start-frac must be in [0.0, 1.0), got "
               f"{args.lr_decay_start_frac}", file=sys.stderr)
@@ -781,7 +817,8 @@ def main() -> int:
             """The schedule, bound to this run's shape. Passed to run_training_loop, which
             calls it once per chunk with that chunk's midpoint."""
             return lr_at_step(base_lr, position, args.steps, schedule=args.lr_schedule,
-                              min_lr=lr_min, decay_start_frac=held)
+                              min_lr=lr_min, decay_start_frac=held,
+                              warmup_frac=args.warmup_frac)
         print(f"  lr schedule: {args.lr_schedule} {base_lr:.3e} -> {lr_min:.3e}"
               + (f", held flat for the first {held:.0%} of {args.steps} steps "
                  f"(decay begins ~step {int(held * args.steps)})" if held else

@@ -1,0 +1,89 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
+#
+# Optimizer recipe for tt-tnt on tt-metal v0.77.0.
+#
+# WHAT CHANGED FROM nanollama3_bpe_v2.yaml, AND WHY
+# =================================================
+# tt-metal v0.77.0 landed #48716, "[tt-train] Improve training stability and
+# introduce new training (scheduler/optimizer) knobs". Upstream benchmarked those
+# changes AS A SET against training_shakespeare_tinyllama.yaml, so they are adopted
+# here as a set. The consequence is stated plainly rather than hidden: if the next
+# run is better, this file cannot tell you WHICH of the three did it. Attribution
+# would need three runs, and one run of this model is hours.
+#
+#   1. beta2: 0.999 -> 0.95
+#      Upstream's change. AdamW's second-moment horizon: 0.999 averages over
+#      ~1000 steps, which is a long memory for a run of ~10k steps at batch 64,
+#      and slow to adapt when the gradient scale shifts early.
+#
+#   2. weight_decay_skip_1d: true                        <-- the one that matters
+#      This is not a tuning preference, it is a bug we have been shipping. Every
+#      run of this model has applied weight_decay 0.01 to ALL parameters, and
+#      that includes the 13 RMSNorm gammas -- see nanollama3_bpe_v2.yaml's own
+#      note, "All 13 RMSNorm gammas are bfloat16 parameters". Decaying a
+#      normalisation gain pulls it toward zero, which scales the whole activation
+#      path down; it has no regularising interpretation. It became live for us at
+#      P7 Task 1, when the norm layers were unfrozen -- before that they did not
+#      train, so the decay could not reach them. So this has been wrong since the
+#      norms started learning and nothing in the pipeline could have told us.
+#      AdamW only; other optimizer types reject the key.
+#
+#   3. Warmup -- but NOT via ttml's scheduler.
+#      Upstream's set switches to a `warmup_linear` scheduler. We do not enable
+#      that, and the reason is structural rather than stylistic: run.py's
+#      `run_training_loop` already sets the LR itself once per chunk, from
+#      `lr_at_step`. Turning on a device-side scheduler as well would give two
+#      authorities over one number, which is worse than either alone.
+#
+#      So warmup was added to `lr_at_step` instead, where it stays pure
+#      arithmetic and is testable with no board attached
+#      (tests/test_lr_schedule.py). Pass `--warmup-frac 0.02` -- roughly 215
+#      steps of a 10,764-step run.
+#
+#      Previous runs of this model had no warmup at all: full 3e-4 on step 0,
+#      when AdamW's second-moment estimate is still near-meaningless, so the
+#      least trustworthy updates were also the largest.
+#
+#      This is deliberately NOT a key in this file. A `scheduler_type` written
+#      here would be silently ignored, because `apply_optimizer_override` copies
+#      the `optimizer` block and nothing else -- and a config key that looks
+#      effective but is inert is the exact defect shape this project keeps
+#      finding. It lives on the command line, where it cannot be mistaken for
+#      something the file applies on its own.
+#
+# NOT ADOPTED: gradient clipping. Upstream tested it and left it DISABLED by
+# default in the TinyLlama config, citing "a meaningful negative impact on MFU".
+# We have no evidence our run needs it, and buying an MFU regression to fix a
+# problem we have not measured is the wrong trade. Revisit if a run diverges.
+#
+# UNCHANGED: stochastic_rounding: true. This is the v1->v2 fix and it is load
+# bearing -- all 13 gammas are bfloat16, and without stochastic rounding small
+# updates round to nothing and the norms silently stop learning.
+
+training_config:
+  # Documentation only. build_yaml_config's `seed` is the one with an effect;
+  # apply_optimizer_override reads the `optimizer` block from this file and
+  # nothing else. Vary the real one with --seed.
+  seed: 5489
+  seq_len: 512
+  batch_size: 64
+
+  # See docs/superpowers/plans/ for the epoch arithmetic. Pass the real value
+  # with --steps; this is a record of intent, not configuration.
+  max_steps: 10764
+
+  # No scheduler keys here on purpose -- see note 3 in the header. Warmup is a
+  # command-line concern (`--warmup-frac 0.02`) because only the `optimizer`
+  # block below is read from this file.
+
+  optimizer:
+    type: AdamW
+    lr: 0.0003
+    beta1: 0.9
+    beta2: 0.95              # was 0.999 (upstream #48716)
+    epsilon: 1.0e-8
+    weight_decay: 0.01
+    weight_decay_skip_1d: true   # was absent -> the 13 RMSNorm gammas were decayed
+    amsgrad: false
+    stochastic_rounding: true    # unchanged; load-bearing for bfloat16 gammas
