@@ -1,0 +1,307 @@
+{
+  "hf_model": "/home/ttuser/code/tt-tnt/artifacts/hf-tt-tnt-1024-dialogue",
+  "map": "/home/ttuser/code/tt-tnt/artifacts/token_core_map.npz",
+  "condition": "content",
+  "hops": 2,
+  "samples_per_prompt": 8,
+  "prompts": [
+    "The first thing to say is",
+    "It was there, and then",
+    "Consider what happens when",
+    "After that, the",
+    "Nobody had told them that",
+    "The next part is",
+    "Somewhere between the",
+    "What follows is"
+  ],
+  "temperature": 0.9,
+  "seed": 0,
+  "permuted_regions": true,
+  "coverage": {
+    "dialogue": {
+      "steered_to": "flavour",
+      "centroid_cell": 42,
+      "cells_in_neighbourhood": 13,
+      "tokens_available": 3783,
+      "fraction_of_vocab": 0.1182
+    },
+    "flavour": {
+      "steered_to": "folklore",
+      "centroid_cell": 68,
+      "cells_in_neighbourhood": 13,
+      "tokens_available": 3773,
+      "fraction_of_vocab": 0.1179
+    },
+    "folklore": {
+      "steered_to": "gutenberg_children",
+      "centroid_cell": 0,
+      "cells_in_neighbourhood": 13,
+      "tokens_available": 3783,
+      "fraction_of_vocab": 0.1182
+    },
+    "gutenberg_children": {
+      "steered_to": "poetry",
+      "centroid_cell": 33,
+      "cells_in_neighbourhood": 13,
+      "tokens_available": 3783,
+      "fraction_of_vocab": 0.1182
+    },
+    "poetry": {
+      "steered_to": "procedural",
+      "centroid_cell": 6,
+      "cells_in_neighbourhood": 13,
+      "tokens_available": 3783,
+      "fraction_of_vocab": 0.1182
+    },
+    "procedural": {
+      "steered_to": "spine",
+      "centroid_cell": 92,
+      "cells_in_neighbourhood": 13,
+      "tokens_available": 3783,
+      "fraction_of_vocab": 0.1182
+    },
+    "spine": {
+      "steered_to": "tinystories",
+      "centroid_cell": 24,
+      "cells_in_neighbourhood": 13,
+      "tokens_available": 3783,
+      "fraction_of_vocab": 0.1182
+    },
+    "tinystories": {
+      "steered_to": "weird",
+      "centroid_cell": 81,
+      "cells_in_neighbourhood": 13,
+      "tokens_available": 3773,
+      "fraction_of_vocab": 0.1179
+    },
+    "weird": {
+      "steered_to": "wikipedia_simple",
+      "centroid_cell": 78,
+      "cells_in_neighbourhood": 13,
+      "tokens_available": 3783,
+      "fraction_of_vocab": 0.1182
+    },
+    "wikipedia_simple": {
+      "steered_to": "dialogue",
+      "centroid_cell": 80,
+      "cells_in_neighbourhood": 13,
+      "tokens_available": 3773,
+      "fraction_of_vocab": 0.1179
+    }
+  },
+  "results": {
+    "unsteered": {
+      "n_completions": 64,
+      "mean_words": 26.6,
+      "nearest_source_share": {
+        "dialogue": 0.1094,
+        "flavour": 0.0469,
+        "folklore": 0.0781,
+        "gutenberg_children": 0.1719,
+        "poetry": 0.0,
+        "procedural": 0.0156,
+        "spine": 0.2031,
+        "tinystories": 0.1875,
+        "weird": 0.0781,
+        "wikipedia_simple": 0.1094
+      },
+      "self_share": null,
+      "example": " that the one to whom each one often finds courage can, without a struggle, employ an equal before a time by doing its work beforehand (for which must be"
+    },
+    "dialogue": {
+      "n_completions": 59,
+      "mean_words": 7.1,
+      "nearest_source_share": {
+        "dialogue": 0.1186,
+        "flavour": 0.0,
+        "folklore": 0.0169,
+        "gutenberg_children": 0.0508,
+        "poetry": 0.1017,
+        "procedural": 0.1186,
+        "spine": 0.0169,
+        "tinystories": 0.0,
+        "weird": 0.0,
+        "wikipedia_simple": 0.5763
+      },
+      "self_share": 0.1186,
+      "example": "\u2014\u2014(\"\u2014\" ;', sez\u2014\"--\"do!...\"\"\u2014\"Faith!--the`! ...\")\u2014\"Skil,'\"\u2014\"the`!\""
+    },
+    "flavour": {
+      "n_completions": 64,
+      "mean_words": 28.7,
+      "nearest_source_share": {
+        "dialogue": 0.0625,
+        "flavour": 0.0625,
+        "folklore": 0.1094,
+        "gutenberg_children": 0.0781,
+        "poetry": 0.0,
+        "procedural": 0.0469,
+        "spine": 0.4219,
+        "tinystories": 0.0625,
+        "weird": 0.0781,
+        "wikipedia_simple": 0.0781
+      },
+      "self_share": 0.0625,
+      "example": " that the time the previous minute of the second second in a double the second the previous two the next, the third and the fourth fourth all in the second,"
+    },
+    "folklore": {
+      "n_completions": 64,
+      "mean_words": 18.2,
+      "nearest_source_share": {
+        "dialogue": 0.0938,
+        "flavour": 0.0156,
+        "folklore": 0.0,
+        "gutenberg_children": 0.0781,
+        "poetry": 0.0781,
+        "procedural": 0.0781,
+        "spine": 0.0156,
+        "tinystories": 0.4375,
+        "weird": 0.0156,
+        "wikipedia_simple": 0.1875
+      },
+      "self_share": 0.0,
+      "example": " is. has. says means. has. means is. Paul. Paul. Paul. Paul. Paul. Paul. Paul. Paul is. Paul. Paul"
+    },
+    "gutenberg_children": {
+      "n_completions": 63,
+      "mean_words": 14.9,
+      "nearest_source_share": {
+        "dialogue": 0.0952,
+        "flavour": 0.0,
+        "folklore": 0.1905,
+        "gutenberg_children": 0.1429,
+        "poetry": 0.381,
+        "procedural": 0.0159,
+        "spine": 0.0159,
+        "tinystories": 0.0476,
+        "weird": 0.0,
+        "wikipedia_simple": 0.1111
+      },
+      "self_share": 0.1429,
+      "example": "\u2014we\u2014I\u2014must\u2014have been drowned\u2014I\u2014I\u2014I\u2014do\u2014well-heavy\u2014What\u2014must\u2014\" No\u2014no\u2014"
+    },
+    "poetry": {
+      "n_completions": 64,
+      "mean_words": 31.1,
+      "nearest_source_share": {
+        "dialogue": 0.1719,
+        "flavour": 0.0156,
+        "folklore": 0.0156,
+        "gutenberg_children": 0.0,
+        "poetry": 0.0938,
+        "procedural": 0.2812,
+        "spine": 0.1562,
+        "tinystories": 0.0625,
+        "weird": 0.0156,
+        "wikipedia_simple": 0.1875
+      },
+      "self_share": 0.0938,
+      "example": " steam gas cake water boils loop steam cakes steam fried beans water \u00be cup cakes flour \u00be cup milk \u00bd cup sugar \u00bc pound cinnamon \u00bd teaspoons allspice 1\u00bd teaspoons"
+    },
+    "procedural": {
+      "n_completions": 64,
+      "mean_words": 32.0,
+      "nearest_source_share": {
+        "dialogue": 0.4531,
+        "flavour": 0.0781,
+        "folklore": 0.0,
+        "gutenberg_children": 0.0469,
+        "poetry": 0.0,
+        "procedural": 0.0,
+        "spine": 0.0469,
+        "tinystories": 0.0156,
+        "weird": 0.0312,
+        "wikipedia_simple": 0.3281
+      },
+      "self_share": 0.0,
+      "example": " wealth love being being emotion religions development concept events sciences beliefs being skills being interests being prosperity structures being learning t"
+    },
+    "spine": {
+      "n_completions": 64,
+      "mean_words": 20.5,
+      "nearest_source_share": {
+        "dialogue": 0.0625,
+        "flavour": 0.0156,
+        "folklore": 0.0938,
+        "gutenberg_children": 0.0469,
+        "poetry": 0.1562,
+        "procedural": 0.1094,
+        "spine": 0.0156,
+        "tinystories": 0.375,
+        "weird": 0.0,
+        "wikipedia_simple": 0.125
+      },
+      "self_share": 0.0156,
+      "example": " whether good-uniting should mean good-ob prevents. Making. Making. Making. Making. Making. Making. Making. Making Making. Making. Making"
+    },
+    "tinystories": {
+      "n_completions": 64,
+      "mean_words": 28.6,
+      "nearest_source_share": {
+        "dialogue": 0.0938,
+        "flavour": 0.0156,
+        "folklore": 0.2188,
+        "gutenberg_children": 0.1094,
+        "poetry": 0.0156,
+        "procedural": 0.0469,
+        "spine": 0.1875,
+        "tinystories": 0.0,
+        "weird": 0.125,
+        "wikipedia_simple": 0.1875
+      },
+      "self_share": 0.0,
+      "example": " that the other to speak about it or to mention it, this, which, before long, we and the others all hope to repentance if you really fear it"
+    },
+    "weird": {
+      "n_completions": 64,
+      "mean_words": 27.0,
+      "nearest_source_share": {
+        "dialogue": 0.2812,
+        "flavour": 0.0781,
+        "folklore": 0.0,
+        "gutenberg_children": 0.0312,
+        "poetry": 0.0156,
+        "procedural": 0.0469,
+        "spine": 0.0,
+        "tinystories": 0.0625,
+        "weird": 0.0156,
+        "wikipedia_simple": 0.4688
+      },
+      "self_share": 0.0156,
+      "example": " knowing being being friends 68 adults expect somebody 60 adults begin 20 adults September 25 18 21 30 September 25 20 20 30 30 30 30 67 32 30 30 30 30"
+    },
+    "wikipedia_simple": {
+      "n_completions": 64,
+      "mean_words": 28.8,
+      "nearest_source_share": {
+        "dialogue": 0.0625,
+        "flavour": 0.0312,
+        "folklore": 0.1875,
+        "gutenberg_children": 0.1875,
+        "poetry": 0.0,
+        "procedural": 0.0156,
+        "spine": 0.3438,
+        "tinystories": 0.0312,
+        "weird": 0.0938,
+        "wikipedia_simple": 0.0469
+      },
+      "self_share": 0.0469,
+      "example": " that the other, being alone, just now lives on, just to prove he actually being on the which the people that gods of fable claim to possess, and"
+    }
+  },
+  "own_register_lift": {
+    "dialogue": 0.0092,
+    "flavour": 0.0156,
+    "folklore": -0.0781,
+    "gutenberg_children": -0.029,
+    "poetry": 0.0938,
+    "procedural": -0.0156,
+    "spine": -0.1875,
+    "tinystories": -0.1875,
+    "weird": -0.0625,
+    "wikipedia_simple": -0.0625
+  },
+  "mean_own_register_lift": -0.0504,
+  "n_positive": 3,
+  "n_sources": 10
+}

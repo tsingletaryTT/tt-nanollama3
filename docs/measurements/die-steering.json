@@ -1,0 +1,91 @@
+{
+  "what": "Does restricting generation to a source's measured DIE REGION raise that source's register?",
+  "date": "2026-08-19",
+  "answer": "Suggestive yes, marginal. Steering to the correct region beats steering to a wrong one by +0.143 in own-register share, t=2.43 across 10 sources. Not conclusive.",
+  "design": {
+    "treatment": "each source steers to ITS OWN measured centroid, 2 NoC hops",
+    "control": "each source steers to the NEXT source's centroid (a rotation, so every region is still used exactly once and no source keeps its own)",
+    "held_identical": "prompts, seed, temperature, token budget, neighbourhood radius, and therefore vocabulary fraction (11.8% in every condition)",
+    "why_the_control_is_the_whole_experiment": "Restricting the vocabulary to ANY 11.8% slice changes the text. Without the permutation the treatment arm alone cannot distinguish 'the measured region carries register' from 'perturbation perturbs'."
+  },
+  "instrument": "score_behaviour.RegisterProfile.nearest_source -- per-source unigram+bigram LMs fitted on the corpus, the same instrument the evaluation suite uses. No new metric was invented for this.",
+  "per_source": {
+    "dialogue": {
+      "treatment_lift": -0.0469,
+      "control_lift": 0.0092,
+      "difference": -0.0561
+    },
+    "flavour": {
+      "treatment_lift": -0.0469,
+      "control_lift": 0.0156,
+      "difference": -0.0625
+    },
+    "folklore": {
+      "treatment_lift": 0.0313,
+      "control_lift": -0.0781,
+      "difference": 0.1094
+    },
+    "gutenberg_children": {
+      "treatment_lift": -0.0938,
+      "control_lift": -0.029,
+      "difference": -0.0648
+    },
+    "poetry": {
+      "treatment_lift": 0.381,
+      "control_lift": 0.0938,
+      "difference": 0.2872
+    },
+    "procedural": {
+      "treatment_lift": 0.2656,
+      "control_lift": -0.0156,
+      "difference": 0.2812
+    },
+    "spine": {
+      "treatment_lift": -0.1562,
+      "control_lift": -0.1875,
+      "difference": 0.0313
+    },
+    "tinystories": {
+      "treatment_lift": 0.1875,
+      "control_lift": -0.1875,
+      "difference": 0.375
+    },
+    "weird": {
+      "treatment_lift": 0.0469,
+      "control_lift": -0.0625,
+      "difference": 0.1094
+    },
+    "wikipedia_simple": {
+      "treatment_lift": 0.3594,
+      "control_lift": -0.0625,
+      "difference": 0.4219
+    }
+  },
+  "summary": {
+    "treatment_mean": 0.0928,
+    "treatment_positive": 6,
+    "control_mean": -0.0504,
+    "control_positive": 3,
+    "paired_difference_mean": 0.1432,
+    "sd": 0.186,
+    "se": 0.0588,
+    "t": 2.43,
+    "df": 9,
+    "positive": 7,
+    "approx_p_two_tailed": 0.038
+  },
+  "the_shape_that_convinces_more_than_the_p_value": "The four largest treatment lifts -- poetry +0.381, wikipedia_simple +0.359, procedural +0.266, tinystories +0.188 -- ALL collapse or invert under permutation (+0.094, -0.062, -0.016, -0.188). An artefact of restriction would not care which region it was restricted to.",
+  "limits_stated_plainly": [
+    "n=10 sources. t=2.43, p about 0.04, and it would not survive a multiple-comparison correction.",
+    "ONE permutation, a single rotation. A proper floor is a distribution over many derangements; this is one draw from it.",
+    "64 completions per condition, so every share is a multiple of 1/64 = 0.0156.",
+    "Three sources move the wrong way in treatment (dialogue, flavour, gutenberg_children).",
+    "The model is 123M parameters at one epoch. Register here means 'which corpus LM finds it likeliest', not literary quality."
+  ],
+  "what_would_settle_it": "Many permutations rather than one, and more completions per condition. Both are cheap -- this ran on CPU in minutes. The reason to record it now is that the result is the precondition for the Mixture of Enthusiasts routing story, and it is honest about being marginal.",
+  "relationship_to_the_other_results": {
+    "die-regions-tt-tnt-1024-dialogue.json": "established the regions EXIST (purity 0.546 vs 0.231 floor)",
+    "moe-enthusiasts-poc": "established a die-address routing COMPUTES correctly through ttnn.experimental.moe_compute on one Blackhole card",
+    "this": "asks whether the regions MEAN anything for generation -- the only one of the three that is not yet firm"
+  }
+}
