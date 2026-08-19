@@ -14,6 +14,14 @@ dev = ["pytest>=7.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The repo root, so `train`, `convert` and `scripts` import from a BARE CHECKOUT
+# with nothing installed. Every local run had these on sys.path via an editable
+# install of the project under its pre-rename name (tt-nanollama3), which meant
+# local green said nothing about a fresh clone -- CI's first run failed on
+# `ModuleNotFoundError: No module named 'convert'` while the same command passed
+# here. Not `pip install -e .` in the workflow: this repo is not a library, and a
+# contributor with a fresh clone should be able to run pytest.
+pythonpath = ["."]
 
 [tool.setuptools.packages.find]
 # Discovery by pattern, not an explicit list: Task 1 ships only `train/`, and
