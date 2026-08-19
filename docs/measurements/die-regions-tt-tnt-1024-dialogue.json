@@ -1,0 +1,203 @@
+{
+  "map": "/home/ttuser/code/tt-tnt/artifacts/token_core_map.npz",
+  "hf_model": "/home/ttuser/code/tt-tnt/artifacts/hf-tt-tnt-1024-dialogue",
+  "sources": [
+    "dialogue",
+    "flavour",
+    "folklore",
+    "gutenberg_children",
+    "poetry",
+    "procedural",
+    "spine",
+    "tinystories",
+    "weird",
+    "wikipedia_simple"
+  ],
+  "n_cells": 110,
+  "conditions": {
+    "all": {
+      "per_source": {
+        "dialogue": {
+          "n_tokens": 150,
+          "n_distinct_cells": 53,
+          "mean_pairwise_hops": 4.813870246085012
+        },
+        "flavour": {
+          "n_tokens": 150,
+          "n_distinct_cells": 33,
+          "mean_pairwise_hops": 4.304519015659955
+        },
+        "folklore": {
+          "n_tokens": 150,
+          "n_distinct_cells": 46,
+          "mean_pairwise_hops": 5.207158836689038
+        },
+        "gutenberg_children": {
+          "n_tokens": 150,
+          "n_distinct_cells": 55,
+          "mean_pairwise_hops": 4.9439821029082776
+        },
+        "poetry": {
+          "n_tokens": 150,
+          "n_distinct_cells": 26,
+          "mean_pairwise_hops": 3.84841163310962
+        },
+        "procedural": {
+          "n_tokens": 150,
+          "n_distinct_cells": 33,
+          "mean_pairwise_hops": 4.272214765100671
+        },
+        "spine": {
+          "n_tokens": 150,
+          "n_distinct_cells": 39,
+          "mean_pairwise_hops": 4.229619686800895
+        },
+        "tinystories": {
+          "n_tokens": 150,
+          "n_distinct_cells": 29,
+          "mean_pairwise_hops": 4.402595078299776
+        },
+        "weird": {
+          "n_tokens": 150,
+          "n_distinct_cells": 45,
+          "mean_pairwise_hops": 4.516420581655481
+        },
+        "wikipedia_simple": {
+          "n_tokens": 150,
+          "n_distinct_cells": 43,
+          "mean_pairwise_hops": 4.635167785234899
+        }
+      },
+      "centroid_cells": {
+        "dialogue": 80,
+        "flavour": 42,
+        "folklore": 70,
+        "gutenberg_children": 33,
+        "poetry": 33,
+        "procedural": 6,
+        "spine": 69,
+        "tinystories": 24,
+        "weird": 70,
+        "wikipedia_simple": 67
+      },
+      "concentration": {
+        "observed_mean_pairwise_hops": 4.517395973154362,
+        "permuted_mean": 5.135210648769576,
+        "permuted_sd": 0.006578997182835311,
+        "z": -93.90711964843216,
+        "reading": "LOWER than the floor means sources are concentrated in place"
+      },
+      "centroid_separation": {
+        "observed_mean_pairwise_hops_between_centroids": 4.977777777777778,
+        "permuted_mean": 2.2054444444444443,
+        "permuted_sd": 0.3692267361880087,
+        "z": 7.5084847916367385,
+        "reading": "HIGHER than the floor means the places are different places"
+      },
+      "cell_purity": {
+        "observed": 0.5133333333333333,
+        "permuted_mean": 0.22592333333333334,
+        "permuted_sd": 0.005123010182825458,
+        "z": 56.10178191008137,
+        "reading": "HIGHER than the floor means a cell tends to belong to one source"
+      }
+    },
+    "content": {
+      "per_source": {
+        "dialogue": {
+          "n_tokens": 150,
+          "n_distinct_cells": 51,
+          "mean_pairwise_hops": 4.700939597315436
+        },
+        "flavour": {
+          "n_tokens": 150,
+          "n_distinct_cells": 34,
+          "mean_pairwise_hops": 4.032572706935123
+        },
+        "folklore": {
+          "n_tokens": 150,
+          "n_distinct_cells": 51,
+          "mean_pairwise_hops": 5.23579418344519
+        },
+        "gutenberg_children": {
+          "n_tokens": 150,
+          "n_distinct_cells": 56,
+          "mean_pairwise_hops": 4.956241610738255
+        },
+        "poetry": {
+          "n_tokens": 150,
+          "n_distinct_cells": 30,
+          "mean_pairwise_hops": 4.16331096196868
+        },
+        "procedural": {
+          "n_tokens": 150,
+          "n_distinct_cells": 36,
+          "mean_pairwise_hops": 4.0634451901565996
+        },
+        "spine": {
+          "n_tokens": 150,
+          "n_distinct_cells": 44,
+          "mean_pairwise_hops": 4.442326621923938
+        },
+        "tinystories": {
+          "n_tokens": 150,
+          "n_distinct_cells": 26,
+          "mean_pairwise_hops": 4.415212527964206
+        },
+        "weird": {
+          "n_tokens": 150,
+          "n_distinct_cells": 49,
+          "mean_pairwise_hops": 4.642684563758389
+        },
+        "wikipedia_simple": {
+          "n_tokens": 150,
+          "n_distinct_cells": 38,
+          "mean_pairwise_hops": 4.368859060402684
+        }
+      },
+      "centroid_cells": {
+        "dialogue": 80,
+        "flavour": 42,
+        "folklore": 68,
+        "gutenberg_children": 0,
+        "poetry": 33,
+        "procedural": 6,
+        "spine": 92,
+        "tinystories": 24,
+        "weird": 81,
+        "wikipedia_simple": 78
+      },
+      "concentration": {
+        "observed_mean_pairwise_hops": 4.50213870246085,
+        "permuted_mean": 5.198586442953019,
+        "permuted_sd": 0.006598756460684071,
+        "z": -105.54227067503724,
+        "reading": "LOWER than the floor means sources are concentrated in place"
+      },
+      "centroid_separation": {
+        "observed_mean_pairwise_hops_between_centroids": 5.2444444444444445,
+        "permuted_mean": 3.85,
+        "permuted_sd": 0.3946540913912484,
+        "z": 3.533333303421992,
+        "reading": "HIGHER than the floor means the places are different places"
+      },
+      "cell_purity": {
+        "observed": 0.546,
+        "permuted_mean": 0.23097,
+        "permuted_sd": 0.0049673590121467525,
+        "z": 63.42001841011547,
+        "reading": "HIGHER than the floor means a cell tends to belong to one source"
+      }
+    }
+  },
+  "_headline": "Corpus sources occupy distinct regions OF THE DIE, not only of embedding space. Concentrated, separated and pure, all beyond a label-permutation floor, and the effect strengthens under the frequency control.",
+  "_effect_sizes_not_just_z": {
+    "why": "The z scores are enormous (-106, +63) and that is mostly a statement about the floor's tightness at 1500 tokens and 200 permutations, not about how large the effect is. Reported separately so nobody reads -105 as 'huge'.",
+    "concentration": "4.502 vs 5.199 hops = 13.4% tighter than chance. Real, modest.",
+    "centroid_separation": "5.244 vs 3.850 hops = 36% further apart than chance. z=+3.53 is the WEAKEST of the three signals and it is the one steering depends on most.",
+    "cell_purity": "0.546 vs 0.231 = 2.36x chance. The strongest practical signal: a cell's characteristic tokens belong to a single source more than half the time, against a 23% baseline."
+  },
+  "_the_control_that_mattered": "The `content` condition excludes the 500 globally most frequent tokens. If the geography were a frequency artefact -- common tokens landing together because the placement optimised something correlated with count -- it would collapse there. Concentration z goes -93.9 -> -105.5 and purity +56.1 -> +63.4. It strengthens, which is the opposite of an artefact.",
+  "_what_this_licenses": "Building the steering experiment. 'Sample within k hops of the poetry region' now has a referent: the regions exist, they are distinguishable, and their centroids are recorded in this file. It does NOT yet show that constraining generation to a region changes the text -- that is the next measurement and it can still come out null.",
+  "_what_would_still_make_this_inert": "Purity of 0.55 means nearly half of a cell's characteristic tokens belong to some other source, and 110 cells for 32,000 tokens is ~291 tokens per cell. A neighbourhood may simply be too coarse to carry register even though the regions are statistically real. That is an effect-size question the steering run answers and this one cannot."
+}
