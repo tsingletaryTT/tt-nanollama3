@@ -1,7 +1,7 @@
 {
   "what": "Does tt-metal v0.77.0's tt-train stability set (#48716) improve tt-tnt's validation loss?",
   "date": "2026-08-19",
-  "answer": "No measurable difference. Mean delta across six matched steps is +0.0035 nats, standard error 0.042. Indistinguishable from zero.",
+  "answer": "REVISED at 8 matched points -- see REVISION below. Level early, then consistently worse by ~0.08 nats from step 4000 on. The original 'no measurable difference' was written at six points and missed the tail.",
   "comparison": {
     "candidate": "artifacts/checkpoints-v077 -- beta2 0.95, weight_decay_skip_1d true, 2% linear warmup",
     "baseline": "artifacts/checkpoints-1024-dialogue -- beta2 0.999, weight decay on all params, no warmup",
@@ -77,5 +77,74 @@
     "warmup": "Separately measured as no-effect on the same-corpus pair (5.8969 vs 5.9031 at step 1000), and this run does not contradict that. 2% of a 10.7k-step run is ~215 steps.",
     "not_licensed": "Any claim that the upgrade improved training. It did not, measurably."
   },
-  "process_note": "Two earlier attempts at this comparison were void because they trained on artifacts/tokens (the default --tokens-dir, and the oldest of six token sets) rather than tokens-v4. See corpus-provenance.json. train/run.py now writes run_manifest.json so this class of error is self-reporting."
+  "process_note": "Two earlier attempts at this comparison were void because they trained on artifacts/tokens (the default --tokens-dir, and the oldest of six token sets) rather than tokens-v4. See corpus-provenance.json. train/run.py now writes run_manifest.json so this class of error is self-reporting.",
+  "REVISION_2026-08-19_at_8_points": {
+    "why": "The conclusion above was written at SIX matched points and said 'no measurable difference'. That was premature in two ways: I also stated twice that step 6000 was the last matched point, and it was not -- the baseline carries 7000 and 8000.",
+    "all_eight": [
+      {
+        "step": 1000,
+        "delta": -0.0082
+      },
+      {
+        "step": 2000,
+        "delta": 0.0305
+      },
+      {
+        "step": 3000,
+        "delta": -0.1828
+      },
+      {
+        "step": 4000,
+        "delta": 0.002
+      },
+      {
+        "step": 5000,
+        "delta": 0.1266
+      },
+      {
+        "step": 6000,
+        "delta": 0.0528
+      },
+      {
+        "step": 7000,
+        "delta": 0.1496
+      },
+      {
+        "step": 8000,
+        "delta": 0.0711
+      }
+    ],
+    "overall": {
+      "n": 8,
+      "mean": 0.0302,
+      "sd": 0.1024,
+      "se": 0.0362,
+      "signs": "-+-+++++",
+      "reading": "Mean +0.030 with se 0.036 -- still not distinguishable from zero overall."
+    },
+    "the_tail_is_the_result": {
+      "steps": "4000 through 8000",
+      "n": 5,
+      "deltas": [
+        0.002,
+        0.1266,
+        0.0528,
+        0.1496,
+        0.0711
+      ],
+      "mean": 0.0804,
+      "sd": 0.059,
+      "se": 0.0264,
+      "sign_consistency": "5 of 5 positive; about 6% two-tailed if signs were coin flips",
+      "reading": "From step 4000 onward the v0.77.0 set is consistently WORSE by about 0.08 nats. The overall mean hides this by averaging it against the -0.183 scatter point at step 3000."
+    },
+    "revised_answer": "Level for the first ~3000 steps, then consistently worse by ~0.08 nats for the rest of the compared range. Marginal, but the sign consistency is what makes it more than scatter.",
+    "two_candidate_causes_and_they_are_NOT_separated": [
+      "beta2 0.95 -- a shorter second-moment memory may be less useful once gradients settle, which would show up exactly as a tail effect.",
+      "tt-metal v0.77.0 itself -- the dialogue baseline ran on the PRE-v0.77.0 tree. This comparison changes the optimizer AND the tt-metal version together."
+    ],
+    "the_run_that_separates_them": "beta2 0.999 + weight_decay_skip_1d + warmup, on v0.77.0, same corpus and seed, ~35 min at ddp 4. Matching the baseline tail implicates beta2; still-worse implicates tt-metal v0.77.0, which would matter for everything trained afterwards.",
+    "practical_size": "~0.08 nats. This project's seed-only noise floor for the behavioural eval suite is 0.1944 nats, and differences inside it are stamped NOT INTERPRETABLE. So this is likely invisible in every downstream eval actually run -- real on the training curve, probably immaterial in behaviour.",
+    "consequence": "tt-tnt-1024-dialogue REMAINS the designated current model. This run is a recorded candidate that did not win."
+  }
 }
