@@ -58,26 +58,61 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
     """Report how much of the suite did not run, and why.
 
     Printed unconditionally, including on a fully green run. The number is the
-    whole point: "1080 passed" and "1037 passed, 43 skipped because this machine
-    has no corpus" are different claims, and only one of them is what a CI badge
-    silently means.
+    whole point: "1080 passed" and "1034 passed, 48 skipped because this machine
+    has no corpus, no checkpoints and no tt-metal" are different claims, and only
+    one of them is what a CI badge silently means.
+
+    Reports the TOTAL skip count first, deliberately. An earlier version of this
+    hook counted only the tests gated by `needs_artifacts` and announced "10 of
+    1082 skipped" on a run where 48 had skipped -- understating by nearly five
+    times, in the one place written to stop exactly that. Most skips in this suite
+    predate the helper and phrase their own reasons; a summary that sees only its
+    own marker is measuring itself.
     """
     skipped = terminalreporter.stats.get("skipped", [])
-    artifact_skips = [
-        r for r in skipped
-        if "gitignored artifacts" in str(getattr(r, "longrepr", ("", "", ""))[2]
-                                         if isinstance(getattr(r, "longrepr", None), tuple)
-                                         else getattr(r, "longrepr", ""))
-    ]
-    total = terminalreporter._numcollected if hasattr(terminalreporter, "_numcollected") else 0
-    if artifact_skips:
-        terminalreporter.write_sep("-", "artifact-gated tests")
+    total = getattr(terminalreporter, "_numcollected", 0)
+    if not skipped:
+        if _gated:
+            terminalreporter.write_sep("-", "coverage of this run")
+            terminalreporter.write_line(
+                f"0 skipped: every input this suite gates on is present.")
+        return
+
+    def _reason(rep) -> str:
+        lr = getattr(rep, "longrepr", "")
+        return str(lr[2]) if isinstance(lr, tuple) and len(lr) > 2 else str(lr)
+
+    reasons = [_reason(r) for r in skipped]
+    gated = sum(1 for r in reasons if "gitignored artifacts" in r)
+
+    # Group the rest by a coarse cause so the line is readable rather than a wall.
+    def bucket(r: str) -> str:
+        low = r.lower()
+        if "gitignored artifacts" in low:
+            return "artifacts (gated)"
+        if any(k in low for k in ("checkpoint", "converted model", "tokenizer",
+                                  "tokens", "safetensors", "not committed",
+                                  "not in this checkout", "repository content",
+                                  "config.json")):
+            return "other local training artifacts"
+        if "tt_metal_home" in low or "tt-metal" in low or "tt-kernel" in low:
+            return "tt-metal / tt-kernel not available"
+        if "lm-eval" in low:
+            return "optional lm-eval venv"
+        return "other"
+
+    counts: dict[str, int] = {}
+    for r in reasons:
+        counts[bucket(r)] = counts.get(bucket(r), 0) + 1
+
+    terminalreporter.write_sep("-", "coverage of this run")
+    terminalreporter.write_line(
+        f"{len(skipped)} of {total} tests did NOT run. A green result does not mean "
+        f"they passed."
+    )
+    for name, n in sorted(counts.items(), key=lambda kv: -kv[1]):
+        terminalreporter.write_line(f"    {n:>4}  {name}")
+    if gated != len(skipped):
         terminalreporter.write_line(
-            f"{len(artifact_skips)} of {total} tests were SKIPPED for missing gitignored "
-            f"artifacts/. A green run does not mean these passed — it means they did not run."
-        )
-    elif _gated:
-        terminalreporter.write_sep("-", "artifact-gated tests")
-        terminalreporter.write_line(
-            f"0 skipped: all {len(_gated)} artifact paths this suite gates on are present."
-        )
+            f"    ({gated} of these use the needs_artifacts helper; the rest carry "
+            f"their own skip reasons — run with -rs to read them)")
