@@ -1,0 +1,87 @@
+{
+  "source": "docs/measurements/die-steering-treatment.json",
+  "method": "Permutation floor computed from the region x register matrix the treatment run already produced. Generation depends only on which region is sampled, not on the label attached to it, so every derangement is a relabelling of existing completions and needs no new sampling.",
+  "sources": [
+    "dialogue",
+    "flavour",
+    "folklore",
+    "gutenberg_children",
+    "poetry",
+    "procedural",
+    "spine",
+    "tinystories",
+    "weird",
+    "wikipedia_simple"
+  ],
+  "observed_mean_own_register_lift": 0.0928,
+  "derangement_floor": {
+    "n_sampled": 20000,
+    "n_possible": 1334961,
+    "mean": -0.0101,
+    "sd": 0.0321,
+    "p50": -0.0138,
+    "p95": 0.0486,
+    "p99": 0.0779
+  },
+  "z": 3.2,
+  "p_one_sided": 0.00365,
+  "n_derangements_at_or_above_observed": 72,
+  "per_source": {
+    "dialogue": {
+      "own": -0.0469,
+      "mean_other": 0.0498,
+      "advantage": -0.0967
+    },
+    "flavour": {
+      "own": -0.0469,
+      "mean_other": -0.0122,
+      "advantage": -0.0347
+    },
+    "folklore": {
+      "own": 0.0313,
+      "mean_other": 0.0022,
+      "advantage": 0.0291
+    },
+    "gutenberg_children": {
+      "own": -0.0938,
+      "mean_other": -0.0948,
+      "advantage": 0.001
+    },
+    "poetry": {
+      "own": 0.381,
+      "mean_other": 0.0512,
+      "advantage": 0.3298
+    },
+    "procedural": {
+      "own": 0.2656,
+      "mean_other": 0.0375,
+      "advantage": 0.2281
+    },
+    "spine": {
+      "own": -0.1562,
+      "mean_other": -0.0727,
+      "advantage": -0.0835
+    },
+    "tinystories": {
+      "own": 0.1875,
+      "mean_other": -0.1076,
+      "advantage": 0.2951
+    },
+    "weird": {
+      "own": 0.0469,
+      "mean_other": -0.0503,
+      "advantage": 0.0972
+    },
+    "wikipedia_simple": {
+      "own": 0.3594,
+      "mean_other": 0.0937,
+      "advantage": 0.2657
+    }
+  },
+  "n_sources_favouring_own_region": 7,
+  "why_derangements_not_permutations": "A permutation with a fixed point leaves that source steered to its own region, which is treatment, not control. Derangements are the clean comparator.",
+  "_headline": "Steering to a source's MEASURED die region raises that source's register beyond a 20,000-derangement floor: observed +0.0928 against a floor of -0.0101 (sd 0.0321), z=+3.20, p=0.00365, above the floor's 99th percentile.",
+  "_what_this_floor_does_NOT_control_for": "Generation-seed variance. Every derangement here is a RELABELLING of one generated dataset, so the floor accounts for 'which region is called what' and not for 'would re-running the sampling with a different seed move the observed value'. Those are different sources of variance and only the first is controlled. Covering the second needs several generation seeds and is the obvious next strengthening -- it is also the one that cannot be had for free.",
+  "_the_effect_is_carried_by_four_sources": "poetry +0.330, tinystories +0.295, wikipedia_simple +0.266, procedural +0.228 advantage over the average wrong region. Three sources go the wrong way (dialogue -0.097, spine -0.084, flavour -0.035). 7/10 favour their own region. A uniform effect this is not.",
+  "_units": "Own-register share: the fraction of completions whose nearest source LM is the source being steered to. 64 completions per condition, so every share is a multiple of 1/64 = 0.0156."
+}

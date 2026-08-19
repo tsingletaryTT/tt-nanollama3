@@ -1,7 +1,7 @@
 {
   "what": "Does restricting generation to a source's measured DIE REGION raise that source's register?",
   "date": "2026-08-19",
-  "answer": "Suggestive yes, marginal. Steering to the correct region beats steering to a wrong one by +0.143 in own-register share, t=2.43 across 10 sources. Not conclusive.",
+  "answer": "SUPERSEDED. The single-rotation control gave t=2.43, p about 0.04. The proper floor over 20,000 sampled derangements gives z=+3.20, p=0.00365, with the observed value above the floor's 99th percentile. Same data, better comparator.",
   "design": {
     "treatment": "each source steers to ITS OWN measured centroid, 2 NoC hops",
     "control": "each source steers to the NEXT source's centroid (a rotation, so every region is still used exactly once and no source keeps its own)",
@@ -87,5 +87,7 @@
     "die-regions-tt-tnt-1024-dialogue.json": "established the regions EXIST (purity 0.546 vs 0.231 floor)",
     "moe-enthusiasts-poc": "established a die-address routing COMPUTES correctly through ttnn.experimental.moe_compute on one Blackhole card",
     "this": "asks whether the regions MEAN anything for generation -- the only one of the three that is not yet firm"
-  }
+  },
+  "SUPERSEDED_BY": "die-steering-floor.json \u2014 a full derangement floor, not one rotation",
+  "what_the_first_control_cost_and_why_it_was_avoidable": "The rotation control generated a second complete set of completions -- roughly 40 minutes of CPU -- to obtain ONE draw from the permutation distribution. It was avoidable: generation depends only on WHICH REGION is sampled, not on the label attached to it, so the treatment run's own region x register matrix already answered every permutation at once. The floor was sitting in the first run's output the whole time."
 }
