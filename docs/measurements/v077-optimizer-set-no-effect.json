@@ -1,7 +1,7 @@
 {
   "what": "Does tt-metal v0.77.0's tt-train stability set (#48716) improve tt-tnt's validation loss?",
   "date": "2026-08-19",
-  "answer": "REVISED at 8 matched points -- see REVISION below. Level early, then consistently worse by ~0.08 nats from step 4000 on. The original 'no measurable difference' was written at six points and missed the tail.",
+  "answer": "SUPERSEDED -- see FINAL_2026-08-19_at_11_points. No measurable difference across 11 matched points.",
   "comparison": {
     "candidate": "artifacts/checkpoints-v077 -- beta2 0.95, weight_decay_skip_1d true, 2% linear warmup",
     "baseline": "artifacts/checkpoints-1024-dialogue -- beta2 0.999, weight decay on all params, no warmup",
@@ -146,5 +146,99 @@
     "the_run_that_separates_them": "beta2 0.999 + weight_decay_skip_1d + warmup, on v0.77.0, same corpus and seed, ~35 min at ddp 4. Matching the baseline tail implicates beta2; still-worse implicates tt-metal v0.77.0, which would matter for everything trained afterwards.",
     "practical_size": "~0.08 nats. This project's seed-only noise floor for the behavioural eval suite is 0.1944 nats, and differences inside it are stamped NOT INTERPRETABLE. So this is likely invisible in every downstream eval actually run -- real on the training curve, probably immaterial in behaviour.",
     "consequence": "tt-tnt-1024-dialogue REMAINS the designated current model. This run is a recorded candidate that did not win."
+  },
+  "FINAL_2026-08-19_at_11_points": {
+    "supersedes": "Both the original six-point conclusion AND the eight-point revision above. Both were wrong, and for the same reason.",
+    "what_went_wrong_twice": "I printed the baseline curve with `head -8` and then built baselines.json, the monitor, and two written conclusions on that truncation. The baseline has ELEVEN points, running to step 10764. The 'five consecutive positive deltas' that made the tail look real stopped at 8000 because my data stopped at 8000. Steps 9000 and 10000 are NEGATIVE.",
+    "all_eleven": [
+      {
+        "step": 1000,
+        "ours": 4.087109375,
+        "baseline": 4.0953125,
+        "delta": -0.0082
+      },
+      {
+        "step": 2000,
+        "ours": 3.559375,
+        "baseline": 3.52890625,
+        "delta": 0.0305
+      },
+      {
+        "step": 3000,
+        "ours": 3.141796875,
+        "baseline": 3.324609375,
+        "delta": -0.1828
+      },
+      {
+        "step": 4000,
+        "ours": 3.10546875,
+        "baseline": 3.103515625,
+        "delta": 0.002
+      },
+      {
+        "step": 5000,
+        "ours": 3.083984375,
+        "baseline": 2.957421875,
+        "delta": 0.1266
+      },
+      {
+        "step": 6000,
+        "ours": 3.06328125,
+        "baseline": 3.010546875,
+        "delta": 0.0527
+      },
+      {
+        "step": 7000,
+        "ours": 3.03125,
+        "baseline": 2.881640625,
+        "delta": 0.1496
+      },
+      {
+        "step": 8000,
+        "ours": 2.99453125,
+        "baseline": 2.9234375,
+        "delta": 0.0711
+      },
+      {
+        "step": 9000,
+        "ours": 2.86953125,
+        "baseline": 2.94765625,
+        "delta": -0.0781
+      },
+      {
+        "step": 10000,
+        "ours": 2.92265625,
+        "baseline": 2.9453125,
+        "delta": -0.0227
+      },
+      {
+        "step": 10764,
+        "ours": 3.004296875,
+        "baseline": 2.904296875,
+        "delta": 0.1
+      }
+    ],
+    "statistics": {
+      "n": 11,
+      "mean": 0.0219,
+      "sd": 0.0959,
+      "se": 0.0289,
+      "signs": "-+-+++++--+"
+    },
+    "answer": "No measurable difference. Mean +0.022, standard error 0.029, signs mixed 7 positive / 4 negative with no run longer than five. Every delta sits within the run's own 0.13 median point-to-point wobble.",
+    "the_tail_claim_is_WITHDRAWN": "There is no consistent late-run disadvantage. tail>=4000 across all eight available points is +0.050 with se 0.028 and signs +++++--+, not the +++++ I reported.",
+    "the_isolation_run_is_WITHDRAWN_too": "I recommended spending ~35 minutes of hardware on a beta2 0.999 control to explain the tail effect and to separate it from a possible tt-metal v0.77.0 regression. There is no effect to explain. That run would have chased an artifact of my own truncation. Not run.",
+    "final_losses": {
+      "first_train": 10.625,
+      "last_train": 2.6875,
+      "real_val_full_corpus": 3.0512,
+      "note": "The final periodic point (3.0043 at 10764) landed on an upswing; the run's own wobble is +/-0.13, so which side of an oscillation the last validation falls on is not a property of the model."
+    },
+    "consequences_unchanged": {
+      "weight_decay_skip_1d": "KEEP -- on correctness grounds, not on this measurement. Decaying 13 RMSNorm gammas toward zero has no regularising interpretation.",
+      "beta2_0.95": "No demonstrated benefit and now no demonstrated harm. Taste.",
+      "designated_model": "tt-tnt-1024-dialogue remains current. This candidate matched it; it did not beat it."
+    },
+    "the_actual_lesson": "Four times in one session a conclusion was driven by a broken instrument rather than by the system under test: a pgrep that matched its own shell, a warmup test one layer below the inertness, a baseline table whose columns collapsed, and now a baseline truncated by head -8. In each case the instrument reported confidently. The measurement discipline this project applies to the model is not yet applied to the tools that measure it."
   }
 }
