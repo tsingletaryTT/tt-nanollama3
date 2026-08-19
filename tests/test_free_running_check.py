@@ -22,6 +22,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import needs_artifacts
+
 ROOT = Path(__file__).resolve().parent.parent
 
 # Loaded by file path, matching this repo's convention (see test_publish_to_hub.py): an
@@ -64,6 +66,7 @@ def _load_publish_to_hub():
     return module
 
 
+@needs_artifacts("artifacts/hf-tt-tnt-v3")
 def test_default_reference_is_the_artifact_that_publish_to_hub_uploads():
     """The default reference must be the same directory the publish script uploads.
 

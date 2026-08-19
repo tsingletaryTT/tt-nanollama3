@@ -353,29 +353,32 @@ def test_warmup_frac_is_validated():
 # not "what does the schedule compute" but "does anything ask it".
 
 
-def _resolve_lr_fn(argv):
-    """Run main()'s schedule resolution and hand back the lr_fn it chose.
+@pytest.fixture
+def tiny_tokens(tmp_path):
+    """A minimal tokens directory, so these tests need no gitignored artifacts.
 
-    --dry-run stops before the device is opened, so this needs no hardware. The
-    lr_fn is captured off run_training_loop's call rather than reconstructed, so
-    the test sees exactly what training would have been handed.
+    main() loads the token arrays before it resolves the LR schedule, so an
+    earlier version of these tests inherited a dependency on artifacts/tokens --
+    which is gitignored, so they FAILED rather than skipped on any machine
+    without a 350M-token corpus, including CI. A few thousand synthetic ids
+    exercise the same code path: what is under test is which lr_fn main()
+    installs, and that decision does not read a single token.
     """
-    import train.run as run_mod
+    import numpy as np
 
-    captured = {}
-
-    def fake_loop(*args, **kwargs):
-        captured["lr_fn"] = kwargs.get("lr_fn", None)
-        return {"train_losses": [], "val_losses": []}
-
-    return captured, fake_loop, run_mod
+    d = tmp_path / "tokens"
+    d.mkdir()
+    np.save(d / "train_ids.npy", np.arange(4096, dtype=np.uint32))
+    np.save(d / "val_ids.npy", np.arange(512, dtype=np.uint32))
+    return d
 
 
-def test_constant_schedule_with_warmup_still_installs_an_lr_fn(monkeypatch, capsys):
+def test_constant_schedule_with_warmup_still_installs_an_lr_fn(monkeypatch, capsys, tiny_tokens):
     """The regression. constant + warmup must NOT resolve to lr_fn = None."""
     import train.run as run_mod
 
-    argv = ["--size", "1024", "--steps", "1000", "--warmup-frac", "0.02", "--dry-run"]
+    argv = ["--size", "1024", "--steps", "1000", "--warmup-frac", "0.02",
+            "--tokens-dir", str(tiny_tokens), "--dry-run"]
     monkeypatch.setattr(sys, "argv", ["run.py"] + argv)
     try:
         run_mod.main()
@@ -389,11 +392,12 @@ def test_constant_schedule_with_warmup_still_installs_an_lr_fn(monkeypatch, caps
     assert "warmup" in out.lower()
 
 
-def test_constant_schedule_without_warmup_still_skips_set_lr(monkeypatch, capsys):
+def test_constant_schedule_without_warmup_still_skips_set_lr(monkeypatch, capsys, tiny_tokens):
     """The behaviour we must NOT have broken: plain constant stays hook-free."""
     import train.run as run_mod
 
-    argv = ["--size", "1024", "--steps", "1000", "--dry-run"]
+    argv = ["--size", "1024", "--steps", "1000",
+            "--tokens-dir", str(tiny_tokens), "--dry-run"]
     monkeypatch.setattr(sys, "argv", ["run.py"] + argv)
     try:
         run_mod.main()

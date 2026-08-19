@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
+#
+# Why this exists
+# ---------------
+# Six tests sat red for days in August 2026 because nothing ran the suite unless a
+# person chose to. They were not subtle failures -- the corpus doc had gone stale
+# after a source was added, and the guard that exists to catch exactly that had
+# caught it, and reported to no one.
+#
+# What this can and cannot check
+# ------------------------------
+# `artifacts/` is gitignored: checkpoints, converted HF directories, token arrays
+# and the 1.6 GB corpus are not in a clone. So this job runs the ~1039 tests that
+# need none of them and SKIPS ~43 that do. The run prints that split every time
+# (see tests/conftest.py) rather than letting a green tick imply more than it means.
+#
+# No hardware, no network, no Tenstorrent card. Anything needing a device is a
+# separate, manual concern -- the device gates in this repo take a gozer lease and
+# have no business in CI.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install torch (CPU build)
+        # The CPU wheel is ~200 MB against ~2.5 GB for the default CUDA one, and
+        # nothing here runs on a GPU. Installed first so the resolver cannot pull
+        # the CUDA build in as a transitive dependency of transformers.
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install test dependencies
+        # Measured, not guessed: with only pytest/numpy/pyyaml/ml_dtypes this suite
+        # produces 12 failures and 49 collection errors. With the list below it is
+        # 1037 passed, 45 skipped, 0 failed -- verified in a clean venv before this
+        # workflow was written.
+        #
+        # `ttnn` is Tenstorrent's own PyPI package and imports fine with no card
+        # present. `ttml` (tt-train) is NOT on PyPI; tests needing it already skip.
+        # Versions are deliberately unpinned: if an upstream release breaks us, that
+        # is a thing worth being told about rather than insulated from.
+        run: pip install pytest numpy pyyaml ml_dtypes ttnn transformers tokenizers datasets
+
+      - name: Run the offline suite
+        # -rs prints the reason for every skip, so "43 skipped" is auditable rather
+        # than a number to scroll past.
+        run: pytest -q -rs

@@ -18,6 +18,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import needs_artifacts
+
 ROOT = Path(__file__).resolve().parent.parent
 
 # Loaded by file path, matching this repo's convention (see test_backfill_checkpoint_headers.py):
@@ -53,6 +55,7 @@ def test_source_never_sets_private_false():
     assert "private=True" in source
 
 
+@needs_artifacts("artifacts/hf-tt-tnt-v3")
 def test_artifact_files_matches_real_hf_dir():
     """The upload plan's file list must be exactly what's on disk in HF_DIR,
     non-recursively -- no silent drift between what this prints and what upload_folder
@@ -68,6 +71,7 @@ def test_artifact_files_matches_real_hf_dir():
     assert len(files) > 0
 
 
+@needs_artifacts("artifacts/hf-tt-tnt-v3")
 def test_hf_dir_is_not_the_protected_v2_baseline():
     """HF_DIR must never point at ``artifacts/hf``.
 
@@ -81,6 +85,7 @@ def test_hf_dir_is_not_the_protected_v2_baseline():
     assert publish_to_hub.HF_DIR.is_dir()
 
 
+@needs_artifacts("artifacts/hf-tt-tnt-v3")
 def test_local_artifact_context_length_matches_what_the_script_claims_to_publish():
     """The real artifact on disk must satisfy the pre-upload guard."""
     publish_to_hub._assert_local_artifact_is_publishable()
@@ -138,6 +143,7 @@ def test_verify_labels_are_not_hardcoded_numbers():
     assert any("{EXPECTED_MAX_POSITION_EMBEDDINGS}" in line for line in check_lines)
 
 
+@needs_artifacts("artifacts/hf-tt-tnt-v3")
 def test_dry_run_publish_never_touches_the_hub(monkeypatch, capsys):
     """--dry-run must not import or call anything that reaches the network."""
     def _boom(*a, **k):
@@ -166,6 +172,7 @@ def test_dry_run_restore_card_never_touches_the_hub(monkeypatch, capsys):
     assert "dry-run" in capsys.readouterr().out
 
 
+@needs_artifacts("artifacts/hf-tt-tnt-v3")
 def test_publish_without_yes_refuses_and_does_not_touch_the_hub(monkeypatch, capsys):
     def _boom(*a, **k):
         raise AssertionError("must not contact the Hub without --yes")
@@ -221,6 +228,7 @@ def test_verify_requires_no_other_flags(capsys):
     assert "read-only" in capsys.readouterr().err
 
 
+@needs_artifacts("artifacts/hf-tt-tnt-v3")
 def test_upload_reads_the_same_directory_the_guard_validated(monkeypatch, tmp_path):
     """The bytes uploaded must come from the directory the assertions checked.
 

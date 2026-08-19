@@ -33,6 +33,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import needs_artifacts
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
@@ -277,6 +279,7 @@ def test_a_comparison_records_the_window_refusal_instead_of_silently_dropping_it
     assert "2048" in rendered
 
 
+@needs_artifacts("artifacts/hf-tt-tnt-v3")
 def test_the_cli_refuses_a_cross_window_comparison_with_a_nonzero_exit(tmp_path):
     """End to end, through argv: the guard must fire before any model is loaded."""
     make_model(tmp_path, "v3", 2048, losses=[(500, 5.0), (1000, 4.0), (1500, 3.0)])

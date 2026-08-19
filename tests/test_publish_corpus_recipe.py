@@ -22,6 +22,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from conftest import needs_artifacts
+
 ROOT = Path(__file__).resolve().parent.parent
 
 # Loaded by file path, matching this repo's convention (see test_publish_to_hub.py /
@@ -239,6 +241,7 @@ def test_dry_run_never_touches_the_hub(monkeypatch, capsys):
     assert "generated card" in out
 
 
+@needs_artifacts("artifacts/corpus")
 def test_publish_without_yes_refuses_and_does_not_touch_the_hub(monkeypatch, capsys):
     _boom_hf_api(monkeypatch)
     rc = pcr.cmd_publish("episod/tt-tnt-corpus", yes=False, tokens_dir=pcr.TOKENS_DIR_DEFAULT)
@@ -362,6 +365,7 @@ def test_verify_detects_visibility_drift(tmp_path, monkeypatch, capsys):
     assert "visibility" in out.lower()
 
 
+@needs_artifacts("artifacts/corpus")
 def test_verify_does_not_pass_vacuously_with_an_empty_or_broken_fake():
     """Guards against a fake so weak it always reports success. If cmd_verify is called
     against a fake Hub with NOTHING on it, every file must be reported as a failure to
