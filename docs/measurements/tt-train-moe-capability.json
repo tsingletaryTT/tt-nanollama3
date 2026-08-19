@@ -1,0 +1,26 @@
+{
+  "what": "What tt-train's MoE support can and cannot do on this box, measured on tt-metal v0.77.0",
+  "date": "2026-08-18",
+  "why": "The MoE arch question was open: if tt-tnt grows a sparse-MoE variant, what can this hardware actually train? Sparse MoE training landed in tt-train as #43508 (c3a3b4e508) and is available for the first time today.",
+  "hardware": "2 chips of one P300 board (lease-granted; a 1-chip request expands to the board)",
+  "results": [
+    {
+      "suite": "tt-train/tests/python/test_deepseek_sparse_moe.py",
+      "result": "13 passed",
+      "reading": "Sparse MoE training ops run here. This is the path a tt-tnt MoE variant would use."
+    },
+    {
+      "suite": "tt-train/tests/python/test_deepseek_sparse_ep.py",
+      "result": "3 skipped",
+      "reason": "Expert parallelism wants a 32-node mesh. The fabric topology mapper refuses explicitly: 'target graph is larger with 32 nodes, but global graph only has 2 nodes'.",
+      "reading": "Expert-parallel MoE is out of reach on a single P300 board. Not a bug, a size requirement."
+    }
+  ],
+  "consequence_for_tt_tnt": {
+    "viable_here": "A sparse MoE variant trained WITHOUT expert parallelism -- experts sharded within the 2 chips we have.",
+    "not_viable_here": "Anything relying on EP across a large mesh. Those configs (deepseek_16B_8chip_ep.yaml, deepseek_16B_32chip_ep.yaml) are for hardware we do not have.",
+    "starting_config": "tt-train/configs/training_configs/tiny_deepseek_single_sparse_ep.yaml is the small one; tiny_deepseek_single_dense.yaml is its dense control.",
+    "and_the_serving_constraint_still_applies": "Whatever kv head count an MoE variant uses must be divisible by 2 (and by 4 for P300_X2), or it cannot be served on this hardware at all -- see serving-on-v077.json. kv=3 is already a dead end for the 384 model."
+  },
+  "not_claimed": "No MoE model was trained. This measures only that the ops and their tests run, and where the size ceiling is."
+}
