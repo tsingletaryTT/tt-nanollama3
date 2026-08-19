@@ -1,0 +1,37 @@
+{
+  "what": "Localising the device looping gap found in serving-on-v077.json",
+  "date": "2026-08-19",
+  "model": "artifacts/hf-tt-tnt-1024-dialogue (episod/tt-tnt-1024)",
+  "stack": "tt-metal v0.77.0, vllm-tt-plugin bd150c7",
+  "metric": "local repeat rate -- fraction of the first 40 generated tokens already seen in the preceding 4. Definition copied verbatim from decode-defect-resolved.json.",
+
+  "three_arms": {
+    "cpu_reference": {"median": 0.0125, "per_prompt": [0.0, 0.025, 0.107, 0.0, 0.025, 0.0]},
+    "direct_tt_transformers": {"median": 0.0000, "per_prompt": [0.0, 0.0, 0.025, 0.0, 0.0, 0.0],
+      "how": "tt_transformers Generator driven directly, 1x1 mesh, greedy host-side argmax, sampling_params=None, NO vLLM. scripts/direct_greedy_check.py"},
+    "vllm": {"median": 0.1125, "per_prompt": [0.075, 0.125, 0.800, 0.05, 0.1, 0.125]}
+  },
+
+  "verdict": "The defect is in the vLLM layer, not in ttnn/tt_transformers and not in the model.",
+  "strength_of_that_verdict": "The direct arm is not merely better than vLLM, it is CLEANER THAN THE CPU REFERENCE (0.0000 vs 0.0125). The prompt that loops worst under vLLM -- 'The cat sat on the mat and looked at the', 0.80, generating 'The cat. The cat. The cat.' -- generates 'stars. The cat was happy to see the star...' on the same device via the direct path. Same weights, same prompts, same greedy rule.",
+
+  "what_is_already_excluded": {
+    "the_model": "CPU reference on the same weights does not loop, and neither does the direct device path.",
+    "the_kernels_and_ttnn_decode": "The direct arm exercises them and is clean.",
+    "the_plugin_commit": "A/B across c127c17 and bd150c7 was byte-identical (see serving-on-v077.json finding 3). Note this excludes the DIFFERENCE between those two commits, not the plugin as a whole."
+  },
+
+  "leading_hypothesis": {
+    "claim": "Paged attention. It is the largest remaining structural difference between the two arms: the direct arm runs paged_attention_config=None, and vLLM cannot -- it served with block_size=64.",
+    "status": "UNTESTED. Not supported, not refuted.",
+    "why_untested": "Enabling paging in the direct arm fails before generating anything: ttnn.experimental.paged_fill_cache throws 'ShapeBase[] index out of range. 3 not in [-4, 3)' from attention.py:1052 during prefill. It indexes dim 3 of a rank-3 tensor, so the paged KV cache is not the rank the op expects for this model.",
+    "not_a_finding": "This failure is the harness, NOT evidence about paging. Two page-table constructions were tried -- a minimal identity table and the reference construction from simple_text_demo.py's create_tt_page_table, with max_num_blocks raised from 8 to 512 -- and both fail identically, which rules out page-table shape and block count as the cause of the throw.",
+    "why_it_stopped_here": "Going further means changing tt-metal, which is out of bounds for this project. Logged rather than pursued."
+  },
+
+  "next_cuts_if_resumed": [
+    "Serve through vLLM with paging effectively disabled (single block per sequence, or a build that skips paged_fill_cache) and re-measure. If it goes clean, paging is confirmed without needing the direct arm to page at all.",
+    "Bisect the vLLM layer itself rather than the plugin commit: the upstream vllm version in venv-vllm-standalone is a candidate that the c127c17/bd150c7 A/B says nothing about.",
+    "Check paged allocation coverage against the attention op's rounded read window, and log the first repeat's absolute sequence position against the block boundary -- if the loop starts at a multiple of 64 that is close to proof."
+  ]
+}
