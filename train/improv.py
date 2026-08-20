@@ -98,7 +98,12 @@ def extract_slots(prefix: str, continuation: str, *, idf: Dict[str, float],
     last_words = content_words(last)
     carried = [w for w in last_words if w in set(c_words)]
     if not carried:
-        carried = [w for w in sorted(set(p_words), key=p_words.count, reverse=True)
+        # Tie-break alphabetically: set() iteration order depends on Python's
+        # per-process string hash randomization (PYTHONHASHSEED), so a bare count key
+        # lets ties resolve differently across runs on identical input. The corpus
+        # this produces must be reproducible, so the key must be total (unique) —
+        # negate the count to keep most-frequent-first under the plain ascending sort.
+        carried = [w for w in sorted(set(p_words), key=lambda w: (-p_words.count(w), w))
                    if w in set(c_words)][:1]
     if not carried:
         return None                      # nothing carried forward -> a block -> drop
@@ -106,7 +111,10 @@ def extract_slots(prefix: str, continuation: str, *, idf: Dict[str, float],
     fresh = [w for w in c_words if w not in set(p_words)]
     if not fresh:
         return None                      # nothing added -> also a block -> drop
-    fresh_ranked = sorted(set(fresh), key=lambda w: -idf.get(w, 0.0))
+    # Same reproducibility concern as the `carried` sort above: append the word itself
+    # to the key so IDF ties resolve alphabetically instead of by hash-randomized
+    # set() iteration order, which would otherwise vary between processes.
+    fresh_ranked = sorted(set(fresh), key=lambda w: (-idf.get(w, 0.0), w))
     add = ", ".join(fresh_ranked[:1])
 
     delta = intensity(continuation) - intensity(prefix)

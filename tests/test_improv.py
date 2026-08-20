@@ -53,3 +53,38 @@ def test_stakes_reads_up_when_intensity_rises():
     got = extract_slots(prefix, continuation, idf=_idf(["cut", "cried"]),
                         intensity=lambda t: 5.0 if "cut" in t else 0.0)
     assert got is not None and got.stakes == "up"
+
+
+def test_extract_drops_when_nothing_is_added():
+    """A continuation that only repeats the prefix carries forward but adds nothing.
+
+    That's the *other* way to be a boring block: `carried` must succeed here (every
+    continuation word already appears in the prefix's last sentence, so the function
+    gets past the carry-forward check) and only then does `fresh` come up empty. This
+    exercises the `if not fresh: return None` branch specifically, distinct from the
+    carry-forward drop covered above.
+    """
+    prefix = "Lily found a needle. She showed the needle to her mother."
+    continuation = "Mother showed the needle."
+    got = extract_slots(prefix, continuation, idf=_idf([]),
+                        intensity=lambda t: 0.0)
+    assert got is None
+
+
+def test_extract_breaks_add_ties_alphabetically():
+    """Slot extraction feeds training data, so identical input must always yield the
+    same slots. `fresh_ranked` sorts a `set()` of strings, and Python randomizes
+    string-hash order per process — with a plain `-idf` key, two words tied on IDF
+    could come out in either order depending on process, and the corpus would be
+    non-reproducible. `zebra` and `apple` are tied at the top IDF here; `near` is
+    strictly lower so it can't be confused with the tie. The fixed key breaks the tie
+    alphabetically, so `apple` (not `zebra`) must always be chosen — an outcome that's
+    only guaranteed under the fixed sort key, not the old `-idf.get(w, 0.0)` one.
+    """
+    prefix = "Lily found a needle. She showed the needle to her mother."
+    continuation = "Mother showed the needle near a zebra and an apple."
+    got = extract_slots(prefix, continuation,
+                        idf=_idf(["near"]) | {"zebra": 5.0, "apple": 5.0},
+                        intensity=lambda t: 0.0)
+    assert got is not None
+    assert got.add == "apple"
