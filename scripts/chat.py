@@ -4,21 +4,28 @@
 """Interactive completion REPL for the converted tt-tnt model. CPU only.
 
 **This is a completion model, not a chat model.** It has no chat template and no
-instruction tuning — it was trained to continue TinyStories-style prose, for 0.43 of one
-epoch at ~22M parameters. Asking it questions will disappoint. Give it the opening of a
-simple story and it does well:
+instruction tuning — it was trained to continue prose. Asking it questions will
+disappoint. Give it the opening of a simple story and it does well:
 
     Once upon a time, there was a little
     Lily found a shiny red
     The dog wanted to
 
-Runs against the local converted artifact (``artifacts/hf/``) on CPU — no Tenstorrent
-hardware needed, since the conversion's whole point is that it is host-portable.
+Runs against a local converted artifact on CPU — no Tenstorrent hardware needed, since
+the conversion's whole point is that it is host-portable. Being CPU-only also makes this
+the *reference* path: the vLLM device path has an open decode defect where the model
+repeats more than this does, so what you see here is the model at its actual quality.
 
     python scripts/chat.py
     python scripts/chat.py --temperature 0.6 --max-new-tokens 80
 
-Commands inside the REPL: ``/temp <float>``, ``/len <int>``, ``/greedy``, ``/quit``.
+Commands inside the REPL: ``--temp <float>``, ``--len <int>``, ``/greedy``, ``/quit``.
+
+DEFAULT MODEL: ``artifacts/hf-tt-tnt-1024-dialogue`` — 123M parameters, 8 layers, dim
+1024, 512-token context, one full epoch. The previous default was ``artifacts/hf``, which
+is still on disk but is the OLD 384-dim/6-layer/256-context model from an earlier
+iteration; pointing at it silently served a much weaker model that looked like this one.
+Pass ``--model artifacts/hf`` if you actually want it.
 """
 
 from __future__ import annotations
@@ -28,7 +35,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_MODEL = ROOT / "artifacts" / "hf"
+DEFAULT_MODEL = ROOT / "artifacts" / "hf-tt-tnt-1024-dialogue"
 
 
 def main() -> int:
