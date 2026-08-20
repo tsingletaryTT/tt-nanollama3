@@ -697,6 +697,29 @@ def main() -> int:
                    help="Learning rate at the end of the decay (ignored by 'constant'). "
                         "Defaults to one tenth of the configured LR, the conventional 10x "
                         "decay. Reported explicitly at startup either way.")
+    p.add_argument("--moe", action="store_true",
+                   help="Mixture of Enthusiasts: replace the feed-forward in the later "
+                        "blocks with ttml's sparse MoE (train/enthusiasts.py). Requires "
+                        "--model-impl python, since the swap is an attribute assignment on "
+                        "ttml's Python LlamaBlock and the C++ factory exposes no such slot.")
+    p.add_argument("--moe-experts", type=int, default=10,
+                   help="routed experts. Defaults to 10, one per corpus source, which is "
+                        "what the die regions were measured over.")
+    p.add_argument("--moe-top-k", type=int, default=2)
+    p.add_argument("--moe-width", type=int, default=928,
+                   help="one expert's feed-forward width. 928 with top-2 plus one shared "
+                        "expert gives 0.989x the dense model's ACTIVE parameters, which is "
+                        "the only sizing under which an MoE arm and the dense control are "
+                        "comparable. The default is that number, not a round one.")
+    p.add_argument("--moe-shared", type=int, default=1)
+    p.add_argument("--moe-first-block", type=int, default=2,
+                   help="leading blocks left dense. The earliest blocks do position and "
+                        "syntax, which every token needs.")
+    p.add_argument("--gate-policy", default="learned", choices=("learned", "seeded", "frozen"),
+                   help="learned is stock and is the control; seeded and frozen use the die.")
+    p.add_argument("--moe-balance", action="store_true",
+                   help="mass-balance the die partition (7.66x -> 1.50x). A DIFFERENT "
+                        "routing from the one whose register effect was measured.")
     p.add_argument("--warmup-frac", type=float, default=0.0,
                    help="Fraction of the run spent ramping the LR linearly from 0 to its "
                         "base value before anything else. 0 (default) disables warmup, so "
@@ -956,6 +979,25 @@ def main() -> int:
             model = tt_tnt_model.create_model(yaml_config, transformer_config)
         else:
             model = TransformerModelFactory(yaml_config).create_model()
+        moe_summary = None
+        if args.moe:
+            if args.model_impl != "python":
+                print("error: --moe needs --model-impl python (the swap is an attribute "
+                      "assignment on ttml's Python LlamaBlock)", file=sys.stderr)
+                return 2
+            from train.enthusiasts import MoEHyperparams, install_enthusiasts
+            hp = MoEHyperparams(
+                dim=size.embedding_dim if hasattr(size, "embedding_dim") else 1024,
+                moe_inter_dim=args.moe_width,
+                n_routed_experts=args.moe_experts,
+                n_activated_experts=args.moe_top_k,
+                n_shared_experts=args.moe_shared,
+            )
+            moe_summary = install_enthusiasts(
+                model, hp, gate_policy=args.gate_policy,
+                first_moe_block=args.moe_first_block)
+            moe_summary["balanced_partition"] = bool(args.moe_balance)
+
         optimizer = create_optimizer(model, yaml_config)
 
         # ttml's train() sets the progress bar's val_loss to a copy of train_loss whenever
@@ -1062,6 +1104,8 @@ def main() -> int:
             "warmup_frac": args.warmup_frac,
             "lr_decay_start_frac": args.lr_decay_start_frac,
             "tt_metal": _describe_tt_metal(args.tt_metal_home),
+            # None for a dense run, so a manifest never implies experts that are not there.
+            "moe": moe_summary,
         }
         _mpath = Path(args.checkpoint_dir) / "run_manifest.json"
         _mpath.parent.mkdir(parents=True, exist_ok=True)

@@ -120,14 +120,15 @@ def build() -> str:
     o.append(text(58, y + 126, "LlamaMLP.forward(Tensor) -> Tensor", size=11, font=MONO, fill=ACCENT))
 
     o.append(box(540, y + 36, 420, 108, fill=TEAL, op=0.10, stroke=ACCENT))
-    o.append(text(558, y + 58, "our subclass — roughly twenty lines", size=11, font=MONO, fill=INK2))
+    o.append(text(558, y + 58, "ours — twenty lines, and it TRAINS", size=11, font=MONO, fill=ACCENT, weight=600))
     o.append(text(558, y + 80, "class EnthusiastBlock(LlamaBlock):", size=13, font=MONO, weight=600))
     o.append(text(574, y + 100, "self.mlp = SparseMoEEP(...)", size=13, font=MONO, fill=INK))
     o.append(text(558, y + 126, "SparseMoEEP.forward(Tensor) -> Tensor", size=11, font=MONO, fill=ACCENT))
 
     o.append(arrow(462, y + 92, 536, y + 92))
     o.append(text(499, y + 82, "same", size=10, font=MONO, fill=INK2, anchor="middle"))
-    o.append(text(499, y + 160, "identical signature is the whole argument",
+    o.append(text(499, y + 160, "identical signature is the whole argument — "
+                  "10.5625 to 7.7500 in 20 steps on one Blackhole card",
                   size=11, fill=INK2, anchor="middle"))
 
     # ---- 3. the routing, which is ours --------------------------------------

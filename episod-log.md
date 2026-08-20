@@ -499,3 +499,39 @@ rather than for one we would otherwise have had to trust.
 A model whose vocabulary has an address, sampling by walking its own die, routing
 to sub-networks that live where its words do. None of that is required. It is what
 the hardware makes sayable.
+
+### It trains
+
+Later the same day, the subclass ran.
+
+    enthusiasts: 10 routed + 1 shared, top-2, expert width 928
+    blocks     : 8 total, dense 0..1, MoE 2..7
+
+    first train loss : 10.5625
+    last  train loss :  7.7500
+    real  val   loss :  7.5344      (20 steps, batch 8)
+
+Forward, backward, optimiser step, loss descending, on one Blackhole card — the
+same descent shape the dense model shows over its own first twenty steps. Six of
+eight feed-forwards are now a sparse mixture and the model does not appear to have
+noticed.
+
+The reason it is twenty lines rather than a fork is that `LlamaBlock` holds its
+feed-forward in a plain attribute and `SparseMoEEP.forward` has the identical
+signature. That is the whole trick. It also corrects something written earlier
+today: MoE looked like it would drag tt-tnt onto the DeepSeek family, which would
+have meant a new embedding matrix and the loss of every die-region measurement.
+True of the shipped configs, false of the module.
+
+Two faults were caught by arithmetic before hardware was spent on them. The
+obvious expert width gives 0.38× the dense model's *active* parameters, so that arm
+would have lost on capacity while seeming to report on routing; 928 gives 0.989×.
+And plain Voronoi routing is 7.66× imbalanced — one enthusiast owning 20.9% of the
+vocabulary and another 2.7% — which a frozen gate could not survive, so a
+mass-balanced partition brings it to 1.50× while staying spatial.
+
+What this is not: a quality claim. Twenty steps says the machinery runs. The gate
+here is the stock learned one, which is the *control* arm; the seeded and frozen
+policies, the ones that actually connect the die to the router, are declared and
+not yet written.
+

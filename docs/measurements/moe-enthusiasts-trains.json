@@ -1,0 +1,30 @@
+{
+  "what": "A Mixture of Enthusiasts trains: tt-tnt's Llama with 6 of 8 feed-forwards replaced by ttml's sparse MoE",
+  "date": "2026-08-19",
+  "result": "Forward, backward, optimiser step, loss descending, on one Blackhole card.",
+  "smoke": {
+    "steps": 20, "batch_size": 8, "seq_len": 512, "tokens_dir": "artifacts/tokens-v4",
+    "first_train_loss": 10.5625, "last_train_loss": 7.75, "real_val_loss": 7.5344,
+    "throughput": "~7 it/s at batch 8 on a single chip once warm"
+  },
+  "architecture": {
+    "blocks": 8, "dense_blocks": [0, 1], "moe_blocks": [2, 3, 4, 5, 6, 7],
+    "n_routed_experts": 10, "n_shared_experts": 1, "n_activated_experts": 2,
+    "expert_width": 928, "gate_policy": "learned",
+    "why_10_experts": "one per corpus source, which is what the die regions were measured over",
+    "why_2_dense_blocks": "the earliest blocks do position and syntax, which every token needs; the shipped DeepSeek config uses n_dense_layers: 2 for the same reason",
+    "why_width_928": "top-2 plus one shared gives 0.989x the dense model's ACTIVE parameters. That is the only sizing under which an MoE arm and the dense control are comparable; the obvious smaller width gives 0.38x and would lose on capacity while appearing to say something about routing."
+  },
+  "how_it_is_possible_in_twenty_lines": {
+    "the_seam": "ttml/models/llama/transformer.py:177 holds the feed-forward as a plain attribute, self.mlp = LlamaMLP(...), and LlamaMLP.forward and SparseMoEEP.forward have the identical signature forward(Tensor) -> Tensor.",
+    "separability": "SparseMoEEP imports ttnn, ttml, .moe and .autograd_ops, and nothing from DeepSeek's attention. The MoE feed-forward is separable from the model family that ships it.",
+    "why_not_subclass_Llama": "Llama.__init__ builds its own ModuleList of blocks. Injecting a block type means duplicating that construction and keeping the duplicate in step with upstream forever; reassigning block.mlp touches one attribute and inherits future changes."
+  },
+  "what_this_corrects": "An earlier note in this session stated that MoE would force tt-tnt onto the DeepSeek model family -- MLA attention, a nope/rope head split, and a NEW EMBEDDING MATRIX that would have invalidated artifacts/token_core_map.npz and every die-region measurement with it. True of the shipped configs, false of the module. tt-tnt keeps GQA, RoPE, its tokenizer, its vocabulary and its die map.",
+  "what_this_is_NOT": [
+    "Not a quality result. Twenty steps at batch 8 shows the machinery runs; it says nothing about whether the MoE is better than the dense model.",
+    "Not the four-arm experiment. The gate here is stock (learned) -- the control arm. The seeded and frozen policies, which are the ones that connect the die to the router, are declared and NOT YET IMPLEMENTED.",
+    "Not load-balanced. This run used plain Voronoi routing at 7.66x imbalance, which matters for a frozen gate and not for a learned one. --moe-balance exists and gives 1.50x, and is a DIFFERENT routing from the one whose register effect was measured."
+  ],
+  "next": "Implement seeded/frozen gate initialisation, then run the arms: dense (already trained, val 2.9570), learned, seeded, frozen. The measurement most worth having is whether a free gate drifts toward or away from the measured die regions."
+}
