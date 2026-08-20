@@ -1,0 +1,18 @@
+# train/data/closure_lexicon.txt
+# Curated closure markers for the `affordance` scorer.
+# HAND-CURATED, not scraped: a scraped list cannot be audited, and this one is small
+# enough to read. These are phrases that signal a continuation is WRAPPING UP the scene
+# rather than opening it further ("They went to bed." vs. "But what was inside the box?").
+# Checked as a raw substring against the final sentence's lowercased text (not just its
+# tokenised content words), because two of these ("ever after", "the end") are multi-word
+# and would never match a single-token lookup.
+bed
+asleep
+sleep
+ever after
+the end
+home
+finished
+done
+goodnight
+happily
