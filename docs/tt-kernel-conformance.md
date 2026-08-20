@@ -138,6 +138,37 @@ tt-metal change it needs without that change landing upstream first**, and the v
 bundle-folder design is what makes that possible. Worth stating in tt-model's own docs as
 a supported pattern rather than leaving authors to discover it.
 
+### 6. Five defects from one day of being a real consumer (2026-08-20)
+
+Migrating this model onto the renamed `tt-model` CLI surfaced five defects, all of the same
+shape: **the tool reported on something other than what would actually run.** Three are in
+hand (one merged, two in review) and two are not.
+
+| # | defect | status |
+|---|---|---|
+| 6a | `resolve_version()` trusted frozen editable dist-metadata over the source tree, so a rebuilt checkout reported its install-time version forever (`ttnn=0.65.1rc17.dev6200` for a v0.77.0 tree) — and every manifest range like `>=0.72` was then evaluated against a bogus 0.65 and silently failed to match | **merged**, `f572d1a` |
+| 6b | `check_toolchain()` decided vLLM/plugin presence with an in-process `find_spec`, describing tt-model's own venv rather than the instance that serves. A false negative for *every* registered instance on this host: `serve --print` warned the plugin was missing directly above a command that serves fine. The same function's **hard-error** path was already correct, with a comment naming this exact trap — so the warning and the error disagreed about one host | draft PR **#18** |
+| 6c | The block reporting which instance satisfies a bundle's ranges sat *after* `_report_bundle_requirements`'s `return`. Unreachable since written, so `doctor <bundle>` printed the required ranges and then went silent about the one thing you run it to learn | draft PR **#18** |
+| 6d | `installed.json` pins whatever `TT_METAL_HOME` was set when the bundle was staged, with no way to re-point it. Ours recorded a `/tmp/.../scratchpad` path that resolved only because it happened to be a symlink to the real tree, and would have died with the session | **unfixed** |
+| 6e | A vLLM-backend bundle can resolve to an interpreter that cannot import vLLM. Re-staging ours picked tt-model's own venv, because the bundle declares only `platform_ttnn` and selection had no vLLM constraint to apply. Serving through that pin hard-fails | **unfixed** |
+
+### This file is now also executable
+
+Everything above was found by a human reading output and noticing it was wrong, which does
+not scale and does not re-check itself: nothing re-verified findings 1–5 while 6a–6e were
+being found. [`scripts/stack_probe.py`](../scripts/stack_probe.py) turns the repeatable part
+into one command. Every check in it is a failure **this project has actually observed** —
+6a, 6b, 6d, 6e above, plus two of our own — and every one was watched fail before being
+trusted, including two that first failed in a form that was the *probe's* bug rather than
+the stack's.
+
+    python scripts/stack_probe.py                 # host + CLI checks, no device
+    python scripts/stack_probe.py --with-device    # adds a training smoke (needs a lease)
+
+Two of its checks need no hardware at all and run in CI. What it cannot do is replace this
+file: a probe re-checks known failures, and finding the *next* defect still means authoring
+a real bundle and reading the output.
+
 ## Still unproven
 
 - **Serving correctness.** The bundle registers, launches, and generates, but generated
