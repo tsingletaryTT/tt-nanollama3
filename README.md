@@ -19,7 +19,7 @@ training, packaging, publishing and serving — on Tenstorrent tooling.
 **512-token context window**, bfloat16. One epoch over the 352,641,058-token training split of
 a 391.8M-token corpus. No instruction tuning; it continues text rather than answering
 questions, and it repeats itself under greedy decoding. Trained from random initialization on
-Blackhole with `ttml`, converted to Hugging Face format, packaged with tt-kernel, and served
+Blackhole with `ttml`, converted to Hugging Face format, packaged with tt-model, and served
 through the Tenstorrent vLLM plugin on tt-metal v0.77.0.
 
 512 is the real number. Some 384-size artifacts in this repository *declare* 2048, and that is
@@ -113,7 +113,7 @@ the `tt-tnt-v1` run whose epoch and losses this section quotes.
 `scripts/publish_to_hub.py` creates the repo private by default and has no code path that flips
 it public itself; the repo's visibility was changed to public separately, as an
 explicitly-authorized action outside that script (2026-08-14), and is expected to stay that
-way. The tt-kernel packaging manifests are under [`manifests/`](manifests/), and
+way. The tt-model packaging manifests are under [`manifests/`](manifests/), and
 [`docs/serving-with-tt-kernel.md`](docs/serving-with-tt-kernel.md) is the procedure for pulling
 and serving that bundle. See
 [`docs/superpowers/specs/`](docs/superpowers/specs/) for the full arc.
@@ -401,13 +401,13 @@ Run the tests with `python -m pytest`. They need no hardware.
 
 ## Packaging and serving
 
-The published checkpoint is packaged as a **tt-kernel v4 bundle** — a manifest under
+The published checkpoint is packaged as a **tt-model v4 bundle** — a manifest under
 [`manifests/`](manifests/) plus [`bundle/tt_tnt_adapter.py`](bundle/tt_tnt_adapter.py), the
 class the Tenstorrent vLLM plugin imports — and served through that plugin:
 
 ```bash
 cd <the vLLM plugin's examples/ directory>          # the launch command is cwd-dependent
-tt-kernel serve episod/tt-tnt --force --instance metal-src-vllm
+tt-model serve episod/tt-tnt --force --instance metal-src-vllm
 ```
 
 [`docs/serving-with-tt-kernel.md`](docs/serving-with-tt-kernel.md) is the guide: what the

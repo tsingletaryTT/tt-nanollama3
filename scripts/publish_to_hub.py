@@ -8,7 +8,7 @@ Uploads the current HF artifact directory (``HF_DIR``, see below -- it is *not*
 ``episod/tt-tnt``. Re-runnable by design, because it has to be run more than once:
 
 * Once, to do the initial publish (default action, below).
-* Every time ``tt-kernel push`` runs against this repo, because tt-kernel's ``tag_repo``
+* Every time ``tt-model push`` runs against this repo, because tt-kernel's ``tag_repo``
   (``src/tt_kernel/hub.py:56-66``) replaces the card's front matter with
   ``ModelCardData(tags=...)`` and *nothing else* -- it destroys ``license``,
   ``pipeline_tag``, ``library_name``, and ``datasets`` on every push. ``--restore-card``
@@ -49,7 +49,7 @@ Usage:
     python scripts/publish_to_hub.py --dry-run              # preview the initial publish
     python scripts/publish_to_hub.py --yes                  # do the initial publish
     python scripts/publish_to_hub.py --restore-card --dry-run
-    python scripts/publish_to_hub.py --restore-card --yes   # re-apply the card after tt-kernel push
+    python scripts/publish_to_hub.py --restore-card --yes   # re-apply the card after tt-model push
     python scripts/publish_to_hub.py --verify                # round-trip check against the Hub
 """
 
@@ -365,7 +365,7 @@ def cmd_publish(repo_id: str, dry_run: bool, yes: bool) -> int:
 
 
 def cmd_restore_card(repo_id: str, dry_run: bool, yes: bool) -> int:
-    """Re-apply the target's card, for use after a tt-kernel push damages front matter."""
+    """Re-apply the target's card, for use after a tt-model push damages front matter."""
     target = target_for(repo_id)
     print(f"repo:    {repo_id}")
     print(f"card:    {target["card"].relative_to(ROOT)}")
@@ -465,7 +465,7 @@ def main(argv: list[str] | None = None) -> int:
     mode = p.add_mutually_exclusive_group()
     mode.add_argument("--restore-card", action="store_true",
                        help="Only re-apply docs/model-card.md as the repo card (use after "
-                            "`tt-kernel push` damages front matter). Skips repo creation "
+                            "`tt-model push` damages front matter). Skips repo creation "
                             "and weight upload.")
     mode.add_argument("--verify", action="store_true",
                        help="Read-only round-trip check: load the published model+tokenizer "

@@ -84,7 +84,7 @@ def _describe_tt_metal(tt_metal_home: str) -> str:
     editable, and an editable install records its version once at ``pip install -e``
     time and never revisits it. Reading the metadata after an in-place upgrade
     reports a version from months ago -- the same trap that made
-    ``tt-kernel serve`` advise upgrading a tree that had just been upgraded.
+    ``tt-model serve`` advise upgrading a tree that had just been upgraded.
     """
     import subprocess
     try:

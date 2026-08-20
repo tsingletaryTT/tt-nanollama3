@@ -359,7 +359,7 @@ the corpus gave it, and it declines the premise by simply having other business.
 ## 2026-08-18 — the newest checkpoint, packaged and served
 
 `artifacts/hf-tt-tnt-1024-dialogue` — the 1024 size trained on the corpus with the
-dialogue slice — is now packaged as a tt-kernel bundle and serves through the
+dialogue slice — is now packaged as a tt-model bundle and serves through the
 vLLM plugin. This is the first 1024-size checkpoint to go through the packaging
 path at all: every bundle before it carried the 384-dim v3, and
 `manifests/tt_kernel_manifest-1024.json` still says "WEIGHTS NOT YET TRAINED"

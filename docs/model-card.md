@@ -3,8 +3,8 @@
 <!--
   SOURCE OF TRUTH for the Hugging Face model card at episod/tt-tnt.
 
-  Kept in this repo because tt-kernel's `tag_repo` (hub.py:56-66) replaces the card's
-  front matter wholesale with `ModelCardData(tags=...)` on every `tt-kernel push`,
+  Kept in this repo because tt-model's `tag_repo` (hub.py:56-66) replaces the card's
+  front matter wholesale with `ModelCardData(tags=...)` on every `tt-model push`,
   destroying `license`, `pipeline_tag`, `library_name`, and `datasets`. The prose body
   survives; the metadata does not. After any tt-kernel operation, re-apply the front
   matter below and verify it stuck.

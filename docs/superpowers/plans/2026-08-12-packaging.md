@@ -22,7 +22,7 @@ Checked directly before writing this plan:
 
 ## The constraint that dictates ordering — and a correction
 
-An earlier note in this project said the model card and license must exist **before** the first `tt-kernel push`. **That is wrong**, and the correction matters because it inverts the sequence.
+An earlier note in this project said the model card and license must exist **before** the first `tt-model push`. **That is wrong**, and the correction matters because it inverts the sequence.
 
 `hub.tag_repo` (`src/tt_kernel/hub.py:56-66`) does:
 
@@ -169,7 +169,7 @@ host and cannot serve on the hardware it was trained on would be a poor thing to
 public. Publishing is effectively irreversible — people clone, caches propagate, links get
 shared — so the gate belongs after the strongest evidence, not the earliest.
 
-Flipping public becomes **Task 4 Step 5**, after `tt-kernel serve` answers a real query.
+Flipping public becomes **Task 4 Step 5**, after `tt-model serve` answers a real query.
 
 ---
 
@@ -233,19 +233,19 @@ Shape confirmed against `tt_kernel/manifest.py`:
 
 Also assert `weights.repo` matches the published repo id, since tt-kernel never validates that the weights repo matches `entrypoint.arch_name`.
 
-- [ ] **Step 2: `tt-kernel push`, then immediately check what it did to the card**
+- [ ] **Step 2: `tt-model push`, then immediately check what it did to the card**
 
 After pushing, re-read the repo's card and record which front-matter fields survived. Restore the licence and any other lost fields from `docs/model-card.md`. **This is the step the ordering correction exists for.**
 
 - [ ] **Step 3: Pull and serve**
 
-`tt-kernel pull` onto a clean bundles dir, then `tt-kernel serve`, then query the endpoint. Report the actual response.
+`tt-model pull` onto a clean bundles dir, then `tt-model serve`, then query the endpoint. Report the actual response.
 
 - [ ] **Step 5: Flip the HF repo public — the final gate**
 
 Only now, and only if all of these hold:
 
-- `tt-kernel pull` + `tt-kernel serve` brought up an endpoint on Tenstorrent hardware
+- `tt-model pull` + `tt-model serve` brought up an endpoint on Tenstorrent hardware
 - a real query returned coherent output (report it verbatim)
 - the model card's front matter has been restored after `tag_repo` damaged it
 - the repo-level licence is still set
@@ -259,7 +259,7 @@ than a public one that cannot serve.
 
 - [ ] **Step 6: Record results in CLAUDE.md**
 
-Including what `tt-kernel push` did to the model card, since that is the finding most useful to the next person.
+Including what `tt-model push` did to the model card, since that is the finding most useful to the next person.
 
 ---
 

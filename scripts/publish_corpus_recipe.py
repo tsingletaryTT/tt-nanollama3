@@ -49,7 +49,7 @@ Safety rules baked into this script, not left to the caller's discipline:
 * **Never change repo visibility.** The repo is PUBLIC (``EXPECTED_PRIVATE = False``) and
   must stay that way. This script never passes a ``private=`` argument to any Hub call, and
   ``_assert_visibility_unchanged`` reads the Hub's own ``private`` flag before and after any
-  write to prove nothing moved it. Do NOT use ``tt-kernel push`` for this repo -- it calls
+  write to prove nothing moved it. Do NOT use ``tt-model push`` for this repo -- it calls
   ``set_visibility`` unconditionally on every push, which is exactly the failure mode this
   guard exists to catch.
 

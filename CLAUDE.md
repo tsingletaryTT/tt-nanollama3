@@ -1078,7 +1078,7 @@ three ways**: reverting the patch fails 13, keying on a constant fails 9, droppi
 fails the retrain test specifically.
 
 **F8 is deliberately not in the adapter.** `~/.cache/tt-kernel/bundles/` is consumed by
-`tt-kernel serve` *before* the vLLM process exists: the stale bundle's `vllm_metadata.json`
+`tt-model serve` *before* the vLLM process exists: the stale bundle's `vllm_metadata.json`
 supplies the launch command (`--max_model_len 512`) that starts the process that would import
 this adapter. The adapter cannot reach backwards past its own `argv`. It belongs in tt-kernel
 (`cli.py:1276 _serve_vllm` → `_ensure_vllm_pulled`), as a `--refresh` flag plus a revision

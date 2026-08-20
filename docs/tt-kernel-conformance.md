@@ -8,7 +8,7 @@ This project exists partly to be a **hard consumer** of
 bundle, serve it, and report what breaks. This file is that report.
 
 Everything below was measured against tt-kernel at `00dba42` by authoring manifests and
-running tt-kernel's own rendering code, plus one live serving run. It is written from the
+running tt-model's own rendering code, plus one live serving run. It is written from the
 position of a model author reading the schema and expecting the documented behaviour.
 
 ## Coverage: what our manifest exercises
@@ -135,7 +135,7 @@ the patch applied at import time, and the model ran.
 
 Recording it here because it is the interesting positive result. **A model can carry the
 tt-metal change it needs without that change landing upstream first**, and the v4
-bundle-folder design is what makes that possible. Worth stating in tt-kernel's own docs as
+bundle-folder design is what makes that possible. Worth stating in tt-model's own docs as
 a supported pattern rather than leaving authors to discover it.
 
 ## Still unproven

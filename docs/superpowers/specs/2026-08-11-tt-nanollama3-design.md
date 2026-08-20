@@ -206,7 +206,7 @@ disguised as Llama would undercut the entire point — the exemplar must show wh
 
 ## Stage 6 — The tt-kernel v4 bundle
 
-`bundle/manifest.json`, authored by hand and passed to `tt-kernel push --manifest`:
+`bundle/manifest.json`, authored by hand and passed to `tt-model push --manifest`:
 
 ```json
 {
@@ -240,7 +240,7 @@ topology, but a ~22M model on one device is the honest default.
 
 ## Stage 7 — Publish
 
-`tt-kernel push --manifest ... --public --publish`, then verify the catalog listing. Two things
+`tt-model push --manifest ... --public --publish`, then verify the catalog listing. Two things
 to expect: `filter=tt-kernel-catalog` currently returns zero repos, so this would be the first
 listing; and tt-kernel has no `.github` directory, so `web/` is not deployed anywhere. Getting
 the catalog hosted is out of scope here but should be raised.

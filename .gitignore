@@ -12,3 +12,7 @@ generated/
 # Ad-hoc --try output and smoke runs from scripts/evaluate.py. Deliberately outside
 # docs/, and deliberately outside git: an ad-hoc completion is not a measurement.
 scratch/
+
+# Weight cache written by `tt-model` when a bundle is staged locally (175M of
+# copied safetensors). Regenerable from artifacts/, so it is never committed.
+model_cache/

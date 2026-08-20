@@ -68,7 +68,7 @@ responsibility sits upstream of it.
   `model_max_length: 1000000000000000019884624838656`, so anyone deriving it from the tokenizer
   gets a serving stack accepting 4k contexts from a model trained to 256 — degraded output, no
   error.
-- **The model card and license must exist on the HF repo *before* the first `tt-kernel push`.**
+- **The model card and license must exist on the HF repo *before* the first `tt-model push`.**
   `tag_repo`/`set_catalog_listing` replace the entire model-card front matter with
   `ModelCardData(tags=...)`, discarding anything added afterwards.
 - **Weights must be pushed to an HF repo first.** `weights.repo` will not accept a local path,

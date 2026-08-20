@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 <!-- SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC -->
 
-# Serving tt-tnt with tt-kernel and the Tenstorrent vLLM plugin
+# Serving tt-tnt with tt-model and the Tenstorrent vLLM plugin
 
 The headline of this project is that the model is packaged with
 [tt-kernel](https://github.com/tenstorrent/tt-kernel-package-manager) and served through the
@@ -10,7 +10,7 @@ actually brought a server up, and the traps that cost hours to find.
 
 It is a **how-to**. [`tt-kernel-conformance.md`](tt-kernel-conformance.md) is the neighbouring
 *findings report* — what a v4 manifest can express, which fields are read and which are
-silently ignored — and it is the right file for "is tt-kernel's schema doing what it says".
+silently ignored — and it is the right file for "is tt-model's schema doing what it says".
 This one assumes you want a server. Where the two overlap, this file states the operational
 consequence and links there for the analysis.
 
@@ -33,8 +33,8 @@ Two artifacts, and nothing else:
 | [`manifests/tt_kernel_manifest-384.json`](../manifests/tt_kernel_manifest-384.json) | The v4 manifest — what tt-kernel renders into a launch command |
 | [`bundle/tt_tnt_adapter.py`](../bundle/tt_tnt_adapter.py) | The `main_class` the plugin imports, carrying two runtime patches and one precision default |
 
-`tt-kernel push` renders the manifest into a `vllm_metadata.json` and lays it beside the
-adapter in the bundle folder. That rendered file is what `tt-kernel serve` actually reads:
+`tt-model push` renders the manifest into a `vllm_metadata.json` and lays it beside the
+adapter in the bundle folder. That rendered file is what `tt-model serve` actually reads:
 
 ```json
 {
@@ -174,10 +174,10 @@ with evidence, via `TT_TNT_CAPS`.
 
 ## 2. The environment that can serve it
 
-`tt-kernel serve` launches the bundle under a registered **tt-metal instance**. On this box:
+`tt-model serve` launches the bundle under a registered **tt-metal instance**. On this box:
 
 ```bash
-tt-kernel instances list
+tt-model instances list
 ```
 
 ```
@@ -208,7 +208,7 @@ One command, from the right directory (see [§4.1](#41-the-launch-command-is-cwd
 
 ```bash
 cd /home/ttuser/vllm-tt-plugin-standalone/examples
-tt-kernel serve episod/tt-tnt --force --instance metal-src-vllm
+tt-model serve episod/tt-tnt --force --instance metal-src-vllm
 ```
 
 `serve` pulls the bundle folder if it is absent, points `EXTRA_MODELS_DIR` at it, and launches
@@ -233,7 +233,7 @@ Before you launch, print what will launch. `--print` composes the exact env and 
 and returns without opening a device or a server:
 
 ```bash
-tt-kernel serve episod/tt-tnt --print --local-only --instance metal-src-vllm
+tt-model serve episod/tt-tnt --print --local-only --instance metal-src-vllm
 ```
 
 ```
@@ -258,7 +258,7 @@ Every one of these was found by hitting it. None of them announces itself.
 ### 4.1 The launch command is cwd-dependent
 
 The rendered launch command names `server_example_tt.py` by **bare relative path**, so
-`tt-kernel serve` only works from a directory that happens to contain the plugin's example
+`tt-model serve` only works from a directory that happens to contain the plugin's example
 script. Run it from the model repo and it dies with
 
 ```
@@ -322,7 +322,7 @@ serve recorded here used.
 This is not a tt-tnt problem and its real fix is elsewhere: upgrade `/opt/tenstorrent/sfpi` to
 7.67.0. Until then the newest wheel is unusable on this host.
 
-### 4.4 `tt-kernel push` can change repository visibility as a side effect
+### 4.4 `tt-model push` can change repository visibility as a side effect
 
 On tt-kernel `main`, `--private/--public` is a plain boolean defaulting to `False`, and
 `hub.set_visibility(repo_id, private=private)` runs on **every** push — not only when the repo
@@ -338,7 +338,7 @@ Until that lands, be explicit and verify on both sides. Both of this project's H
 must stay public, so every push here passes `--public`:
 
 ```bash
-tt-kernel push episod/tt-tnt --public --backend vllm \
+tt-model push episod/tt-tnt --public --backend vllm \
   --manifest manifests/tt_kernel_manifest-384.json \
   --bundle-dir <clean staging copy of bundle/> \
   --tt-metal-version 0.65.1 --arch blackhole
@@ -356,7 +356,7 @@ has no exclusion list, so an early push shipped
 model bundle. `bundle/__pycache__/` exists in this repo right now, so this is not hypothetical.
 An exclusion list exists on an unmerged tt-kernel branch; until it lands, stage by hand.
 
-### 4.5 `tt-kernel serve` prefers the cached bundle to the Hub
+### 4.5 `tt-model serve` prefers the cached bundle to the Hub
 
 `serve` documents that "repeat invocations skip the pull and go straight to launch". The
 consequence is not documented: **a manifest fix pushed to the Hub does not reach a machine that
@@ -373,7 +373,7 @@ at `--max_model_len 512` while the Hub said 2048.
 Detect it:
 
 ```bash
-tt-kernel serve episod/tt-tnt --print --local-only --instance metal-src-vllm   # read --max_model_len
+tt-model serve episod/tt-tnt --print --local-only --instance metal-src-vllm   # read --max_model_len
 cat ~/.cache/tt-kernel/bundles/episod__tt-tnt/vllm_metadata.json               # compare to the manifest you pushed
 md5sum ~/.cache/tt-kernel/bundles/episod__tt-tnt/tt_tnt_adapter.py <repo>/bundle/tt_tnt_adapter.py
 ```
@@ -385,7 +385,7 @@ the cache fix was verified here but distributing it needs another `push`, which 
 done. If you pull this bundle fresh on another machine, check the adapter you got against this
 repo's `bundle/tt_tnt_adapter.py` before trusting §4.6's guarantees.
 
-Avoid it: `tt-kernel rm episod/tt-tnt` removes the installed bundle folder and its index
+Avoid it: `tt-model rm episod/tt-tnt` removes the installed bundle folder and its index
 entry, so the next `serve` pulls again. (On the runs recorded here the folder was *moved
 aside* rather than removed, which is the same effect and keeps the old copy for comparison —
 worth preferring when you are in the middle of a measurement.)
@@ -546,7 +546,7 @@ was run:
 ```bash
 python scripts/publish_to_hub.py --dry-run     # pre-flight guard, incl. the context length
 python scripts/publish_to_hub.py --yes         # weights + card
-tt-kernel push episod/tt-tnt --public --backend vllm \
+tt-model push episod/tt-tnt --public --backend vllm \
   --manifest manifests/tt_kernel_manifest-384.json \
   --bundle-dir <clean staging copy of bundle/> \
   --tt-metal-version 0.65.1 --arch blackhole

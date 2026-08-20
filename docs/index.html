@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>tt-tnt — a small language model trained on Tenstorrent hardware</title>
-<meta name="description" content="tt-tnt is a Llama-3-style language model trained from random initialization on Tenstorrent Blackhole with ttml, packaged with tt-kernel, and served through the Tenstorrent vLLM plugin. It is small and it is not capable. What is unusual is how precisely its limits are known.">
+<meta name="description" content="tt-tnt is a Llama-3-style language model trained from random initialization on Tenstorrent Blackhole with ttml, packaged with tt-model, and served through the Tenstorrent vLLM plugin. It is small and it is not capable. What is unusual is how precisely its limits are known.">
 
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="tt-tnt">
@@ -326,7 +326,7 @@ footer a { color: var(--ink-3); }
     <p class="lede">
       tt-tnt is a Llama-3-style language model trained from random initialization on
       Tenstorrent Blackhole hardware with <code>ttml</code> (tt-train), converted, packaged
-      with tt-kernel, and served through the Tenstorrent vLLM plugin.
+      with tt-model, and served through the Tenstorrent vLLM plugin.
     </p>
     <p class="lede">
       It is a small model: 122,962,944 parameters, a <strong>512-token context window</strong>,
@@ -518,7 +518,7 @@ footer a { color: var(--ink-3); }
         </p>
       </li>
       <li>
-        <h3>Packaged with tt-kernel</h3>
+        <h3>Packaged with tt-model</h3>
         <p>
           A manifest declaring the runtime, the mesh, the entry point and the ttnn version
           floor, plus a serving adapter that travels with the bundle.
@@ -527,7 +527,7 @@ footer a { color: var(--ink-3); }
       <li>
         <h3>Served through the Tenstorrent vLLM plugin</h3>
         <p>
-          <code>tt-kernel serve episod/tt-tnt</code>. The plugin logged the bundle's adapter
+          <code>tt-model serve episod/tt-tnt</code>. The plugin logged the bundle's adapter
           registering out of the extra-models directory, the mesh opening at <code>(1,&nbsp;1)</code>,
           and <code>/v1/models</code> reporting the manifest's declared context on the wire.
           The procedure — and the traps that make it more than one command — is written up in
@@ -1693,7 +1693,7 @@ footer a { color: var(--ink-3); }
 <footer>
   <div class="wrap col">
     <p>
-      Built with tt-metal / <code>ttml</code> / <code>ttnn</code>, tt-kernel, and the
+      Built with tt-metal / <code>ttml</code> / <code>ttnn</code>, tt-model, and the
       Tenstorrent vLLM plugin. Project code Apache-2.0, © 2026 Tenstorrent AI ULC. The
       training corpus is not Apache-2.0 and is not redistributed; see the corpus recipe for
       per-source terms.
