@@ -97,6 +97,28 @@ def _describe_tt_metal(tt_metal_home: str) -> str:
         return "unknown"
 
 
+def _load_reference_embedding(hf_dir: Path):
+    """The embedding matrix from a converted HF artifact, as float32 numpy.
+
+    Read through torch rather than ``safetensors.numpy``: these artifacts are
+    bfloat16 and numpy has no such dtype, so the numpy loader raises
+    ``TypeError: data type 'bfloat16' not understood``. torch converts.
+    """
+    import numpy as np
+    from safetensors.torch import load_file
+
+    path = hf_dir / "model.safetensors"
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"{path} does not exist -- the gate reference must be a CONVERTED artifact "
+            f"(scripts/convert_checkpoint.py), not a checkpoint directory")
+    tensors = load_file(str(path))
+    key = next((k for k in tensors if "embed" in k.lower()), None)
+    if key is None:
+        raise KeyError(f"no embedding tensor in {path}; keys start {list(tensors)[:3]}")
+    return tensors[key].float().numpy().astype(np.float32)
+
+
 def _prepare_env(tt_metal_home: str, arch: str) -> None:
     """ttml needs all three of these before import; it aborts without RUNTIME_ROOT."""
     os.environ.setdefault("TT_METAL_HOME", tt_metal_home)
@@ -715,6 +737,21 @@ def main() -> int:
     p.add_argument("--moe-first-block", type=int, default=2,
                    help="leading blocks left dense. The earliest blocks do position and "
                         "syntax, which every token needs.")
+    p.add_argument("--warm-start", default=None,
+                   help="Checkpoint to copy shared parameters from before training, or "
+                        "'latest'. DIFFERENT FROM --resume: resume restores the model AND "
+                        "the optimizer and continues the step count, and requires an exact "
+                        "parameter match. A warm start copies only the parameters this model "
+                        "and the checkpoint share, starts the optimizer fresh, and starts at "
+                        "step 0 -- which is what a Mixture of Enthusiasts needs, since its "
+                        "feed-forwards do not exist in a dense checkpoint. Required for "
+                        "--gate-policy seeded/frozen, whose gate scores hidden states against "
+                        "die-region directions and is meaningless against random embeddings.")
+    p.add_argument("--reference-hf-dir", default=None,
+                   help="Converted HF artifact whose embedding matrix the die map was "
+                        "measured on, e.g. artifacts/hf-tt-tnt-1024-dialogue. Supplies the "
+                        "embeddings that seed the gate. Defaults to the designated model in "
+                        "docs/current_model.json when --gate-policy needs one.")
     p.add_argument("--gate-policy", default="learned", choices=("learned", "seeded", "frozen"),
                    help="learned is stock and is the control; seeded and frozen use the die.")
     p.add_argument("--moe-balance", action="store_true",
@@ -738,6 +775,33 @@ def main() -> int:
                         "different LR trajectory from step 1.")
     args = p.parse_args()
 
+    # Validated HERE, before the device opens, so --dry-run catches it. An earlier
+    # version checked these inside the model-construction block, which --dry-run never
+    # reaches -- so the comment promising a failure "in a second rather than after a
+    # mesh has opened" was false, and a mistyped --warm-start path would have cost a
+    # device open and an expert build before surfacing.
+    if args.gate_policy in ("seeded", "frozen") and not args.moe:
+        print(f"error: --gate-policy {args.gate_policy} has no effect without --moe",
+              file=sys.stderr)
+        return 2
+    if args.gate_policy in ("seeded", "frozen") and not args.warm_start:
+        print(f"error: --gate-policy {args.gate_policy} requires --warm-start. The gate "
+              f"scores hidden states against die-region directions, which encodes nothing "
+              f"against the random embeddings of a fresh model.", file=sys.stderr)
+        return 2
+    if args.warm_start and args.resume:
+        print("error: --warm-start and --resume are mutually exclusive. --resume continues "
+              "a run (model + optimizer + step count, exact parameter match); --warm-start "
+              "begins a new one from shared weights at step 0 with a fresh optimizer.",
+              file=sys.stderr)
+        return 2
+    if args.warm_start and args.warm_start != "latest" and not Path(args.warm_start).is_file():
+        print(f"error: no checkpoint to warm-start from: {args.warm_start}", file=sys.stderr)
+        return 2
+    if args.reference_hf_dir and not (Path(args.reference_hf_dir) / "model.safetensors").is_file():
+        print(f"error: --reference-hf-dir {args.reference_hf_dir} has no model.safetensors; "
+              f"it must be a CONVERTED artifact, not a checkpoint directory", file=sys.stderr)
+        return 2
     if not 0.0 <= args.warmup_frac < 1.0:
         print(f"error: --warmup-frac must be in [0, 1), got {args.warmup_frac}", file=sys.stderr)
         return 2
@@ -980,12 +1044,14 @@ def main() -> int:
         else:
             model = TransformerModelFactory(yaml_config).create_model()
         moe_summary = None
+        warm_summary = None
         if args.moe:
             if args.model_impl != "python":
                 print("error: --moe needs --model-impl python (the swap is an attribute "
                       "assignment on ttml's Python LlamaBlock)", file=sys.stderr)
                 return 2
-            from train.enthusiasts import MoEHyperparams, install_enthusiasts
+            from train.enthusiasts import (MoEHyperparams, enthusiast_of_token,
+                                           install_enthusiasts, warm_start)
             hp = MoEHyperparams(
                 dim=size.embedding_dim if hasattr(size, "embedding_dim") else 1024,
                 moe_inter_dim=args.moe_width,
@@ -993,10 +1059,49 @@ def main() -> int:
                 n_activated_experts=args.moe_top_k,
                 n_shared_experts=args.moe_shared,
             )
+
+            # The seeded and frozen policies need embeddings the die map was measured
+            # on. Resolved and loaded BEFORE the swap so an unreadable reference fails
+            # in a second rather than after a mesh has opened and experts are built.
+            ref_emb = per_tok = None
+            if args.gate_policy in ("seeded", "frozen"):
+                if not args.warm_start:
+                    print("error: --gate-policy "
+                          f"{args.gate_policy} requires --warm-start. The gate scores "
+                          "hidden states against die-region directions, which encodes "
+                          "nothing against the random embeddings of a fresh model.",
+                          file=sys.stderr)
+                    return 2
+                ref_dir = Path(args.reference_hf_dir) if args.reference_hf_dir else \
+                    ROOT / json.loads(
+                        (ROOT / "docs" / "current_model.json").read_text()
+                    )["current"]["hf_model"]
+                ref_emb = _load_reference_embedding(ref_dir)
+                per_tok = enthusiast_of_token(balance=args.moe_balance,
+                                              n_experts=args.moe_experts)
+                print(f"  gate reference: {ref_dir} {ref_emb.shape}")
+
             moe_summary = install_enthusiasts(
                 model, hp, gate_policy=args.gate_policy,
-                first_moe_block=args.moe_first_block)
+                first_moe_block=args.moe_first_block,
+                reference_embedding=ref_emb, per_token_expert=per_tok)
             moe_summary["balanced_partition"] = bool(args.moe_balance)
+
+        # Warm start AFTER the swap, so the MoE parameters exist and can be reported as
+        # deliberately fresh. Doing it before would copy into a dense feed-forward that
+        # is about to be discarded, and the completeness check would have nothing to
+        # check. Dense arms warm-start too -- the four-arm comparison is only clean if
+        # every arm starts from the same weights.
+        if args.warm_start:
+            from train.enthusiasts import warm_start
+            ws_path = (checkpoint.latest_checkpoint(Path(args.checkpoint_dir))
+                       if args.warm_start == "latest" else Path(args.warm_start))
+            if ws_path is None or not ws_path.is_file():
+                raise FileNotFoundError(f"no checkpoint to warm-start from: {args.warm_start}")
+            warm_summary = warm_start(
+                model, ws_path, transformer_config=transformer_config,
+                yaml_config=yaml_config,
+                moe_block_indices=(moe_summary["moe_blocks"] if moe_summary else []))
 
         optimizer = create_optimizer(model, yaml_config)
 
@@ -1106,6 +1211,8 @@ def main() -> int:
             "tt_metal": _describe_tt_metal(args.tt_metal_home),
             # None for a dense run, so a manifest never implies experts that are not there.
             "moe": moe_summary,
+            # None unless warm-started, so a manifest never implies inherited weights.
+            "warm_start": warm_summary,
         }
         _mpath = Path(args.checkpoint_dir) / "run_manifest.json"
         _mpath.parent.mkdir(parents=True, exist_ok=True)

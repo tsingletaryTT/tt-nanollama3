@@ -22,8 +22,13 @@ returns values from a disjoint numeric range from the fake ``train_fn`` losses.
 from __future__ import annotations
 
 import json
+import sys
+from pathlib import Path
+from unittest import mock
 
 import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
 
 from train.checkpoint import build_header, validate_header
 from train.run import (
@@ -427,3 +432,88 @@ def test_operator_supplied_descriptor_is_not_overridden(monkeypatch):
     to leave the environment alone."""
     monkeypatch.setenv("TT_MESH_GRAPH_DESC_PATH", "/somewhere/custom.textproto")
     assert _mesh_graph_descriptor_path(4) is None
+
+
+# ---------------------------------------------------------------------------
+# --warm-start and the gate policies (2026-08-20)
+# ---------------------------------------------------------------------------
+# These are validated BEFORE the device opens, which is the whole point: the first
+# version checked them inside the model-construction block, which --dry-run never
+# reaches. The code carried a comment promising failure "in a second rather than
+# after a mesh has opened" while a mistyped --warm-start path would in fact have
+# cost a device open and a full expert build before surfacing.
+
+
+def _cli(*argv):
+    """Run main() with argv under --dry-run and return (exit code, stderr)."""
+    import io
+    import contextlib
+    import train.run as run_mod
+
+    err = io.StringIO()
+    with mock.patch.object(sys, "argv", ["run.py", *argv, "--dry-run"]):
+        with contextlib.redirect_stderr(err):
+            try:
+                rc = run_mod.main()
+            except SystemExit as e:  # argparse
+                rc = e.code
+    return rc, err.getvalue()
+
+
+def test_seeded_gate_requires_a_warm_start():
+    """The load-bearing guard.
+
+    A seeded gate scores hidden states against die-region directions. Against the
+    random embeddings of a fresh model that encodes NOTHING, and the policy would
+    silently degenerate into an unusual initialisation of `learned` -- which would
+    look like a result.
+    """
+    rc, err = _cli("--size", "1024", "--steps", "10", "--moe", "--gate-policy", "seeded")
+    assert rc == 2
+    assert "requires --warm-start" in err
+
+
+def test_frozen_gate_requires_a_warm_start():
+    rc, err = _cli("--size", "1024", "--steps", "10", "--moe", "--gate-policy", "frozen")
+    assert rc == 2
+    assert "requires --warm-start" in err
+
+
+def test_gate_policy_without_moe_is_refused_rather_than_ignored():
+    """Silently accepting it would let a run believe it used the die when it did not."""
+    rc, err = _cli("--size", "1024", "--steps", "10", "--gate-policy", "frozen",
+                   "--warm-start", "latest")
+    assert rc == 2
+    assert "no effect without --moe" in err
+
+
+def test_warm_start_and_resume_are_mutually_exclusive():
+    """They mean different things and doing both would silently pick one."""
+    rc, err = _cli("--size", "1024", "--steps", "10",
+                   "--warm-start", "latest", "--resume", "latest")
+    assert rc == 2
+    assert "mutually exclusive" in err
+
+
+def test_a_missing_warm_start_checkpoint_fails_before_the_device():
+    rc, err = _cli("--size", "1024", "--steps", "10", "--warm-start", "/nope/missing.pkl")
+    assert rc == 2
+    assert "no checkpoint to warm-start from" in err
+
+
+def test_a_checkpoint_dir_as_gate_reference_is_refused_with_the_reason():
+    """The gate reference must be a CONVERTED artifact, and the error should say so."""
+    rc, err = _cli("--size", "1024", "--steps", "10", "--moe",
+                   "--reference-hf-dir", "artifacts")
+    assert rc == 2
+    assert "model.safetensors" in err and "CONVERTED" in err
+
+
+def test_a_valid_moe_warm_start_combination_is_accepted():
+    """The guards must not reject the thing the experiment actually runs."""
+    ckpt = ROOT / "artifacts" / "checkpoints-v077-beta2-control" / "tt_tnt_step00010764.pkl"
+    if not ckpt.is_file():
+        pytest.skip("needs gitignored artifacts: the beta2-control checkpoint")
+    rc, err = _cli("--size", "1024", "--steps", "10", "--moe",
+                   "--gate-policy", "seeded", "--warm-start", str(ckpt))
+    assert rc in (0, None), err
