@@ -259,12 +259,15 @@ and two of those inputs deserve stating plainly rather than being folded into a 
 Training corpus — a nine-source blend, two sources share-alike. The corpus (see
 [`docs/corpus_blend.md`](docs/corpus_blend.md) and
 [`docs/corpus_licensing.md`](docs/corpus_licensing.md), the latter generated from
-`train/corpus.py`) mixes TinyStories, Simple English Wikipedia, and seven curated Project
-Gutenberg slices. Two sources carry share-alike data licenses: `tinystories`
-([`roneneldan/TinyStories`](https://huggingface.co/datasets/roneneldan/TinyStories), 31% of the
-blend) under the Community Data License Agreement – Sharing, v1.0, and `wikipedia_simple`
+`train/corpus.py`) mixes TinyStories, Simple English Wikipedia, a small instruction-dialogue
+slice, and seven curated Project Gutenberg slices. **Three** sources carry share-alike data
+licenses: `tinystories`
+([`roneneldan/TinyStories`](https://huggingface.co/datasets/roneneldan/TinyStories), 29% of the
+blend) under the Community Data License Agreement – Sharing, v1.0; `wikipedia_simple`
 ([`wikimedia/wikipedia`](https://huggingface.co/datasets/wikimedia/wikipedia), 15% of the
-blend) under CC-BY-SA-3.0. This repository **does not redistribute the corpus**; the fetch
+blend) under CC-BY-SA-3.0; and `dialogue`
+([`databricks/databricks-dolly-15k`](https://huggingface.co/datasets/databricks/databricks-dolly-15k),
+2% of the blend) also under CC-BY-SA-3.0. This repository **does not redistribute the corpus**; the fetch
 scripts download each source from the Hugging Face Hub at a pinned revision. Whether model
 weights trained on share-alike data constitute a "Data Derivative" (CDLA-Sharing-1.0) or an
 "Adaptation" (CC-BY-SA-3.0) is not settled, and we do not assert that they don't. Anyone

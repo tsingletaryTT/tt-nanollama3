@@ -1,0 +1,41 @@
+{
+  "what": "Die-region steering, replicated across four independent generation seeds",
+  "date": "2026-08-19",
+  "answer": "Replicates. Every seed's observed own-register lift sits above its own 20,000-derangement floor's 99th percentile, with p between 0.0002 and 0.0037.",
+  "per_seed": {
+    "0": {
+      "observed": 0.0928,
+      "z": 3.2,
+      "p_one_sided": 0.00365,
+      "floor_mean": -0.0101
+    },
+    "1": {
+      "observed": 0.1157,
+      "z": 4.02,
+      "p_one_sided": 0.0007,
+      "floor_mean": -0.0129
+    },
+    "2": {
+      "observed": 0.1164,
+      "z": 4.4,
+      "p_one_sided": 0.0002,
+      "floor_mean": -0.0132
+    },
+    "3": {
+      "observed": 0.1049,
+      "z": 3.74,
+      "p_one_sided": 0.00075,
+      "floor_mean": -0.0119
+    }
+  },
+  "across_seeds": {
+    "mean_observed": 0.1074,
+    "sd": 0.0111,
+    "min": 0.0928,
+    "max": 0.1164,
+    "n": 4
+  },
+  "why_this_run_was_needed": "The derangement floor controls for WHICH REGION IS CALLED WHAT -- every derangement is a relabelling of one generated dataset. It says nothing about whether re-running the sampling with a different seed would move the observed value. That is a separate variance and, unlike the floor, it cannot be had for free: each seed is a full generation pass.",
+  "reading": "Observed lift is stable at 0.093-0.116 across seeds while each floor sits near -0.010 to -0.013. The label floor and the seed replication together close both sources of variance this design has.",
+  "still_not_uniform": "Carried by poetry, tinystories, wikipedia_simple and procedural; dialogue, spine and flavour go the wrong way. 7/10 sources prefer their own region."
+}

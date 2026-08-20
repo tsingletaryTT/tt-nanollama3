@@ -671,6 +671,76 @@ footer a { color: var(--ink-3); }
       lands wherever the winning token lives, and common tokens cluster. The 110 cores are the
       machinery, not the itinerary of any single sentence.
     </p>
+
+    <h3>So we asked it, and it answers</h3>
+    <p>
+      "Give me a continuation from next door" was a claim about what the sampler could
+      <em>express</em>. On 2026-08-19 it became a measurement, and it needed two things
+      established first — because the layout was justified by tokens separating in
+      <em>embedding</em> space, and embedding space is 1024-dimensional while the die is
+      110 usable cells. A projection can destroy exactly the structure that motivated it.
+    </p>
+    <p>
+      <strong>The regions survive the projection.</strong> Source-characteristic tokens
+      land in distinct places on the grid: cell purity <strong>0.546</strong> against a
+      label-permutation floor of 0.231, concentration 13% tighter than chance, centroids
+      36% further apart. The effect <em>strengthens</em> when the 500 most frequent tokens
+      are excluded — the control that collapses a frequency artefact.
+    </p>
+    <p>
+      <strong>And the regions steer.</strong> Restrict sampling to the cells within two NoC
+      hops of a source's centroid, and that source's own register rises — measured with the
+      same per-source language models the evaluation suite already uses, against a floor
+      built from 20,000 derangements of the region labels.
+    </p>
+    <div class="scroller">
+      <table>
+        <caption>
+          Four independent generation seeds, every one above the floor&rsquo;s 99th
+          percentile. Direction on this die means corpus register.
+        </caption>
+        <thead><tr><th>generation seed</th><th>own-register lift</th><th>z</th><th>p (one-sided)</th></tr></thead>
+        <tbody>
+          <tr><td>0</td><td>+0.0928</td><td>+3.20</td><td>0.00365</td></tr>
+          <tr><td>1</td><td>+0.1157</td><td>+4.02</td><td>0.00070</td></tr>
+          <tr><td>2</td><td>+0.1164</td><td>+4.40</td><td>0.00020</td></tr>
+          <tr><td>3</td><td>+0.1049</td><td>+3.74</td><td>0.00075</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      It is not uniform, and the uneven part is stated rather than averaged away: poetry,
+      tinystories, wikipedia_simple and procedural carry the effect; dialogue, spine and
+      flavour go the wrong way. Seven of ten sources prefer their own region. The floor
+      controls for <em>which region is called what</em> — the four seeds are what control
+      for the sampling itself.
+    </p>
+
+    <h3>A Mixture of Enthusiasts</h3>
+    <p>
+      Enthusiasts rather than experts. 123M parameters at one epoch buys enthusiasm about a
+      corpus source; the naming should not overstate the artifact.
+    </p>
+    <p>
+      <code>ttnn.experimental.moe_compute</code> — upstream's fused MoE op — runs on a
+      single Blackhole card. That corrects a note this project had recorded claiming MoE
+      needed a 32-node mesh: that was tt-train's expert <em>parallelism</em>, not this op,
+      which has a 1×1 compute-only path. So the routing was replaced. Not a learned gate:
+      a token goes to the enthusiast that owns its cell on the grid — token id, to cell, to
+      region, to expert.
+    </p>
+    <p>
+      It computes correctly, validated by upstream's own goldens. The seam matters: the
+      patch sits at the routing generator, <em>before</em> the goldens are built, so they
+      compute the expected answer for this routing rather than for one that would otherwise
+      have had to be trusted. Patched any later, a passing PCC would have meant nothing.
+    </p>
+    <p>
+      What it does <em>not</em> show is that the routing is good. Load is uneven by
+      construction — the Voronoi partition of the die gives <code>flavour</code> 23 cells
+      and <code>spine</code> 3 — and no claim is made about throughput or locality benefit.
+      That is the interesting question and it is not answered here.
+    </p>
   </div>
 </section>
 
@@ -1485,6 +1555,33 @@ footer a { color: var(--ink-3); }
       token when no forward pass was pending — which produces exactly the observed repetition.
       On plugin <code>c127c17</code> the local-repeat rate is <strong>0.031</strong> against a
       CPU reference of 0.000, and free-running decode reads as ordinary prose.
+    </p>
+    <p>
+      <strong>It is back, on a different model and a newer stack (2026-08-19).</strong>
+      Serving <code>tt-tnt-1024-dialogue</code> on tt-metal v0.77.0, the local-repeat rate
+      is <strong>0.1125</strong> against a CPU reference of 0.0125 on the same weights and
+      prompts, with one prompt at 0.80 &mdash; <em>&ldquo;The cat. The cat. The cat.&rdquo;</em>
+      The same bisection localises it the same way, and more sharply than before: driving
+      <code>tt_transformers</code> directly, greedy, no vLLM, gives <strong>0.0000</strong>
+      &mdash; cleaner than the CPU reference itself. The prompt that loops worst under vLLM
+      generates <em>&ldquo;stars. The cat was happy to see the star&hellip;&rdquo;</em> on the
+      same silicon.
+    </p>
+    <p>
+      Two candidates are already excluded. The plugin, by A/B: serving the same model on
+      <code>c127c17</code> and <code>bd150c7</code> gives byte-identical results &mdash; every
+      per-prompt rate, every agreement count, every divergence index &mdash; which also
+      establishes that the serving path is deterministic across restarts. And multi-block
+      paging, by reducing <code>block_size</code> 64&nbsp;&rarr;&nbsp;512 so a 512-token
+      context is one block with no page-table traversal: it does not help.
+    </p>
+    <p>
+      What that refutes precisely is <em>traversal</em>, not paged attention itself &mdash;
+      one block still runs the paged code path. Separating those needs the direct arm to page,
+      which currently throws inside <code>paged_fill_cache</code>; that is a harness limitation
+      and not evidence. Left standing: the paged attention op at one block, the scheduler, and
+      the upstream vLLM version itself, about which the plugin A/B says nothing, because it
+      varied the plugin and not vLLM. <strong>Open.</strong>
     </p>
     <p>
       Because the answer depends on which path is taken and not on the weights, the fault is

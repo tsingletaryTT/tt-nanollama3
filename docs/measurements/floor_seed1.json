@@ -1,0 +1,83 @@
+{
+  "source": "/tmp/steer_seed1.json",
+  "method": "Permutation floor computed from the region x register matrix the treatment run already produced. Generation depends only on which region is sampled, not on the label attached to it, so every derangement is a relabelling of existing completions and needs no new sampling.",
+  "sources": [
+    "dialogue",
+    "flavour",
+    "folklore",
+    "gutenberg_children",
+    "poetry",
+    "procedural",
+    "spine",
+    "tinystories",
+    "weird",
+    "wikipedia_simple"
+  ],
+  "observed_mean_own_register_lift": 0.1157,
+  "derangement_floor": {
+    "n_sampled": 20000,
+    "n_possible": 1334961,
+    "mean": -0.0129,
+    "sd": 0.032,
+    "p50": -0.0156,
+    "p95": 0.0454,
+    "p99": 0.0767
+  },
+  "z": 4.02,
+  "p_one_sided": 0.0007,
+  "n_derangements_at_or_above_observed": 13,
+  "per_source": {
+    "dialogue": {
+      "own": -0.0625,
+      "mean_other": 0.0492,
+      "advantage": -0.1117
+    },
+    "flavour": {
+      "own": 0.0005,
+      "mean_other": 0.0313,
+      "advantage": -0.0308
+    },
+    "folklore": {
+      "own": 0.0468,
+      "mean_other": -0.0503,
+      "advantage": 0.0971
+    },
+    "gutenberg_children": {
+      "own": -0.0937,
+      "mean_other": -0.0937,
+      "advantage": 0.0
+    },
+    "poetry": {
+      "own": 0.375,
+      "mean_other": 0.0317,
+      "advantage": 0.3433
+    },
+    "procedural": {
+      "own": 0.3594,
+      "mean_other": 0.0001,
+      "advantage": 0.3593
+    },
+    "spine": {
+      "own": -0.1562,
+      "mean_other": -0.0503,
+      "advantage": -0.1059
+    },
+    "tinystories": {
+      "own": 0.1719,
+      "mean_other": -0.0937,
+      "advantage": 0.2656
+    },
+    "weird": {
+      "own": 0.0468,
+      "mean_other": -0.059,
+      "advantage": 0.1058
+    },
+    "wikipedia_simple": {
+      "own": 0.4687,
+      "mean_other": 0.1062,
+      "advantage": 0.3625
+    }
+  },
+  "n_sources_favouring_own_region": 6,
+  "why_derangements_not_permutations": "A permutation with a fixed point leaves that source steered to its own region, which is treatment, not control. Derangements are the clean comparator."
+}

@@ -400,3 +400,102 @@ floor, showing up in plain sight rather than in a metric.
 
 A thermometer, to check whether you are right. It has learned that a question
 deserves an answer, and it reaches for an instrument.
+
+---
+
+## 2026-08-19 — the lightning is gone, and the die has regions
+
+A long day on the toolchain: tt-metal moved 1223 commits to **v0.77.0**, both
+custom kernels migrated off APIs that upstream is removing, the per-core RNG got
+real per-core streams, and a full retrain landed. Most of that is in
+`docs/measurements/`. Two things belong here instead, because they are about the
+voice and about the die rather than about a number.
+
+### The model, asked
+
+Same self-nullifying prompt, both current checkpoints, greedy and sampled.
+
+`artifacts/hf-tt-tnt-1024-dialogue` — the designated model:
+
+> **greedy** — I will go first and show you how to do it." "I will go first," said
+> the boy. "I will go first and show you how to do it."
+>
+> **t=0.8** — This is a very easy way. The car has a way to run faster than light.
+> If the light goes faster, the light goes faster.
+>
+> **t=1.0** — The car has a way of making the speed. It will help us in the motor.
+> If you drive fast enough the motor is not slow enough.
+
+`artifacts/hf-tt-tnt-1024-v077` — the same recipe with AdamW's beta2 back at 0.999:
+
+> **greedy** — I'll be a good rider, and I'll be a good rider." "I'll be a good
+> rider," said the boy, as he looked at the boy.
+>
+> **t=0.8** — I don't want to go on that journey, I want to go on the track. It
+> will be fun, of course, but I can't wait to get started." "I don't care,"
+> replied Jim
+>
+> **t=1.0** — This is a very easy thing. I have tried a way of making the thing
+> easy. It will help me to stay in this world forever. I have the heart for all
+> the world and all the worlds
+
+**The lightning is gone.** The 1024a entry above noted the model hearing "faster
+than light" and reaching for *lightning* — the nearest thing a corpus full of
+weather owns. Neither current checkpoint does that. They reach for cars, motors,
+riders, journeys, tracks: vehicles and motion. That is a better reach, and a
+different kind of one — it is grabbing at *speed* as a thing that happens rather
+than at a word that shares four letters with the prompt.
+
+Both greedy paths are now dialogue: quoted speech, two speakers, *said the boy*.
+That is the 2% dolly slice showing up on the most-likely path, which is exactly
+where a small corpus change should first become visible.
+
+The strangest is v077 at t=1.0. Asked for an impossible way to outrun light, it
+lands on staying in this world forever, and on *all the world and all the worlds*.
+Nothing in the prompt suggests immortality or a plurality of worlds. The sentence
+holds the whole way, which is the bar, and where it chose to go is its own.
+
+### The die has regions, and they steer
+
+The vocabulary was laid onto the harvested 11x10 Tensix grid months ago on the
+strength of a measurement that source-characteristic tokens separate in *embedding*
+space. Nobody had asked whether that survived the projection onto 110 cells.
+
+It does. Sources occupy distinct regions of the **die**: cell purity 0.546 against
+a 0.231 permutation floor, and the effect strengthens when the 500 most frequent
+tokens are excluded — the control that would have collapsed a frequency artefact.
+
+And the regions do something. Restrict sampling to the cells within two NoC hops
+of a source's centroid and that source's own register rises, beyond a floor built
+from 20,000 derangements of the region labels:
+
+    seed 0   +0.0928   z +3.20   p 0.00365
+    seed 1   +0.1157   z +4.02   p 0.00070
+    seed 2   +0.1164   z +4.40   p 0.00020
+    seed 3   +0.1049   z +3.74   p 0.00075
+
+Four independent generation seeds, all above the floor's 99th percentile. Direction
+on this die means corpus register, on a 123M model, measurably.
+
+It is not uniform: poetry, tinystories, wikipedia_simple and procedural carry the
+effect; dialogue, spine and flavour go the wrong way. Seven of ten sources prefer
+their own region.
+
+### Mixture of Enthusiasts
+
+Enthusiasts, not experts — 123M parameters at one epoch buys enthusiasm about a
+corpus source and the naming should not overstate the artifact.
+
+`ttnn.experimental.moe_compute` — upstream's fused MoE op — turns out to run on a
+single Blackhole card, which corrects a note in this repo claiming MoE needed a
+32-node mesh. That was tt-train's expert *parallelism*; this op has a 1x1 path.
+
+So the routing was replaced. Not a learned gate: a token goes to the enthusiast
+that owns its cell on the grid. Token id, to cell, to region, to expert. Upstream's
+own goldens validate it, and they pass — the patch sits at the routing generator,
+*before* the goldens are built, so they compute the expected answer for our routing
+rather than for one we would otherwise have had to trust.
+
+A model whose vocabulary has an address, sampling by walking its own die, routing
+to sub-networks that live where its words do. None of that is required. It is what
+the hardware makes sayable.
