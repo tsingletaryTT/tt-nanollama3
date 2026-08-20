@@ -75,7 +75,21 @@ COMPARABILITY_KEYS = (
 #: Fields expected to DIFFER — they are usually the point of the comparison — and
 #: are reported as the experiment's variables rather than flagged as problems.
 EXPECTED_TO_DIFFER = ("optimizer", "optimizer_override_file", "lr_schedule",
-                      "warmup_frac", "tt_metal", "seed")
+                      "warmup_frac", "tt_metal", "seed",
+                      # The Mixture-of-Enthusiasts variables. Without these the output of a
+                      # dense-vs-MoE comparison never NAMED what differed between the arms:
+                      # `moe` is not in COMPARABILITY_KEYS (it is supposed to differ), so it
+                      # was neither flagged nor reported, and the report read as though the
+                      # two runs were identically configured. A comparison that cannot state
+                      # its own independent variable is not a measurement.
+                      #
+                      # `warm_start` is here rather than in COMPARABILITY_KEYS on purpose:
+                      # every arm of the four-arm experiment starts from the SAME checkpoint,
+                      # but the summaries still differ legitimately, because a dense arm
+                      # copies every parameter while an MoE arm copies only the shared ones.
+                      # Equality would fail on comparable runs. It is reported so the reader
+                      # can check the source checkpoint agrees.
+                      "moe", "warm_start")
 
 
 def load_curve(d: Path) -> Dict[int, float]:

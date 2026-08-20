@@ -251,3 +251,55 @@ def test_identical_curves_are_not_interpretable(tmp_path):
     a, b = _paired_curves(tmp_path, offset=0.0, jitter=0.0)
     r = _invoke(a, b)
     assert "identical" in r.stdout, r.stdout
+
+
+# ------------------------------------------------------- the MoE variables get NAMED
+#
+# A dense-vs-MoE comparison used to print no mention of MoE at all: `moe` is (correctly)
+# absent from COMPARABILITY_KEYS, so it was neither flagged as a mismatch nor reported as
+# the variable under test, and the output read as though the arms were configured alike.
+
+def test_moe_difference_is_reported_as_the_variable_under_test(tmp_path):
+    dense = _run_dir(tmp_path, "A-dense", {1000: 3.0, 2000: 2.9},
+                     _manifest(moe=None))
+    moe = _run_dir(tmp_path, "B-learned", {1000: 3.1, 2000: 2.95},
+                   _manifest(moe={"experts": 10, "top_k": 2, "gate_policy": "learned"}))
+    out = _invoke(dense, moe, "--paired").stdout
+    assert "variable under test -- moe" in out, out
+    assert "gate_policy" in out, "the arm's gate policy must appear in the report"
+
+
+def test_two_moe_arms_differing_only_in_gate_policy_are_still_named(tmp_path):
+    """seeded-vs-frozen is the comparison the die-region claim rests on."""
+    a = _run_dir(tmp_path, "C-seeded", {1000: 3.0},
+                 _manifest(moe={"experts": 10, "gate_policy": "seeded"}))
+    b = _run_dir(tmp_path, "D-frozen", {1000: 3.05},
+                 _manifest(moe={"experts": 10, "gate_policy": "frozen"}))
+    out = _invoke(a, b, "--paired").stdout
+    assert "variable under test -- moe" in out
+    assert "seeded" in out and "frozen" in out
+
+
+def test_identical_moe_config_is_not_reported_as_a_variable(tmp_path):
+    """Guards the other direction: same config must not be announced as differing."""
+    cfg = {"experts": 10, "gate_policy": "seeded"}
+    a = _run_dir(tmp_path, "one", {1000: 3.0}, _manifest(moe=cfg))
+    b = _run_dir(tmp_path, "two", {1000: 3.0}, _manifest(moe=dict(cfg)))
+    assert "variable under test -- moe" not in _invoke(a, b, "--paired").stdout
+
+
+def test_warm_start_is_reported_not_enforced(tmp_path):
+    """Arms warm-started from ONE checkpoint still have differing summaries.
+
+    A dense arm copies every parameter; an MoE arm copies only the shared ones. Putting
+    `warm_start` in COMPARABILITY_KEYS would therefore refuse a perfectly valid comparison,
+    so it is reported instead — the reader checks the source checkpoint agrees.
+    """
+    ck = "artifacts/checkpoints-v077-beta2-control/tt_tnt_step00010764.pkl"
+    a = _run_dir(tmp_path, "dense", {1000: 3.0},
+                 _manifest(warm_start={"source": ck, "copied": 204}))
+    b = _run_dir(tmp_path, "moe", {1000: 3.1},
+                 _manifest(warm_start={"source": ck, "copied": 48}))
+    out = _invoke(a, b, "--paired").stdout
+    assert "REFUSING TO COMPARE" not in out, "same-checkpoint arms must remain comparable"
+    assert "variable under test -- warm_start" in out
