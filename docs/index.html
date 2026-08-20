@@ -9,7 +9,7 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="tt-tnt">
 <meta property="og:title" content="tt-tnt — a small language model trained on Tenstorrent hardware">
-<meta property="og:description" content="Trained from random init on Blackhole with ttml, packaged with tt-kernel, served through the Tenstorrent vLLM plugin. ~123M parameters, one epoch, 400M tokens. Not capable — but its limits are measured, including the finding it had to withdraw.">
+<meta property="og:description" content="123M parameters, a 512-token window, one epoch over 352.6M tokens. Trained, packaged and served entirely on Tenstorrent tooling. Its vocabulary has a measured spatial home on the die that demonstrably steers its register.">
 <!-- ABSOLUTE, and it has to be. Open Graph and Twitter card scrapers do not resolve
      relative URLs against the page they scraped: a relative path here produces a link
      preview with a missing field and no error message anywhere in the chain, so the
@@ -28,7 +28,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="tt-tnt — a small model built Tenstorrent-native">
 <meta name="twitter:image" content="https://tsingletarytt.github.io/tt-tnt/brand/og-card.jpg">
-<meta name="twitter:description" content="~123M parameters, one epoch, 400M tokens. Trained, packaged and served entirely on Tenstorrent tooling. Not capable — but honestly measured, refuted findings included.">
+<meta name="twitter:description" content="123M parameters, 512-token window, one epoch over 352.6M tokens. Its vocabulary is laid on the Tensix grid, and direction on the die measurably steers its register.">
 
 <link rel="icon" type="image/png" href="favicon.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
@@ -329,10 +329,26 @@ footer a { color: var(--ink-3); }
       with tt-kernel, and served through the Tenstorrent vLLM plugin.
     </p>
     <p class="lede">
-      It is a small model: ~123M parameters, a single pass over the training split of a
-      400-million-token corpus. It has no instruction tuning, does not answer questions, and
+      It is a small model: 122,962,944 parameters, a <strong>512-token context window</strong>,
+      one epoch over the 352,641,058-token training split of a 391.8M-token corpus. No
+      instruction tuning &mdash; it continues text rather than answering questions, and it
       repeats itself under greedy decoding. The measurements below describe what it does and
       where its limits are.
+    </p>
+    <p class="lede">
+      <strong>The result worth knowing:</strong> its vocabulary is laid onto the 110 usable
+      cores of a harvested 11&times;10 Tensix grid, and that placement is not decoration.
+      Source-characteristic tokens occupy distinct regions of the die, and restricting
+      sampling to a region raises that region's register &mdash; replicated across four
+      generation seeds at p&nbsp;&lt;&nbsp;0.004 each. Direction on this die means corpus
+      register, measurably, on a 123M model.
+    </p>
+    <p class="lede">
+      <strong>The Mixture of Enthusiasts is infrastructure complete and results pending.</strong>
+      A sparse MoE drops into this model's feed-forward in about twenty lines; it trains, it
+      warm-starts, and its gate can be seeded from the die map. None of that is a quality
+      result, the four-arm comparison has not been run, and sparse routing by die address may
+      buy nothing.
     </p>
    </div>
    <figure class="logo">
@@ -406,7 +422,7 @@ footer a { color: var(--ink-3); }
     </p>
     <p>
       Nothing in the output notices that the request was a request. Nothing declines the
-      premise, because nothing in 400M tokens of Gutenberg and TinyStories has ever declined
+      premise, because nothing in 392M tokens of Gutenberg and TinyStories has ever declined
       anything.
     </p>
     <p class="small">
@@ -1139,12 +1155,12 @@ footer a { color: var(--ink-3); }
     <p>
       <strong>The model has learned English, not just this corpus.</strong> That is the claim no
       instrument in the repository could reach, because every other one is scored against the
-      same 400M tokens the model was trained on. ARC-Easy at +6.4 standard errors and PIQA at
+      same corpus the model was trained on. ARC-Easy at +6.4 standard errors and PIQA at
       +4.2 — on data nobody here chose, scored by code nobody here wrote, against a null nobody
       here controls — are what establish it.
     </p>
     <p>
-      That is not a triumph. It is what a 123M-parameter model that has seen 400M tokens should
+      That is not a triumph. It is what a 123M-parameter model that has read 352.6M tokens should
       do, and the distance to the reference class is one number:
       WikiText-103 perplexity <strong>222.66</strong> against GPT-2 small's <strong>37.37</strong>,
       at <strong>1.2% fewer parameters</strong> (122,962,944 against 124,439,808) and

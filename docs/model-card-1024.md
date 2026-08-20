@@ -70,7 +70,7 @@ Full comparison:
 
 No instruction tuning beyond a 2% slice of `databricks-dolly-15k`. No chat
 template. No system prompt. It repeats under greedy decoding. It has 512 tokens
-of context. It is a small model trained for one epoch on 400M tokens, and it
+of context. It is a small model trained for one epoch on 352.6M tokens, and it
 should be treated as an artifact of a hardware-and-tooling project rather than as
 a useful assistant.
 

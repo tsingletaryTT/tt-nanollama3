@@ -13,6 +13,39 @@ Tenstorrent vLLM plugin.
 The model is small and is not intended to be capable. It exists to exercise the full path —
 training, packaging, publishing and serving — on Tenstorrent tooling.
 
+## Where this stands, as of 2026-08-20
+
+**The model.** 122,962,944 parameters, 8 blocks, d_model 1024, 16 heads over 4 KV groups, a
+**512-token context window**, bfloat16. One epoch over the 352,641,058-token training split of
+a 391.8M-token corpus. No instruction tuning; it continues text rather than answering
+questions, and it repeats itself under greedy decoding. Trained from random initialization on
+Blackhole with `ttml`, converted to Hugging Face format, packaged with tt-kernel, and served
+through the Tenstorrent vLLM plugin on tt-metal v0.77.0.
+
+512 is the real number. Some 384-size artifacts in this repository *declare* 2048, and that is
+a declaration rather than a trained capability.
+
+**The result worth knowing.** The 32,000-token vocabulary is laid onto the 110 usable cores of
+a harvested 11×10 Tensix grid, and that placement is not decoration. Source-characteristic
+tokens occupy distinct regions of the die — cell purity 0.546 against a 0.231
+label-permutation floor, strengthening under a frequency control — and **restricting sampling
+to a region raises that region's register**, replicated across four generation seeds at
+p < 0.004 each against a 20,000-derangement floor. Direction on this die means corpus
+register, measurably, on a 123M model.
+
+**The Mixture of Enthusiasts: infrastructure complete, results pending.** tt-tnt's Llama can
+have its feed-forward replaced by `ttml`'s sparse MoE in about twenty lines — it trains, it
+warm-starts correctly from a dense checkpoint, and its gate can be seeded from the die map
+(recovering a token's region 61.2% of the time against 10% chance). **None of that is a
+quality result.** The four-arm comparison — dense, learned gate, seeded gate, frozen gate —
+**has not been run.** Whether sparse routing by die address helps this model is currently
+unanswered, and it may buy nothing.
+
+**Open defect.** Served through vLLM, the model repeats more than its own CPU reference does
+(local repeat 0.1125 against 0.0125). The same weights driven through `tt_transformers`
+directly score 0.0000, so the fault is in the vLLM layer; the plugin and multi-block paging
+are both excluded. See §13 of the site.
+
 ## Architecture
 
 ![tt-tnt-1024 network architecture](docs/diagrams/model-architecture.svg)
@@ -531,7 +564,7 @@ metric rows, the per-task truncation audit and the caveats:
 
 **The scores indicate the model has learned English, not just our
 corpus.** That is the one thing no instrument in this repository could establish, because every
-other one is scored against our own 400M tokens. ARC-Easy at +6.4 standard errors and PIQA at
+other one is scored against our own corpus. ARC-Easy at +6.4 standard errors and PIQA at
 +4.2, on data we did not choose and scored by code we did not write, against a null we do not
 control, are the evidence.
 
