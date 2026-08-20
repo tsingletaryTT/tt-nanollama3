@@ -1,0 +1,79 @@
+{
+  "design": "Four arms warm-started from the SAME checkpoint (artifacts/checkpoints-v077-beta2-control/tt_tnt_step00010764.pkl), identical seed 5489, corpus tokens-v4, optimizer, --ddp 2, 1500 steps, 15 validation points each. Paired: same data order, so per-step oscillation cancels.",
+  "multiplicity": "6 pairwise contrasts reported, so the two-sided Bonferroni threshold is alpha=0.05/6, |t| > 2.64. Stated because two contrasts sit between 2.0 and 2.7 and would read as clearly significant uncorrected. B-learned vs D-frozen lands at 2.64 and is called BORDERLINE, not a pass.",
+  "confound": "Every MoE arm introduces 204 fresh parameters and discards 18, so all three re-learn a feed-forward from init while the dense arm continues a converged one. The dense-vs-MoE gap is INITIALIZATION DEBT, not a quality verdict: it shrinks monotonically -0.523 -> -0.132 and is still shrinking at step 1500. Where the curves cross is NOT determined by this design. The MoE-vs-MoE contrasts are free of this confound because the debt is identical.",
+  "findings": [
+    "Gate policy is a ~5% effect against the cost of replacing the FFN at all (0.012 nats vs 0.234).",
+    "Seeding the gate from die geography buys nothing measurable over random init: +0.0044 nats, |t|=2.0, signs 8+/7-, effect bounded under ~0.009 nats at 95%.",
+    "FREEZING the gate to die geography costs 0.0118 nats against a seeded-but-free gate (|t|=5.1, 14/15 signs) -- real, and ~15% of the run's own step-to-step floor of 0.077. A routing rule fixed by physical address is therefore nearly, but not quite, free."
+  ],
+  "contrasts": [
+    {
+      "a": "A-dense",
+      "b": "B-learned",
+      "mean": -0.234,
+      "se": 0.0295,
+      "pos": 0,
+      "neg": 15,
+      "floor": 0.0617,
+      "t": 7.932,
+      "bonferroni": "survives"
+    },
+    {
+      "a": "A-dense",
+      "b": "C-seeded",
+      "mean": -0.2296,
+      "se": 0.0287,
+      "pos": 0,
+      "neg": 15,
+      "floor": 0.0562,
+      "t": 8.0,
+      "bonferroni": "survives"
+    },
+    {
+      "a": "A-dense",
+      "b": "D-frozen",
+      "mean": -0.2414,
+      "se": 0.028,
+      "pos": 0,
+      "neg": 15,
+      "floor": 0.0617,
+      "t": 8.621,
+      "bonferroni": "survives"
+    },
+    {
+      "a": "B-learned",
+      "b": "C-seeded",
+      "mean": 0.0044,
+      "se": 0.0022,
+      "pos": 8,
+      "neg": 7,
+      "floor": 0.0766,
+      "t": 2.0,
+      "bonferroni": "does not survive"
+    },
+    {
+      "a": "B-learned",
+      "b": "D-frozen",
+      "mean": -0.0074,
+      "se": 0.0028,
+      "pos": 4,
+      "neg": 11,
+      "floor": 0.0832,
+      "t": 2.643,
+      "bonferroni": "BORDERLINE"
+    },
+    {
+      "a": "C-seeded",
+      "b": "D-frozen",
+      "mean": -0.0118,
+      "se": 0.0023,
+      "pos": 1,
+      "neg": 14,
+      "floor": 0.0766,
+      "t": 5.13,
+      "bonferroni": "survives"
+    }
+  ],
+  "bonferroni_critical_t": 2.64
+}

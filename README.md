@@ -33,13 +33,33 @@ to a region raises that region's register**, replicated across four generation s
 p < 0.004 each against a 20,000-derangement floor. Direction on this die means corpus
 register, measurably, on a 123M model.
 
-**The Mixture of Enthusiasts: infrastructure complete, results pending.** tt-tnt's Llama can
-have its feed-forward replaced by `ttml`'s sparse MoE in about twenty lines — it trains, it
-warm-starts correctly from a dense checkpoint, and its gate can be seeded from the die map
-(recovering a token's region 61.2% of the time against 10% chance). **None of that is a
-quality result.** The four-arm comparison — dense, learned gate, seeded gate, frozen gate —
-**has not been run.** Whether sparse routing by die address helps this model is currently
-unanswered, and it may buy nothing.
+**The Mixture of Enthusiasts: measured, and mostly a null.** tt-tnt's Llama can have its
+feed-forward replaced by `ttml`'s sparse MoE in about twenty lines. The four-arm comparison
+— dense, learned gate, seeded gate, frozen gate, all warm-started from one checkpoint with
+the same seed and corpus — ran on 2026-08-20
+([`docs/measurements/moe-four-arm.json`](docs/measurements/moe-four-arm.json)). Three
+results, and the interesting one is last:
+
+* **Gate policy is a ~5% effect.** The worst gate costs 0.012 nats; replacing the FFN with
+  MoE at all costs 0.234. Whatever the die buys, it is small next to the architecture change.
+* **Seeding the gate from the die map buys nothing measurable.** +0.0044 nats against a
+  randomly-initialised learned gate, signs 8+/7−, effect bounded under ~0.009 nats. The
+  seeding provably works as a *classifier* — 61.2% region recovery against 10% chance — and
+  that skill does not reach the loss. The gate learns what it needs wherever it starts.
+* **Freezing the gate to physical die geography costs only 0.0118 nats** (|t|=5.1, 14/15
+  signs) — about 15% of the run's own step-to-step floor. A routing rule fixed entirely by
+  *physical address*, never allowed to learn, lands within a hair of a freely-learned gate.
+  Nearly free is not free, and 14/15 signs say the gap is real, but that is the coherent
+  claim this project can now make: on this hardware, routing by geography is close to costless.
+
+**What the comparison cannot tell you.** Every MoE arm introduces 204 fresh parameters and
+discards 18, so all three re-learn a feed-forward from init while the dense arm continues a
+converged one. The dense-vs-MoE gap is *initialization debt*, not a quality verdict — it
+shrinks monotonically (−0.523 → −0.132) and was still shrinking at step 1500. Whether MoE
+overtakes dense is **not answered**; that needs a from-scratch run at a longer horizon. The
+MoE-vs-MoE contrasts above are free of the confound because the debt is identical across them.
+With six pairwise contrasts the Bonferroni threshold is |t| > 2.64, which the seeding null
+fails outright and learned-vs-frozen only reaches (2.64, called borderline rather than a pass).
 
 **Open defect.** Served through vLLM, the model repeats more than its own CPU reference does
 (local repeat 0.1125 against 0.0125). The same weights driven through `tt_transformers`

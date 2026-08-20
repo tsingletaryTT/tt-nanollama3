@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import pathlib
 
-W, H = 1000, 946
+W, H = 1000, 1010
 BG, INK, INK2, RULE = "#F1F8F8", "#092221", "#3A5452", "#C7D9D8"
 ACCENT, TEAL, AMBER, RED, PURPLE = "#1B8EB1", "#74C5DF", "#F6BC42", "#FA512E", "#8A6FB0"
 MONO = "ui-monospace,'SF Mono',Menlo,Consolas,monospace"
@@ -132,7 +132,7 @@ def build() -> str:
                   size=11, fill=INK2, anchor="middle"))
 
     # ---- 3. the routing, which is ours --------------------------------------
-    y = 580
+    y = 570
     o.append(text(40, y, "3 — THE ROUTING IS OURS: A TOKEN GOES WHERE IT LIVES",
                   size=12, font=MONO, fill=PURPLE, weight=600))
     o.append(text(40, y + 20, "not a learned gate — an address on the harvested 11×10 grid",
@@ -155,19 +155,27 @@ def build() -> str:
                                "steering to a region raises that", size=12, fill=INK2))
     o.append(text(40, y + 176, "region's register across four generation seeds (p < 0.004 each).",
                   size=12, fill=INK2))
+    o.append(text(40, y + 200, "and it is nearly free: a gate FROZEN to this geography costs "
+                               "0.0118 nats against a gate", size=12, fill=INK))
+    o.append(text(40, y + 218, "free to learn (|t| 5.1, 14/15 signs) — ~15% of the run's own "
+                               "step-to-step floor. Seeding", size=12, fill=INK))
+    o.append(text(40, y + 236, "alone buys nothing measurable (+0.0044, signs 8+/7−).",
+                  size=12, fill=INK))
 
     # ---- 4. the QB2 gap -----------------------------------------------------
-    y = 800
+    y = 856
     o.append(text(40, y, "4 — THE GAP THIS BOX SITS IN", size=12, font=MONO, fill=RED, weight=600))
-    o.append(box(40, y + 16, 920, 108, fill=RED, op=0.07, stroke=RED))
+    o.append(box(40, y + 16, 920, 128, fill=RED, op=0.07, stroke=RED))
     o.append(text(58, y + 42, "upstream ships MoE configs for single-card and for 6U Galaxy "
                               "(32 chips). Nothing for four.", size=13))
     o.append(text(58, y + 66, "tt-tnt already vendors a [1, 4] mesh-graph descriptor because "
                               "ttml ships defaults for 8 and 32 only", size=12, fill=INK2))
     o.append(text(58, y + 84, "— a mismatch there does not error, it HANGS in the first "
                               "gradient all-reduce (train/run.py).", size=12, fill=INK2))
-    o.append(text(58, y + 108, "A QuietBox-2-native MoE training path does not exist yet. "
-                               "That is the opening.", size=12.5, weight=600))
+    o.append(text(58, y + 108, "It exists now, at [1, 2]: four arms trained on this box "
+                               "on 2026-08-20. The [1, 4] mesh is", size=12.5, weight=600))
+    o.append(text(58, y + 126, "the part still open — it hard-froze the host ~20s after MoE "
+                               "opened it, with no OOM and no panic.", size=12.5, weight=600))
 
     o.append('</svg>')
     return "".join(o)
