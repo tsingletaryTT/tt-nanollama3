@@ -166,12 +166,22 @@ checkpoint with verified provenance (tokens-v4, seed 5489, beta2 0.999,
 | ddp | **2, one board** — the 4-chip mesh hard-froze this host on 2026-08-20 |
 | config | `train/configs/tt-tnt-v077.yaml` — required; without it `stochastic_rounding` is off and RMSNorm gammas do not learn |
 
-**Open question that may require work in `train/run.py`:** loss should be masked to
-`think + continuation`, leaving the prefix unsupervised. Whether ttml's `train()` supports a
-loss mask is **not yet established**. If it does not, the fallback is loss over the full
-sequence — acceptable but less clean, since it re-teaches prefix text the model already
-knows. Resolve this before writing the training code; it is the single largest unknown in
-this spec.
+**Loss masking: RESOLVED, and it changes the code path.** This was the spec's largest
+unknown. `ttml.trainers.SFTTrainer` (`tt-train/sources/ttml/ttml/trainers/sft_trainer.py`)
+supports loss masking as its **default** behaviour: `batch.loss_mask` zeroes out prompt and
+padding, implemented as `ReduceType.NONE` per-token loss → `* loss_mask` → `mean`, with a
+built-in check that warns when the mask sum diverges from `B*T`. It also takes an optional
+`compute_loss_func` override and an `attention_mask`.
+
+Consequence: **the improv SFT stage does not go through `train/run.py`.** It uses
+`SFTTrainer` with `SFTConfig`, its own dataloader, and its own LR schedule and callbacks.
+`train/run.py` remains the pretraining path. Warm-start becomes "load the pretrained
+checkpoint into the model, then hand the model to `SFTTrainer`" rather than a `--warm-start`
+flag.
+
+This is a genuinely different code path from everything this repo has trained so far, so the
+plan must prove `SFTTrainer` runs at all — a masked smoke on a handful of examples — before
+any data pipeline is built on top of it.
 
 ## Component 4 — evaluation (`scripts/eval_improv.py`)
 
@@ -245,7 +255,11 @@ is used.
 1. **The trace may be ignored.** Derived post-hoc, so the model can learn to emit a vague
    plan and write independently of it. The swap test is the detector, and it runs first among
    the evals.
-2. **Loss masking may not be supported by ttml.** Largest unknown; resolve before coding.
+2. **`SFTTrainer` is an unexercised code path here.** Loss masking itself is resolved (it is
+   the trainer's default), but this repo has never trained through `SFTTrainer` — only
+   through `train/run.py`. The risk moved from "can we mask" to "does this trainer work on
+   our model, our mesh, and our checkpoint". Proven by a smoke task before anything is built
+   on it.
 3. **Filtering shifts the distribution.** Drop rules select exemplary moves. Drop rate is
    logged per rule and reported.
 4. **123M may not fill five slots reliably.** Expected, and why adherence is reported
