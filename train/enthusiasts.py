@@ -219,6 +219,8 @@ def install_enthusiasts(
     *,
     gate_policy: str = "learned",
     first_moe_block: int = 2,
+    reference_embedding: Optional[np.ndarray] = None,
+    per_token_expert: Optional[np.ndarray] = None,
     log=print,
 ) -> Dict[str, Any]:
     """Replace ``block.mlp`` with a ``SparseMoEEP`` on the chosen blocks.
@@ -239,6 +241,23 @@ def install_enthusiasts(
         raise ValueError(f"gate_policy {gate_policy!r} not in {GATE_POLICIES}")
     hp.validate()
 
+    # `seeded` and `frozen` write the die into the gate, and the gate reads a HIDDEN
+    # STATE. That is only meaningful against embeddings that are already organised --
+    # see die_gate_weights. Refusing here rather than accepting a reference-free
+    # request keeps the two policies from silently degenerating into an unusual
+    # initialisation of `learned`, which would look like a result and be an artefact.
+    if gate_policy in ("seeded", "frozen"):
+        if reference_embedding is None or per_token_expert is None:
+            raise ValueError(
+                f"gate_policy={gate_policy!r} needs reference_embedding and "
+                f"per_token_expert. The gate scores hidden states, so seeding it from "
+                f"the die is only defined against embeddings the die map was measured "
+                f"on. From random initialisation there is no relationship between a "
+                f"hidden state and a die region and this policy would encode nothing.")
+        if reference_embedding.shape[1] != hp.dim:
+            raise ValueError(
+                f"reference_embedding dim {reference_embedding.shape[1]} != hp.dim {hp.dim}")
+
     from ttml.models.deepseek.moe_sparse_ep import SparseMoEEP
 
     blocks = list(model.blocks)
@@ -251,7 +270,11 @@ def install_enthusiasts(
     for i, block in enumerate(blocks):
         if i < first_moe_block:
             continue
-        block.mlp = SparseMoEEP(hp, axis_name=hp.moe_axis_name)
+        moe = SparseMoEEP(hp, axis_name=hp.moe_axis_name)
+        if gate_policy in ("seeded", "frozen"):
+            _apply_die_gate(moe, hp, reference_embedding, per_token_expert,
+                            freeze=(gate_policy == "frozen"))
+        block.mlp = moe
         swapped.append(i)
 
     log(f"  enthusiasts: {hp.n_routed_experts} routed + {hp.n_shared_experts} shared, "
@@ -259,11 +282,105 @@ def install_enthusiasts(
     log(f"  blocks      : {len(blocks)} total, dense 0..{first_moe_block - 1}, "
         f"MoE {swapped[0]}..{swapped[-1]}")
     log(f"  gate policy : {gate_policy}")
+    if gate_policy in ("seeded", "frozen"):
+        acc = gate_recovers_region(reference_embedding, per_token_expert,
+                                   hp.n_routed_experts)
+        log(f"  gate seeded : recovers the die region for {acc:.1%} of tokens "
+            f"(chance {1/hp.n_routed_experts:.1%})"
+            + ("; frozen for the run" if gate_policy == "frozen" else "; free to move"))
 
     return {
         "n_blocks": len(blocks),
         "dense_blocks": list(range(first_moe_block)),
         "moe_blocks": swapped,
         "gate_policy": gate_policy,
+        "gate_recovery": (round(gate_recovers_region(
+            reference_embedding, per_token_expert, hp.n_routed_experts), 4)
+            if gate_policy in ("seeded", "frozen") else None),
         "hyperparams": {k: v for k, v in hp.__dict__.items()},
     }
+
+
+def die_gate_weights(embedding: np.ndarray, per_token: np.ndarray,
+                     n_experts: int) -> np.ndarray:
+    """``(n_experts, dim)`` gate weights that classify a hidden state to its die region.
+
+    ``MoE`` scores experts with a bias-free linear layer -- ``logits = self.gate(x)``,
+    ``gate = LinearLayer(dim, n_routed_experts)`` -- so row ``e`` of its weight is
+    the direction that expert ``e`` responds to. Setting row ``e`` to the *mean
+    embedding of the tokens the die assigns to e*, unit-normalised, turns the gate
+    into a nearest-centroid classifier over die regions: ``argmax_e x . w_e`` picks
+    the region whose token cloud ``x`` points most towards.
+
+    Unit-normalised because otherwise a region holding more or longer-normed tokens
+    would win on magnitude rather than on direction, which is a frequency artefact
+    of exactly the kind ``probe_die_regions`` controlled for.
+
+    THE LIMITATION, WHICH IS NOT SMALL
+    ----------------------------------
+    The gate reads a HIDDEN STATE, not a token id. This construction is only
+    meaningful to the extent that a hidden state at the MoE blocks still points
+    where its token's embedding points. That is true for a model whose embeddings
+    are already organised, and it is FALSE AT RANDOM INITIALISATION: with random
+    embeddings there is no relationship between a hidden state and a die region, so
+    a seeded gate on a from-scratch run encodes nothing and `seeded` degenerates to
+    an unusual initialisation of `learned`.
+
+    So a seeded or frozen arm is well defined when the run WARM-STARTS from a
+    checkpoint whose embeddings the die map was measured on, and ill-defined from
+    scratch. That is a property of routing on hidden states, not of this function,
+    and it is the reason `--gate-policy seeded` refuses to run without a reference.
+    """
+    if embedding.ndim != 2:
+        raise ValueError(f"embedding must be (vocab, dim), got {embedding.shape}")
+    dim = embedding.shape[1]
+    W = np.zeros((n_experts, dim), dtype=np.float32)
+    for e in range(n_experts):
+        owned = np.flatnonzero(per_token == e)
+        if len(owned) == 0:
+            continue  # leave the row at zero; that expert never wins on its own
+        v = embedding[owned].mean(axis=0)
+        n = np.linalg.norm(v)
+        W[e] = v / n if n > 0 else v
+    return W
+
+
+def gate_recovers_region(embedding: np.ndarray, per_token: np.ndarray,
+                         n_experts: int) -> float:
+    """Fraction of tokens whose die region the seeded gate recovers from its embedding.
+
+    The seeding is only worth doing if it works as a classifier, and that is
+    checkable without a device: build the weights, apply them to every token's own
+    embedding, and see how often ``argmax`` returns the region the die assigned.
+
+    A value near 1/n_experts means the construction does nothing.
+    """
+    W = die_gate_weights(embedding, per_token, n_experts)
+    pred = (embedding @ W.T).argmax(axis=1)
+    return float((pred == per_token).mean())
+
+
+def _apply_die_gate(moe: Any, hp: MoEHyperparams, embedding: np.ndarray,
+                    per_token: np.ndarray, *, freeze: bool) -> None:
+    """Write die-region weights into one MoE's gate, optionally freezing them.
+
+    The gate's parameter is ``LinearLayer/weight`` with shape
+    ``(1, 1, n_routed_experts, dim)``; ``die_gate_weights`` returns
+    ``(n_routed_experts, dim)``, so it is reshaped rather than transposed -- getting
+    that backwards produces a gate that scores by the wrong axis and still runs.
+    """
+    import ttml
+
+    W = die_gate_weights(embedding, per_token, hp.n_routed_experts)
+    params = moe.gate.parameters()
+    key = next(k for k in params if k.endswith("weight"))
+    tensor = params[key]
+
+    target = tensor.to_numpy()
+    if target.shape != (1, 1, hp.n_routed_experts, hp.dim):
+        raise ValueError(f"unexpected gate weight shape {target.shape}")
+    tensor.set_value(
+        ttml.autograd.Tensor.from_numpy(
+            W.reshape(1, 1, hp.n_routed_experts, hp.dim).astype(target.dtype)).get_value())
+    if freeze:
+        tensor.set_requires_grad(False)
