@@ -376,12 +376,22 @@ def _apply_die_gate(moe: Any, hp: MoEHyperparams, embedding: np.ndarray,
     key = next(k for k in params if k.endswith("weight"))
     tensor = params[key]
 
-    target = tensor.to_numpy()
-    if target.shape != (1, 1, hp.n_routed_experts, hp.dim):
-        raise ValueError(f"unexpected gate weight shape {target.shape}")
-    tensor.set_value(
-        ttml.autograd.Tensor.from_numpy(
-            W.reshape(1, 1, hp.n_routed_experts, hp.dim).astype(target.dtype)).get_value())
+    # Shape and dtype come from the tensor's OWN accessors, never from to_numpy().
+    #
+    # `to_numpy()` here was a real bug: under DDP the gate parameter is distributed
+    # across the mesh, and pulling it to host raises
+    #     TT_FATAL: Can't get a single buffer from host storage distributed over
+    #     mesh shape MeshShape([1, 2])          (tensor_apis.cpp:631)
+    # so the seeded and frozen arms died 5 seconds in while learned and dense ran
+    # fine -- those never touch the gate from the host. The validation only ever
+    # needed the shape and the dtype, both of which are available without moving a
+    # single byte off device.
+    shape = tuple(tensor.get_shape()) if hasattr(tensor, "get_shape") else tuple(tensor.shape)
+    expected = (1, 1, hp.n_routed_experts, hp.dim)
+    if shape != expected:
+        raise ValueError(f"unexpected gate weight shape {shape}, expected {expected}")
+    seeded = W.reshape(expected).astype(np.float32)
+    tensor.set_value(ttml.autograd.Tensor.from_numpy(seeded).get_value())
     if freeze:
         tensor.set_requires_grad(False)
 
