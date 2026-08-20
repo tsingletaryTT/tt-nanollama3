@@ -61,7 +61,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
 
@@ -384,3 +384,74 @@ def _apply_die_gate(moe: Any, hp: MoEHyperparams, embedding: np.ndarray,
             W.reshape(1, 1, hp.n_routed_experts, hp.dim).astype(target.dtype)).get_value())
     if freeze:
         tensor.set_requires_grad(False)
+
+
+def warm_start(model: Any, checkpoint: Path, *, transformer_config: Dict[str, Any],
+               yaml_config: Dict[str, Any], moe_block_indices: Sequence[int],
+               log=print) -> Dict[str, Any]:
+    """Copy every parameter a dense checkpoint and this MoE model share.
+
+    A Mixture of Enthusiasts cannot resume a dense checkpoint directly. Attention,
+    norms and embeddings match by name; the feed-forwards do not -- three matrices
+    per block against an expert bank plus a gate. And ttml's loader refuses partial
+    restores in BOTH directions, unconditionally::
+
+        checkpoint restore mismatch: 0 param(s) left at init, 18 checkpoint param(s) ignored
+
+    That is the right default for a resume, where a silently partial restore is a
+    corrupt run, and there is no flag to relax it. tt-metal is not ours to edit.
+
+    So the loader is used exactly as designed: a DENSE model of the same shape is
+    built and loaded strictly, which matches its checkpoint tensor-for-tensor, and
+    the shared values are then copied across by name. The dense model is discarded.
+    Costs one extra model's worth of device memory for the duration of the copy;
+    buys a restore whose completeness is checkable rather than asserted.
+
+    Returns what was copied and what was not. The `fresh` list should contain
+    exactly the experts and the gates -- if attention appears in it, the parameter
+    names have drifted and the warm start is quietly partial.
+    """
+    import train.model as tt_tnt_model
+    from train import checkpoint as ckpt_mod
+
+    live = model.parameters()
+    live_names = set(live)
+
+    dense = tt_tnt_model.create_model(yaml_config, transformer_config)
+    dense_params = dense.parameters()
+    ckpt_mod.load(checkpoint, model_params=dense_params)   # strict, exact match
+
+    shared = sorted(live_names & set(dense_params))
+    fresh = sorted(live_names - set(dense_params))
+    unused = sorted(set(dense_params) - live_names)
+    if not shared:
+        raise ValueError(
+            f"{checkpoint} shares no parameter names with this model -- refusing to "
+            f"call this a warm start.")
+
+    for name in shared:
+        live[name].set_value(dense_params[name].get_value())
+
+    del dense, dense_params
+
+    log(f"  warm start  : {checkpoint.name}")
+    log(f"    copied    : {len(shared)} parameters from the dense checkpoint")
+    # A real invariant, not a cosmetic label. Every freshly-initialised parameter
+    # must belong to an MoE block's mlp; anything else means the names have drifted
+    # and attention or the embeddings were silently NOT restored. An earlier version
+    # of this check looked for "experts"/"gate" substrings and flagged the correct
+    # result as suspicious, because the actual names are like `mlp/w_down_0`.
+    moe_prefixes = tuple(f"llama/llama_block_{i}/mlp/" for i in moe_block_indices)
+    stray = [f for f in fresh if not f.startswith(moe_prefixes)]
+    if stray:
+        raise ValueError(
+            f"warm start left {len(stray)} non-MoE parameter(s) at initialisation, "
+            f"which means the restore was silently partial: {stray[:5]}")
+    log(f"    fresh     : {len(fresh)} kept their initialisation "
+        f"(all under the MoE blocks' mlp, verified)")
+    if unused:
+        log(f"    unused    : {len(unused)} dense tensors have no MoE destination "
+            f"(the replaced feed-forwards)")
+    return {"checkpoint": str(checkpoint), "copied": len(shared), "fresh": len(fresh),
+            "unused_from_checkpoint": len(unused),
+            "fresh_examples": fresh[:8], "unused_examples": unused[:4]}
