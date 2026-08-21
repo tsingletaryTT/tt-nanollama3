@@ -210,6 +210,40 @@ nav.mini li:first-child .grp::before { content: ""; }
 nav.mini a { color: var(--ink-3); text-decoration: none; }
 nav.mini a:hover { color: var(--accent-tx); text-decoration: underline; }
 
+/* Left rail navigation, wide viewports only.
+   Sixteen destinations plus four group labels in a horizontal bar meant the nav scrolled
+   sideways and its labels competed with the section headings for the reader's attention. A
+   vertical rail gives the groups room to read as groups and takes the count out of the
+   headline. Implemented as a FIXED rail plus a body inset rather than a grid, so the section
+   markup is untouched and the narrow-viewport bar below keeps working unchanged. */
+@media (min-width: 64rem) {
+  :root { --nav-w: 14.5rem; }
+  body { padding-left: var(--nav-w); }
+  nav.mini {
+    position: fixed; inset: 0 auto 0 0; width: var(--nav-w);
+    height: 100dvh; overflow-y: auto; overflow-x: hidden;
+    padding: 1.6rem 0 2rem;
+    background: var(--bg); backdrop-filter: none;
+    border-bottom: 0; border-right: 1px solid var(--rule);
+    scrollbar-width: thin;
+  }
+  nav.mini .wrap { width: auto; margin-inline: 0; padding: 0 1.15rem; }
+  nav.mini ol {
+    flex-direction: column; align-items: stretch; gap: .28rem;
+    padding: 0; white-space: normal;
+  }
+  nav.mini .grp {
+    display: block; padding: .85rem 0 .3rem; margin: 1.15rem 0 0;
+    border-top: 1px solid var(--rule);
+  }
+  nav.mini li:first-child .grp { margin-top: 0; border-top: 0; padding-top: 0; }
+  nav.mini .grp::before { content: ""; }
+  nav.mini a { display: block; padding: .1rem 0; line-height: 1.35; }
+  /* The skip link resolves against the initial containing block, not the body's padding box,
+     so without this it lands on top of the rail rather than in the content it skips to. */
+  .skip:focus { left: calc(var(--nav-w) + .5rem); }
+}
+
 /* Diagrams. They are wider than the text column by design, so each scrolls inside
    its own container and the page body never scrolls sideways. */
 figure.diagram {
@@ -381,6 +415,33 @@ footer a { color: var(--ink-3); }
   </div>
 </header>
 
+<nav class="mini" aria-label="Sections">
+  <div class="wrap">
+    <ol>
+      <li><span class="grp">the model</span></li>
+        <li><a href="#capabilities">What it does best</a></li>
+      <li><a href="#ask">Ask it something</a></li>
+      <li><a href="#architecture">Architecture</a></li>
+      <li><a href="#corpus">The corpus</a></li>
+      <li><span class="grp">on the die</span></li>
+      <li><a href="#die">How it uses the die</a></li>
+      <li><a href="#path">The path</a></li>
+      <li><a href="#fixes">Runtime patches</a></li>
+      <li><a href="#speed">4.62×</a></li>
+      <li><span class="grp">measurement</span></li>
+      <li><a href="#instruments">The instruments</a></li>
+        <li><a href="#manager">tt-model-manager</a></li>
+      <li><a href="#external">Someone else's benchmarks</a></li>
+      <li><a href="#geography">Embedding geography</a></li>
+      <li><a href="#refuted">Measurement floors</a></li>
+      <li><a href="#separators">Document separators</a></li>
+      <li><span class="grp">limits</span></li>
+      <li><a href="#cannot">What it can't do</a></li>
+      <li><a href="#links">Everything</a></li>
+    </ol>
+  </div>
+</nav>
+
   <section id="capabilities">
     <h2>What it does best</h2>
     <p class="lede">
@@ -428,31 +489,6 @@ footer a { color: var(--ink-3); }
     </div>
   </section>
 
-<nav class="mini" aria-label="Sections">
-  <div class="wrap">
-    <ol>
-      <li><span class="grp">the model</span></li>
-        <li><a href="#capabilities">What it does best</a></li>
-      <li><a href="#ask">Ask it something</a></li>
-      <li><a href="#architecture">Architecture</a></li>
-      <li><a href="#corpus">The corpus</a></li>
-      <li><span class="grp">on the die</span></li>
-      <li><a href="#die">How it uses the die</a></li>
-      <li><a href="#path">The path</a></li>
-      <li><a href="#fixes">Runtime patches</a></li>
-      <li><a href="#speed">4.62×</a></li>
-      <li><span class="grp">measurement</span></li>
-      <li><a href="#instruments">The instruments</a></li>
-      <li><a href="#external">Someone else's benchmarks</a></li>
-      <li><a href="#geography">Embedding geography</a></li>
-      <li><a href="#refuted">Measurement floors</a></li>
-      <li><a href="#separators">Document separators</a></li>
-      <li><span class="grp">limits</span></li>
-      <li><a href="#cannot">What it can't do</a></li>
-      <li><a href="#links">Everything</a></li>
-    </ol>
-  </div>
-</nav>
 
 <main id="main">
 
