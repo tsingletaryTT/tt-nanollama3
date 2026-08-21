@@ -535,3 +535,106 @@ here is the stock learned one, which is the *control* arm; the seeded and frozen
 policies, the ones that actually connect the die to the router, are declared and
 not yet written.
 
+
+## 2026-08-21 — it learned to plan, and then wrote whatever it liked
+
+The model can now be asked to think before it speaks, and it does — 98% of the time,
+in well-formed five-slot blocks, where the control arm produces none at all. The
+scorers say the thinking changes nothing. The generations say why, and they are more
+interesting than the scorers.
+
+### The model, planning
+
+Held-out openings, think arm, greedy and sampled. The block is the model's own — nothing
+was forced.
+
+> ```
+> <think>
+> offer: loved play outside friends
+> accept: lily
+> add: dance
+> stakes: level
+> handback: dance
+> </think>
+> One day, Lily and her friends were playing a game when they saw a big, scary dog.
+> The dog looked scary and Lily got scared
+> ```
+
+Read the block and then the prose. It planned to add **dance** and hand back **dance**.
+It wrote a **scary dog**. The syntax of intention is perfect and the intention is not
+honoured.
+
+> ```
+> <think>
+> offer: girl feeling sad wanted idea
+> accept: arrow
+> add: lesson
+> stakes: up
+> handback: lesson
+> </think>
+> She decided to use her arrow to make a new arrow. She used her arrow to make a new
+> arrow. The girl was so happy
+> ```
+
+`stakes: up`, and the scene resolves into contentment. `add: lesson`, and no lesson
+arrives. It also loops — *make a new arrow* twice — which is the old repeat defect
+wearing the new costume.
+
+> ```
+> <think>
+> offer: cold
+> accept: ben
+> add: melt
+> stakes: down
+> handback: melt
+> </think>
+> It's so cold!" <think>
+> offer: cold cold cold cold cold cold cold cold cold ...
+> ```
+
+Here it finishes one block, writes four words, and opens a **second** block mid-sentence,
+which then collapses into the degenerate repetition this model has always been prone to.
+The format is now something it can fall into as well as fill.
+
+For contrast, the same opening through the no-think control:
+
+> One day, Lily and her friends were playing hide-and-seek. Lily was hiding behind a big
+> tree when she heard a loud noise. She looked around and saw a big, scary dog. Lily was
+> scared and didn't know what to do. Her friend, Timmy, said, "Don't be scared,
+
+That is *better prose*. Longer, a named second character, dialogue, a beat of tension
+handled. The arm that thinks first writes worse than the arm that doesn't.
+
+### What that actually means
+
+The swap test says substituting another story's block changes 100% of continuations. The
+generations say the block does not *govern* the prose. Both are true, and together they
+name the thing precisely: **the block is context the model conditions on, not an
+instruction it obeys.** Influence, not governance. Change it and the output moves; ask it
+to mean something and it shrugs.
+
+Which is why 0 of 4 failure-mode scorers budged. We measured whether the plan improved the
+move. The model never got as far as treating the plan as a plan.
+
+And there is a plainer reading available, from the shape of what it learned to emit. The
+slots are telegraphese — *loved play outside friends*, *girl feeling sad wanted idea* —
+because the derivation lifts content words and drops the rest. Nothing in 400M tokens of
+storybook prose looks like that. So the model was asked to produce a register it had never
+read, then to let that register steer a register it knows fluently. It learned the first
+part, which is the part that is mostly syntax, and declined the second.
+
+### Where this goes
+
+The unit is wrong, and the fix is already named in the spec: a single continuation gives
+`handback` nothing to hand back *to*. A **skit** — two or more turns with a partner who
+answers — is the smallest thing where accepting an offer and leaving an opening can
+actually pay off or fail, and where "made my partner look good" becomes measurable instead
+of decorative. Stage 2 was scoped as turn-taking for exactly this reason. It should be
+scoped as skits.
+
+The other honest lesson from the day is not about the model. This result was **0%
+adherence** for two full reports, with a supporting diagnostic, because every RMSNorm gamma
+in both arms was frozen — `stochastic_rounding` defaults off on the SFT path, which skips
+the warning the pretraining path prints. A tensor diff found it: seventeen weights
+bit-identical to where they started after three thousand steps. Unfreeze them and 0%
+becomes 98%. The model was never the thing that was broken.

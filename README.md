@@ -88,7 +88,24 @@ SFT arms, think against no-think, warm-started from the one-epoch checkpoint:
   one that cannot discriminate.
 
 So stage 1 is **PARTIAL**: the mechanism works end to end and buys nothing on the metrics we
-chose. Worth recording how nearly we got this wrong — an earlier pass reported **0% adherence**
+chose. The generations say why, and they are more informative than the scores. Asked to
+continue a story about Lily and her friends, the model planned `add: dance` and
+`handback: dance` — and then wrote a **scary dog**. Another block set `stakes: up` and the
+scene resolved into contentment. **The syntax of intention is perfect and the intention is
+not honoured.** Put beside the swap test, that names the thing precisely: the block is
+*context the model conditions on, not an instruction it obeys* — influence, not governance.
+Change it and the output moves; ask it to mean something and it shrugs. Which is exactly why
+no failure-mode scorer budged: we measured whether the plan improved the move, and the model
+never got as far as treating the plan as a plan. The no-think control, on the same opening,
+writes plainly **better** prose — longer, a named second character, dialogue. The arm that
+thinks first writes worse than the arm that doesn't. Close reading in
+[`episod-log.md`](episod-log.md), 2026-08-21.
+
+**Where it goes next: skits.** A single continuation gives `handback` nothing to hand back
+*to*. A skit — two or more turns with a partner who answers — is the smallest unit where
+accepting an offer and leaving an opening can actually pay off or fail, and where "made my
+partner look good" becomes measurable rather than decorative. Stage 2 was scoped as
+turn-taking for that reason; it should be scoped as skits. Worth recording how nearly we got this wrong — an earlier pass reported **0% adherence**
 and a diagnosis to match, from a run in which all 17 RMSNorm gammas were provably frozen
 (`stochastic_rounding` defaults off in the SFT path, which bypasses the warning `train/run.py`
 prints). With the gammas free, 0% became 98%. Both runs' numbers sit side by side in the

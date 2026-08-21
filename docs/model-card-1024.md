@@ -96,6 +96,22 @@ no-think control produces them 0% of the time). Substituting another story's blo
 the four failure-mode scores at α = 0.01, and one of those four is saturated on the real
 co-occurrence table and cannot discriminate at all. Stage 1 is *partial*.
 
+The generations explain the null better than the scores do. Asked to continue a story, the
+model planned `add: dance` / `handback: dance` and then wrote a scary dog; another block set
+`stakes: up` and the scene resolved into contentment. The syntax of intention is perfect and the
+intention is not honoured. Read alongside the swap test that names it precisely: the block is
+*context the model conditions on, not an instruction it obeys* — change it and the output moves,
+ask it to mean something and it shrugs. On the same opening the no-think arm writes plainly
+better prose. A plainer contributing reason: the slots are telegraphese (*loved play outside
+friends*), because derivation lifts content words and drops the rest, so the model was asked to
+produce a register nothing in 400M tokens of storybook prose resembles — and then to let that
+register steer one it knows fluently.
+
+Next unit is a **skit**: two or more turns with a partner who answers. A single continuation
+gives `handback` nothing to hand back to, so the slot that encodes "make your partner look good"
+cannot pay off or fail. Close reading in
+[`episod-log.md`](https://github.com/tsingletaryTT/tt-tnt/blob/main/episod-log.md), 2026-08-21.
+
 One process note kept deliberately: an earlier pass reported 0% adherence, from a run in which
 all 17 RMSNorm gammas were provably frozen because `stochastic_rounding` defaults off on the SFT
 path. With the gammas free, 0% became 98%. Both runs are preserved in the repo's measurement
