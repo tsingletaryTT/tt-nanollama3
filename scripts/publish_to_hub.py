@@ -371,7 +371,11 @@ def cmd_restore_card(repo_id: str, dry_run: bool, yes: bool) -> int:
     print(f"card:    {target["card"].relative_to(ROOT)}")
 
     if dry_run:
-        print(f"[dry-run] would push card from {CARD_PATH.relative_to(ROOT)} to {repo_id}, "
+        # Print the TARGET's card, not the module-level default. This message used to name
+        # CARD_PATH (docs/model-card.md, the 384-dim tt-tnt card) no matter which repo was
+        # selected, while the line above printed the correct per-target card — so a --dry-run
+        # against episod/tt-tnt-1024 contradicted itself and looked like a display quirk.
+        print(f"[dry-run] would push card from {target["card"].relative_to(ROOT)} to {repo_id}, "
               f"then re-set license={LICENSE}. No changes made.")
         return 0
 
@@ -380,7 +384,11 @@ def cmd_restore_card(repo_id: str, dry_run: bool, yes: bool) -> int:
               file=sys.stderr)
         return 2
 
-    _push_card(repo_id)
+    # Pass the target's card explicitly. It was not a display quirk: this call omitted the
+    # argument, so _push_card fell back to its card_path=None default (docs/model-card.md) and
+    # --restore-card would publish the 384-dim model's card onto whichever repo was named.
+    # cmd_publish above has always passed target["card"]; only this path was wrong.
+    _push_card(repo_id, target["card"])
     _set_license(repo_id)
     _report_card_state(repo_id)
     print("card restored.")
