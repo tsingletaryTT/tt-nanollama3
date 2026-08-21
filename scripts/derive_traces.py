@@ -56,16 +56,61 @@ def derive_from_story(story: str, *, story_id: int, rng_seed: int,
             "slots": slots.as_dict()}
 
 
-def build_sft_examples(traces: List[dict], tok, *, with_think: bool) -> List[dict]:
-    """`{"input_ids", "labels"}` with -100 on prompt positions, for `sft_collate_fn`."""
+# Tile width ttml's device ops assume. See the Task 2 SFTTrainer smoke finding
+# (.superpowers/sdd/2026-08-20-improv-thinking/task-2-report.md): ttml's SDPA backward
+# kernel mismatches a collated batch's raw sequence length against a tile-padded buffer
+# whenever that length is not a multiple of 32. sft_collate_fn pads each batch to its
+# longest example (dynamic, per batch) and does not itself guarantee tile alignment, so
+# the guarantee is placed here instead: every example this module hands to sft_collate_fn
+# is already a multiple of 32, which makes the batch max necessarily a multiple of 32 too.
+# max_seq_len=512 (this project's cap) is itself a multiple of 32, so a truncated example
+# stays aligned as well.
+TILE = 32
+
+
+def _sft_example_unaligned(rec: dict, tok, *, with_think: bool) -> dict:
+    """Core `{"input_ids", "labels"}` construction, before tile-alignment padding.
+
+    Factored out of `build_sft_examples` so a test can assert the `with_think` token-count
+    delta directly against the un-padded lengths: `build_sft_examples`'s tile-alignment
+    padding is chosen independently for each arm (it depends on that arm's raw length mod
+    ``TILE``), so an aligned-length delta would not reliably equal the think-block's own
+    token count and could mask a `with_think` regression on the wrong inputs. This function
+    is the one true source of "how are input_ids/labels built from a trace", both for
+    `build_sft_examples` and for that test.
+    """
+    prompt = rec["prefix"]
+    completion = (rec["think"] + rec["continuation"]) if with_think else rec["continuation"]
+    p_ids = tok.encode(prompt)
+    c_ids = tok.encode(completion, add_special_tokens=False)
+    return {"input_ids": p_ids + c_ids, "labels": [-100] * len(p_ids) + c_ids}
+
+
+def build_sft_examples(traces: List[dict], tok, *, with_think: bool,
+                       pad_token_id: int) -> List[dict]:
+    """`{"input_ids", "labels"}` with -100 on prompt positions, for `sft_collate_fn`.
+
+    Every example is padded up to the next multiple of `TILE` (32) tokens -- `pad_token_id`
+    on `input_ids`, `-100` (masked, same as a prompt position) on `labels` -- so the loss is
+    unaffected by the padding and the only cost is a little wasted compute. See `TILE`'s
+    comment above for why this lives here rather than in a custom collate function.
+
+    Args:
+        traces: records with "prefix", "think", "continuation" (see `derive_from_story`).
+        tok: a tokenizer exposing `.encode(text, add_special_tokens=...)`.
+        with_think: include the think-block on the completion side when True.
+        pad_token_id: token id used to pad `input_ids` out to a tile multiple. Passed
+            explicitly (not read from a global) so callers own the choice -- this module
+            has no tokenizer of its own to default it from.
+    """
     out = []
     for rec in traces:
-        prompt = rec["prefix"]
-        completion = (rec["think"] + rec["continuation"]) if with_think else rec["continuation"]
-        p_ids = tok.encode(prompt)
-        c_ids = tok.encode(completion, add_special_tokens=False)
-        out.append({"input_ids": p_ids + c_ids,
-                    "labels": [-100] * len(p_ids) + c_ids})
+        ex = _sft_example_unaligned(rec, tok, with_think=with_think)
+        pad_needed = (-len(ex["input_ids"])) % TILE
+        if pad_needed:
+            ex["input_ids"] = ex["input_ids"] + [pad_token_id] * pad_needed
+            ex["labels"] = ex["labels"] + [-100] * pad_needed
+        out.append(ex)
     return out
 
 

@@ -9,6 +9,17 @@ ttml.trainers.SFTTrainer is an unexercised code path here. Failing here changes 
 not the code: the fallback (full-sequence loss, no masking) is a design decision, not a
 workaround this script should reach for.
 
+TILE ALIGNMENT (added after the first run of this script found a real blocker): the
+first attempt crashed in loss.backward() with a TT_FATAL from ttml's SDPA backward kernel
+("u_scaler shape mismatch") whenever the collated batch's sequence length T was not a
+multiple of 32 (ttml's tile width) -- see task-2-report.md for the full trace and the
+diagnostic that isolated this. The coordinator's ruling: fix it in the example builder,
+not in a custom collate, so sft_collate_fn and everything downstream in ttml stay
+untouched. This script now builds its 8 examples through
+scripts.derive_traces.build_sft_examples, the same tile-aligning builder Task 5 will use,
+so this smoke test exercises the actual production path rather than a hand-rolled one
+that could silently drift from it.
+
 Constructor substitution (see Step 3 in the plan / task brief): the plan's expected entry
 point, ``ttml.models.llama.create_llama_from_config``, does not exist in the installed
 ttml (verified: ``dir(ttml.models.llama)`` has no such name -- it has ``Llama``,
@@ -66,16 +77,21 @@ def main() -> int:
     yaml_config: dict = {}
     ttml.open_device_mesh((1, 1))
     try:
+        from scripts.derive_traces import build_sft_examples
+
         tok = AutoTokenizer.from_pretrained(str(TOKENIZER_DIR))
-        p_ids = tok.encode(PROMPT)
-        c_ids = tok.encode(COMPLETION, add_special_tokens=False)
+        pad_token_id = tok.pad_token_id or 0
 
-        # -100 on prompt positions is what tells sft_collate_fn which tokens to mask.
-        example = {"input_ids": p_ids + c_ids,
-                   "labels": [-100] * len(p_ids) + c_ids}
-        examples = [example] * 8
+        # with_think=False: this smoke test is about the mask + SFTTrainer + model
+        # combination in general, not the think-block feature specifically (that is
+        # covered by tests/test_derive_traces.py). "think" is unused when with_think is
+        # False but build_sft_examples still reads the key off the trace dict, so it must
+        # be present.
+        trace = {"prefix": PROMPT, "think": "", "continuation": COMPLETION}
+        examples = build_sft_examples([trace] * 8, tok, with_think=False,
+                                      pad_token_id=pad_token_id)
 
-        collate = partial(sft_collate_fn, max_seq_len=512, pad_token_id=tok.pad_token_id or 0)
+        collate = partial(sft_collate_fn, max_seq_len=512, pad_token_id=pad_token_id)
         loader = InMemoryDataloader(examples, batch_size=4, collate_fn=collate, shuffle=False)
 
         # THE CONTRACT: loss_mask.sum() must equal B*T, or the masked mean is silently wrong.
