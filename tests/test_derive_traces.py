@@ -11,6 +11,10 @@ STORY = ("Lily found a needle in her room. She knew it was sharp. "
 
 PAD_TOKEN_ID = 999  # arbitrary; distinct from any id _Tok's checksum could plausibly emit
 
+# Distinct from every word-checksum id (`sum(ord(c) for c in w) % 31_000` is always
+# < 31_000) and from PAD_TOKEN_ID -- unambiguous when it shows up in an assertion failure.
+_BOS_SENTINEL = 999_999
+
 
 class _Tok:
     """A faithful (non-lossy) stand-in tokenizer: one id per whitespace-separated word.
@@ -23,10 +27,26 @@ class _Tok:
     (PYTHONHASHSEED), and this project's determinism guarantee (Task 1) depends on
     nothing in the pipeline depending on hash randomization. `sum(ord(c) for c in w)` is
     a stable, process-independent function of the word.
+
+    FIX 4 (task-6-report.md): the previous version of this mock accepted
+    `add_special_tokens` as a parameter and then silently ignored it -- both branches
+    returned identical ids. That made the mock agree with a mutant of
+    `scripts/derive_traces.py`'s real `build_sft_examples` that deleted
+    `add_special_tokens=False` from its completion-side `tok.encode(...)` call (which
+    would wedge a spurious BOS between the prompt and the think-block in every real
+    training example): the test file computes its own expected values with THIS SAME
+    mock, so if the mock can't tell the flag apart, neither can any assertion built on
+    top of it, and the mutation passed all 28 tests. Now `add_special_tokens=True`
+    (ttml's own tokenizer default, and what `_sft_example_unaligned`'s prompt-side call
+    uses) prepends `_BOS_SENTINEL`; `add_special_tokens=False` (the completion/think-block
+    side) does not. Production and every test-local `tok.encode(...)` call use the exact
+    same argument in the same places, so this is a like-for-like upgrade, not a new
+    behaviour to reconcile against.
     """
 
     def encode(self, s, add_special_tokens=True):
-        return [sum(ord(c) for c in w) % 31_000 for w in s.split()]
+        ids = [sum(ord(c) for c in w) % 31_000 for w in s.split()]
+        return ([_BOS_SENTINEL] + ids) if add_special_tokens else ids
 
 
 def test_derive_returns_a_trace_with_all_slots():
