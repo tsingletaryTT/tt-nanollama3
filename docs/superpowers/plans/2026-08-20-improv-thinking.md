@@ -681,8 +681,13 @@ the corpus."
 - Produces: `artifacts/improv/traces.jsonl` where each line is
   `{"story_id": int, "cut_k": int, "prefix": str, "think": str, "continuation": str, "slots": {...}}`
   plus `artifacts/improv/derive_manifest.json` carrying drop counts per rule.
-- Also produces, for Task 5: `build_sft_examples(traces, tok, *, with_think: bool) -> list[dict]`
+- Also produces, for Task 5: `build_sft_examples(traces, tok, *, with_think: bool, pad_token_id: int) -> list[dict]`
   returning `{"input_ids": [...], "labels": [...]}` with `-100` on prompt positions.
+  (FIX 5(b), task-6-report.md: `pad_token_id` is REQUIRED -- the shipped implementation
+  tile-aligns every example to a multiple of 32 tokens using it, per Task 2's SDPA-backward
+  finding below. A stage-2 implementer copying this signature or the call sites further
+  down without it will get a `TypeError: build_sft_examples() missing 1 required keyword-only
+  argument: 'pad_token_id'`.)
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -713,7 +718,7 @@ def test_sft_example_masks_only_the_prompt():
             return [ord(c) % 97 for c in s[:20]]
 
     rec = derive_from_story(STORY, story_id=0, rng_seed=5489)
-    ex = build_sft_examples([rec], _Tok(), with_think=True)[0]
+    ex = build_sft_examples([rec], _Tok(), with_think=True, pad_token_id=0)[0]
     assert len(ex["input_ids"]) == len(ex["labels"])
     assert ex["labels"][0] == -100, "prompt must be masked"
     assert any(v != -100 for v in ex["labels"]), "completion must be supervised"
@@ -725,8 +730,8 @@ def test_no_think_arm_omits_the_block_but_keeps_the_continuation():
             return [ord(c) % 97 for c in s[:20]]
 
     rec = derive_from_story(STORY, story_id=0, rng_seed=5489)
-    with_t = build_sft_examples([rec], _Tok(), with_think=True)[0]
-    without = build_sft_examples([rec], _Tok(), with_think=False)[0]
+    with_t = build_sft_examples([rec], _Tok(), with_think=True, pad_token_id=0)[0]
+    without = build_sft_examples([rec], _Tok(), with_think=False, pad_token_id=0)[0]
     assert len(without["input_ids"]) <= len(with_t["input_ids"])
 ```
 
@@ -796,8 +801,18 @@ def derive_from_story(story: str, *, story_id: int, rng_seed: int,
             "slots": slots.as_dict()}
 
 
-def build_sft_examples(traces: List[dict], tok, *, with_think: bool) -> List[dict]:
-    """`{"input_ids", "labels"}` with -100 on prompt positions, for `sft_collate_fn`."""
+def build_sft_examples(traces: List[dict], tok, *, with_think: bool,
+                       pad_token_id: int) -> List[dict]:
+    """`{"input_ids", "labels"}` with -100 on prompt positions, for `sft_collate_fn`.
+
+    FIX 5(b) (task-6-report.md): `pad_token_id` is REQUIRED, not optional -- the shipped
+    implementation (`scripts/derive_traces.py`) pads every example up to the next
+    multiple of 32 tokens using it, because ttml's SDPA backward kernel mismatches a
+    collated batch whose sequence length is not tile-aligned (see Task 2's finding
+    above). This illustrative snippet omits that padding for brevity, but the signature
+    must still accept the argument so callers written against it don't need a second
+    change later.
+    """
     out = []
     for rec in traces:
         prompt = rec["prefix"]
@@ -945,11 +960,16 @@ def main() -> int:
     from ttml.trainers import SFTConfig, SFTTrainer
 
     tok = AutoTokenizer.from_pretrained(str(ROOT / "artifacts" / "hf-tt-tnt-1024-dialogue"))
+    pad_token_id = tok.pad_token_id or 0
     traces = [json.loads(l) for l in args.traces.open()]
-    examples = build_sft_examples(traces, tok, with_think=(args.arm == "think"))
+    # FIX 5(b) (task-6-report.md): pad_token_id is a required keyword-only argument on
+    # the shipped build_sft_examples -- omitting it (as this snippet did before the fix)
+    # raises TypeError, it does not silently fall back to some default.
+    examples = build_sft_examples(traces, tok, with_think=(args.arm == "think"),
+                                  pad_token_id=pad_token_id)
     print(f"arm={args.arm}  examples={len(examples):,}  seed={args.seed}")
 
-    collate = partial(sft_collate_fn, max_seq_len=512, pad_token_id=tok.pad_token_id or 0)
+    collate = partial(sft_collate_fn, max_seq_len=512, pad_token_id=pad_token_id)
     loader = InMemoryDataloader(examples, batch_size=args.batch_size,
                                 collate_fn=collate, shuffle=True, seed=args.seed)
 

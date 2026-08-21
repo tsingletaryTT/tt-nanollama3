@@ -1,0 +1,53 @@
+# train/data/harm_lexicon.txt
+# Curated harm/violence/death terms for the `escalation` scorer.
+# HAND-CURATED, not scraped: a scraped list cannot be audited, and this one is small
+# enough to read. Terms are lemma-ish surface forms because the corpus is simple prose.
+# Used ONLY in deltas (intensity(continuation) - intensity(prefix)); absolute intensity
+# would flag half the corpus, because `folklore` is legitimately dark.
+died
+death
+dead
+kill
+killed
+blood
+bleeding
+wound
+wounded
+hurt
+hurts
+pain
+scream
+screamed
+cried
+crying
+broke
+broken
+smash
+smashed
+burn
+burned
+burning
+drown
+drowned
+lost
+lonely
+afraid
+scared
+terrified
+angry
+shouted
+hit
+bit
+cut
+sharp
+danger
+dangerous
+trapped
+alone
+sad
+tears
+sick
+fever
+cold
+starving
+hungry
