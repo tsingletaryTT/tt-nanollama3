@@ -12,5 +12,46 @@
   },
   "verdict": "MoE lower (better) than dense; effect grows over training.",
   "honest_reading": "MoE here has 3.62x TOTAL parameters at 0.989x ACTIVE compute, so this is the ordinary MoE bargain -- more parameters for the same compute helped. It is NOT evidence about die geography: gate policy was measured separately in the four-arm run, where seeding the gate from the die map bought nothing measurable (+0.0044 nats, signs 8+/7-) and freezing it to physical address cost only 0.0118.",
-  "caveat": "One seed per arm. The paired design makes the delta precise, but a second seed would be needed to rule out a seed-specific interaction."
+  "caveat": "Superseded by `replication`: the original single-seed caveat is resolved. Two seeds, same direction, same trajectory shape.",
+  "replication": {
+    "status": "REPLICATED at a second seed",
+    "per_seed": {
+      "5489": {
+        "n": 22,
+        "mean_delta_dense_minus_moe": 0.0481,
+        "se": 0.0064,
+        "t": 7.47,
+        "signs_favouring_moe": 20,
+        "first5_mean": 0.0366,
+        "last5_mean": 0.065,
+        "final5_dense": 2.8748,
+        "final5_moe": 2.8098,
+        "dense_dir": "artifacts/checkpoints-scratch-dense",
+        "moe_dir": "artifacts/checkpoints-scratch-moe"
+      },
+      "8191": {
+        "n": 22,
+        "mean_delta_dense_minus_moe": 0.0354,
+        "se": 0.0079,
+        "t": 4.45,
+        "signs_favouring_moe": 19,
+        "first5_mean": -0.0088,
+        "last5_mean": 0.0595,
+        "final5_dense": 2.8213,
+        "final5_moe": 2.7617,
+        "dense_dir": "artifacts/checkpoints-seed8191-dense",
+        "moe_dir": "artifacts/checkpoints-seed8191-moe"
+      }
+    },
+    "pooled": {
+      "n": 44,
+      "mean_delta": 0.0417,
+      "se": 0.0052,
+      "t": 8.02,
+      "signs_favouring_moe": 39
+    },
+    "reading": "Both seeds favour MoE, both significant, and the TRAJECTORY SHAPE reproduced independently: each run starts near zero (seed 8191 slightly negative) and ends near +0.06. A seed artefact would be unlikely to reproduce indifferent-early / separating-late twice. The effect is smaller at 8191 (0.0354 vs 0.0481), so treat ~0.04 as the estimate rather than the larger first number.",
+    "what_this_does_not_establish": "Still the ordinary MoE bargain: 3.62x total parameters at 0.989x active compute. Nothing here is evidence about die-region routing, which measured nearly null separately. And two seeds is two, not a distribution \u2014 the pooled |t| of 8.0 describes item-level variance across 44 validation points, not run-to-run variance across many runs.",
+    "run_to_run_context": "For scale: two DENSE runs differing only in seed show mean |delta| 0.0495 on absolute validation loss. That is UNPAIRED and still contains the per-step oscillation the paired design cancels, so it is not comparable to the paired effect above \u2014 but it does mean any claim about ABSOLUTE loss at this scale needs more than one run."
+  }
 }

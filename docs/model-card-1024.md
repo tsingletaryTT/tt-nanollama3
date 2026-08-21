@@ -77,7 +77,9 @@ seed 5489: validation **2.8098 for MoE against 2.8748 for dense** (mean delta +0
 |t| 7.3, 20 of 22 signs), and the gap widens across training. Read it as the ordinary MoE
 bargain — the configuration carries **3.62× total parameters at 0.989× active compute**, so
 more parameters for the same compute helped. It is *not* evidence about the die-region routing
-below. One seed per arm.
+below. **Replicated at a second seed** (8191: +0.0354, |t| 4.5, 19/22 signs; pooled +0.0417 over
+44 points), with the same late-separating trajectory in both runs, so treat ~0.04 as the
+estimate.
 
 **Routing by physical die address is nearly free.** Tokens can be routed to experts by where
 they live on the harvested Tensix grid rather than by a learned gate. Freezing the gate to that

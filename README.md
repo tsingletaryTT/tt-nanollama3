@@ -65,8 +65,15 @@ the warm start removes the debt. Dense and MoE, one epoch each from init, same s
 mean delta +0.0481 at |t| 7.3 with 20 of 22 signs, and the gap *grows* across training
 (first-five +0.0366 → last-five +0.0650). Read it as the ordinary MoE bargain rather than
 anything about geography: this configuration carries **3.62× total parameters at 0.989× active
-compute**, so more parameters for the same compute helped. One seed per arm — the paired design
-makes the delta precise but cannot exclude a seed-specific interaction.
+compute**, so more parameters for the same compute helped.
+
+**Replicated at a second seed.** Seed 8191, same recipe: mean delta **+0.0354** (|t| 4.5,
+19/22 signs) against seed 5489's +0.0481 (|t| 7.5, 20/22) — pooled **+0.0417** over 44
+validation points. The *trajectory shape* reproduced independently too: both runs start near
+zero (8191 slightly negative) and end near +0.06, so the separation is a late-training effect
+in both. Treat **~0.04** as the estimate rather than the larger first number. Two seeds is two,
+not a distribution, and the pooled |t| describes item-level variance across validation points
+rather than run-to-run variance across many runs.
 With six pairwise contrasts the Bonferroni threshold is |t| > 2.64, which the seeding null
 fails outright and learned-vs-frozen only reaches (2.64, called borderline rather than a pass).
 

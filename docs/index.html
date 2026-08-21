@@ -348,7 +348,8 @@ footer a { color: var(--ink-3); }
       From scratch, one epoch each, MoE beats dense on validation — 2.8098 against 2.8748,
       |t|&nbsp;=&nbsp;7.3, 20 of 22 paired signs, and the gap <em>widens</em> across training.
       Read it as the ordinary MoE bargain: 3.62&times; total parameters at 0.989&times; active
-      compute. Separately, and this is the part that is ours:
+      compute. <strong>Replicated at a second seed</strong> — +0.0354 against +0.0481, pooled
+      +0.0417 over 44 points, and both runs separate late rather than early. Separately, and this is the part that is ours:
       <strong>routing by physical die address costs 0.0118 nats.</strong>
       The four-arm comparison ran on 2026-08-20 — dense, learned gate, seeded gate, frozen
       gate, one warm-start checkpoint, one seed, one corpus. Freezing the gate to die
