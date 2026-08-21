@@ -365,6 +365,60 @@ def generate_batched(tok, model, prompts: List[str], *, max_new_tokens: int,
     return texts
 
 
+def generate_batched_from_ids(tok, model, id_lists: List[List[int]], *, max_new_tokens: int,
+                              do_sample: bool, temperature: Optional[float] = None,
+                              batch_size: int = 40, seed: Optional[int] = None) -> List[str]:
+    """Same as `generate_batched`, but takes PRE-TOKENIZED prompt id lists rather than
+    strings.
+
+    REQUIRED whenever a forced prompt is built by concatenating two pieces that were each
+    tokenized SEPARATELY -- exactly how scripts/derive_traces.py's
+    `_sft_example_unaligned` builds every training example:
+
+        p_ids = tok.encode(prompt)
+        c_ids = tok.encode(completion, add_special_tokens=False)
+        input_ids = p_ids + c_ids
+
+    Tokenizing the JOINED RAW STRING instead (``tok(prefix + think_block)``) re-merges the
+    boundary through the tokenizer's BPE and can silently produce a DIFFERENT token at the
+    seam than training ever saw: training's boundary token before ``<think>`` is ``Ġ<``
+    (id 19691, glued to the preceding space, seen 18,791 times at that exact position),
+    but re-tokenizing the joined string instead produces a bare ``<`` (id 31, never seen
+    there) -- an out-of-distribution seam at exactly the point being forced. Found in code
+    review; see task-6-report.md's FINDING 1 addendum for the verified before/after
+    numbers. Concatenating separately-encoded id lists (this function) is the only way to
+    reproduce training's tokenization exactly -- a decode/re-encode round trip through text
+    would reintroduce the same class of bug.
+    """
+    import torch
+
+    if seed is not None:
+        torch.manual_seed(seed)
+    kwargs: Dict[str, Any] = {"max_new_tokens": max_new_tokens, "do_sample": do_sample}
+    if do_sample:
+        kwargs.update(temperature=temperature, top_p=1.0, top_k=0)
+
+    pad_id = tok.pad_token_id
+
+    texts: List[str] = []
+    for start in range(0, len(id_lists), batch_size):
+        chunk = id_lists[start:start + batch_size]
+        max_len = max(len(ids) for ids in chunk)
+        input_ids = torch.full((len(chunk), max_len), pad_id, dtype=torch.long)
+        attention_mask = torch.zeros((len(chunk), max_len), dtype=torch.long)
+        for i, ids in enumerate(chunk):
+            # Left-pad -- matches tok.padding_side="left" set in load_hf(), required for
+            # correct batched decoder-only generation (every sequence's real content must
+            # end at the same right-hand column so the next-token position lines up).
+            input_ids[i, max_len - len(ids):] = torch.tensor(ids, dtype=torch.long)
+            attention_mask[i, max_len - len(ids):] = 1
+        with torch.no_grad():
+            got = model.generate(input_ids=input_ids, attention_mask=attention_mask, **kwargs)
+        for i in range(len(chunk)):
+            texts.append(tok.decode(got[i][max_len:], skip_special_tokens=True))
+    return texts
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -470,11 +524,19 @@ def main() -> int:
     # data.
     # -------------------------------------------------------------------------------
     print("[5/7] paired failure-mode rates: forced think-block vs. no-think baseline ...")
-    think_prompts = [o["prefix"] + o["think_block"] for o in openings]
+    # Tokenize prefix and think-block SEPARATELY and concatenate ids -- exactly how
+    # scripts/derive_traces.py's _sft_example_unaligned builds training examples
+    # (tok.encode(prompt) + tok.encode(completion, add_special_tokens=False)). Joining the
+    # raw STRINGS first and tokenizing the concatenation (the original version of this
+    # line) puts a different, unseen token at the seam -- see generate_batched_from_ids's
+    # docstring and task-6-report.md's FINDING 1 addendum.
+    think_prompt_ids = [tok_think.encode(o["prefix"])
+                        + tok_think.encode(o["think_block"], add_special_tokens=False)
+                        for o in openings]
     nothink_prompts = list(prefixes)
 
-    think_continuations = generate_batched(
-        tok_think, model_think, think_prompts,
+    think_continuations = generate_batched_from_ids(
+        tok_think, model_think, think_prompt_ids,
         max_new_tokens=args.continuation_max_new_tokens, do_sample=False,
         batch_size=args.batch_size)
     nothink_continuations = generate_batched(
@@ -530,16 +592,25 @@ def main() -> int:
           "model is already loaded) ...")
     n_swap = min(args.n_swap, len(openings))
     swap_subset = openings[:n_swap]
-    own_prompts = [o["prefix"] + o["think_block"] for o in swap_subset]
-    swapped_prompts = [o["prefix"] + swap_subset[(i + 1) % n_swap]["think_block"]
-                       for i, o in enumerate(swap_subset)]
+    # Same training-style id concatenation as the rates section above -- both conditions
+    # carry the SAME boundary construction, so this fix mostly changes the absolute
+    # divergence-token positions, not the own-vs-swapped comparison's fairness (it was
+    # already internally fair: both sides shared the identical string-joined seam before
+    # this fix too). Re-run anyway now that the seam matches training.
+    own_prompt_ids = [tok_think.encode(o["prefix"])
+                      + tok_think.encode(o["think_block"], add_special_tokens=False)
+                      for o in swap_subset]
+    swapped_prompt_ids = [tok_think.encode(o["prefix"])
+                          + tok_think.encode(swap_subset[(i + 1) % n_swap]["think_block"],
+                                            add_special_tokens=False)
+                          for i, o in enumerate(swap_subset)]
 
-    own_continuations = generate_batched(
-        tok_think, model_think, own_prompts,
+    own_continuations = generate_batched_from_ids(
+        tok_think, model_think, own_prompt_ids,
         max_new_tokens=args.continuation_max_new_tokens, do_sample=False,
         batch_size=args.batch_size)
-    swapped_continuations = generate_batched(
-        tok_think, model_think, swapped_prompts,
+    swapped_continuations = generate_batched_from_ids(
+        tok_think, model_think, swapped_prompt_ids,
         max_new_tokens=args.continuation_max_new_tokens, do_sample=False,
         batch_size=args.batch_size)
 
@@ -573,7 +644,15 @@ def main() -> int:
     }
     success["all_criteria_met"] = all(success.values())
 
+    # Persisted as a top-level `verdict` field (not just printed) so the artifact carries
+    # the named field the plan's Produces line calls for -- the substance already lived in
+    # `success_criteria`, but the label itself must be in the file too.
+    verdict_line = ("DECORATIVE" if not swap["thinking_is_load_bearing"]
+                    else ("STAGE 1 SUCCESS" if success["all_criteria_met"]
+                          else "PARTIAL -- see success_criteria"))
+
     report = {
+        "verdict": verdict_line,
         "swap_test": swap,
         "swap_test_detail": {
             "n": n_swap,
@@ -619,9 +698,6 @@ def main() -> int:
     args.out.write_text(json.dumps(report, indent=2))
     print(f"wrote {args.out}")
 
-    verdict_line = ("DECORATIVE" if not swap["thinking_is_load_bearing"]
-                    else ("STAGE 1 SUCCESS" if success["all_criteria_met"]
-                          else "PARTIAL -- see success_criteria"))
     print(f"\nVERDICT: {verdict_line}")
     print(f"  organic think-arm adherence : {adherence_think['rate']:.1%}")
     print(f"  swap test load-bearing      : {swap['thinking_is_load_bearing']} "
