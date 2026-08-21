@@ -1904,3 +1904,54 @@ self-reported running a bare `import ttml` without a lease; the hazard is docume
 docstring nobody reads before their first command.
 
 Suite: **1139 passed, 2 skipped.**
+
+## 2026-08-21 — skits, tasks 1-2: the gates hold, the yield does not
+
+Stage 2 turns each think-block slot from a description into a falsifiable prediction about a
+*later* turn: five turns (model/partner/model/partner/model), partner turns being real corpus
+text rather than generated, so `accept` has an actual offer to accept and `handback` has an
+actual next turn to be tested against. Tasks 1-2 built the schema (`train/skit.py`) and the
+derivation (`scripts/derive_skits.py`). Suite **1148 passed, 2 skipped**.
+
+**A shared module nearly ate a published measurement.** Task 1's brief shipped a fixture story
+that does not derive — `split_sentences` over-splits dialogue-with-attribution, so
+`'"It catches the light!" said her friend.'` becomes two sentences and the turn pair shares no
+content word. The implementer fixed it by changing the splitter in `train/improv.py`, which is
+upstream of `derive_traces.py` and therefore upstream of the *committed* `improv-stage1.json`.
+The change moved stage-1's inputs from 18,791 kept / 6.05% drop to 18,954 / 5.23%, and it was
+not even a fix: the old pattern over-splits dialogue attributions, the new one under-splits any
+sentence ending in a quoted period, which in a dialogue-heavy corpus is at least as common.
+Reverted; the limitation is now documented in `train/skit.py` where the next reader meets it.
+The green suite (1144) was no protection — no test pinned the derivation counts. Re-deriving and
+comparing against the recorded manifest was the check that settled it. Task 2's implementer hit
+the same fixture independently and correctly replaced the story instead of the module.
+
+**Three of five tests passed against the bugs they were named for.** A reviewer mutation-tested
+Task 1 and found the `offer`-sourcing test survived sourcing `offer` from the whole scene, and
+the `stakes` test survived diffing against the wrong turn — because the replacement fixture
+threaded the word "cat" through nearly every sentence, so any span overlapped any other and the
+overlap assertions were vacuous. Rewritten with turn-unique vocabulary and identity assertions.
+Confirmed by re-running the mutants myself: each now goes red, including one the reviewer did not
+use (leaking a partner turn into the supervised region), which only the segments test catches.
+Same failure shape as the four hollow tests in stage 1, recurred despite an explicit warning in
+the brief. A third finding was real but benign: the `MIN_SENTENCES` gate can never fire uniquely,
+since `len(sents[2:7]) != 5` always catches a short story downstream. Kept it anyway — an
+explicit precondition is less fragile than an emergent property of a slice width — and renamed
+the test to what it actually verifies.
+
+**The gates compound, and that is a yield problem, not a quality problem.** Real-corpus
+derivation keeps **1,921 of 20,000 stories — a 90.4% drop rate**, against stage 1's 18,791.
+Each of the three model turns independently requires both a word carried from its single
+preceding sentence and a fresh word; three such gates multiply rather than add
+(~0.46³ = 0.096, matching 1921/20000). 73.3% of drops are ordinary accept/add failures and only
+17.5% carry the dialogue-splitter fingerprint, so this is inherent strictness, not a bug. The
+corpus holds 2,119,489 stories and `--limit 20000` only ever mirrored stage 1's comparison
+budget, so `--limit 200000` yields ~19,210 skits — stage-1-comparable at zero semantic cost.
+Relaxing the accept/add gates to raise yield would buy examples by destroying the measurement:
+those gates *are* the falsifiable prediction that makes stage 2 different from stage 1.
+
+**Still open.** Tasks 3-8 unstarted. Task 4 must re-derive at `--limit 200000` before training,
+and its `stochastic_rounding` assertion must read the flag back out of
+`trainer.optimizer.get_state_dict()` rather than trust the config handed in — the warm-start base
+carries exactly 17 gamma tensors, the same 17 stage 1 found frozen bit-identical for 3000 steps
+because that flag defaults off on the SFT path.
