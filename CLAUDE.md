@@ -1827,3 +1827,80 @@ Suite: **1034 passed, 2 skipped** — 1036 collected, the same 1036 as the entry
 now that the corpus is restored. The measurement sets add no tests. The second skip is not
 mine either (`test_probe_grid_layout` skips without a cached corpus profile; the other is
 `test_sizes` without `TT_METAL_HOME`). No new dependencies, nothing published to the Hub.
+
+---
+
+## 2026-08-20/21 — improv thinking, and four instruments that lied
+
+**Prompt.** "What would it take to make it a thinking model too?" → a design conversation that
+landed on improv rather than reasoning: give the model a five-slot think-block
+(`offer / accept / add / stakes / handback`) before each story continuation, one slot per named
+failure mode — escalating to the worst place, blocking with the dullest next step, drifting so
+far out nobody can follow. Then: spec, plan, and execution via subagent-driven development.
+Merged as `8cab579`.
+
+**The result.** Stage 1 is **PARTIAL**. Schema adherence **98%** (784/800; the no-think control
+emits blocks 0% of the time, which is the control that shows adherence comes from training and
+not from the harness). Substituting another story's block changes **100%** of continuations, so
+the block steers rather than decorates. And it moves **none** of the four failure-mode scores at
+α = 0.01. The mechanism works end to end and buys nothing on the metrics we chose.
+
+**The headline reversed once, and that is the most useful thing here.** An earlier pass reported
+**0% adherence** with a supporting diagnostic (the token opening `<think>` at rank 126, nll
+10.34 under teacher forcing). Both were measured on a run in which all 17 RMSNorm gammas were
+*provably frozen*: `stochastic_rounding` defaults off on the `SFTTrainer` path, which bypasses
+the unconditional warning `train/run.py:909` prints. Proof was a tensor diff, not an inference —
+think vs nothink `step_3000.pkl` had exactly 17 bit-identical tensors (precisely the gammas) and
+49 differing, and those 17 were bit-identical to the warm-start checkpoint. With the gammas free,
+0% became 98%. This is the same frozen-gamma bug fixed in the pretraining path that morning,
+recurring in a code path that skips the guard.
+
+**Four instruments that lied, all of them mine.**
+
+1. **`--eval-every` is not `--val-every`.** The first four-arm run logged no validation curve at
+   all (`--val-every` defaults to 0 = disabled), so `compare_runs.py` had nothing to compare.
+   Discovered after the runs had burned hardware time.
+2. **Splitting the corpus on `\n\n` measures paragraphs, not stories.** The separator is `</s>`.
+   Blank-line splitting reports a median of 40 tokens where the real figure is 199, which would
+   have silently wrecked cut-point selection. Caught by re-measuring, having already written the
+   wrong number into a spec table.
+3. **HF-style unshifted labels against ttml's pre-shifted convention.** ttml expects
+   `labels[t] = token at t+1`; the plan wrote `labels[t] == input_ids[t]`. Two full arms trained
+   against effectively wrong targets. Invisible to two task reviews because every test asserted
+   label STRUCTURE and none asserted label SEMANTICS or loss values — and because the smoke
+   trained from random weights, where a right and a wrong convention look equally bad. Fixed by
+   `labels = [-100]*(len(p_ids)-1) + c_ids + [-100]`, which keeps the last prompt position
+   supervised (its target is the first completion token — the transition being trained).
+4. **`git check-ignore -v`'s exit status does not mean "ignored".** With `-v` it also prints
+   negation matches, so I read an un-ignore rule as proof of ignoring and told an implementer
+   their correct fix had failed. `git add -n` is the check that answers the actual question.
+
+**Tests that could not fail, four of them.** A truncating `s[:20]` mock making a `<=` assertion
+vacuous. A `with_think` guarantee relocated onto a helper production no longer calls. Structural
+assertions blind to the label-shift convention. And `groundedness`, which passed a discrimination
+test on constructed extremes (grounded 1.000 vs "Gorthax and Vermilion argued about the Treaty of
+Blunn" 0.333) while being *dead on real data* — mean 0.998, 99.25% of scores exactly 1.0, because
+the corpus has 641 hub words above 2,000 neighbours and 80.1% of prefix words are hubs, so
+"connects to any prefix word" is almost always true. Replaced with normalised PMI (`870c9b4`):
+0.00% at ceiling, sd 0.089. **My first replacement test was also hollow** — asserted on a
+5-document synthetic table, which the boolean scorer passed, because a small table has no hubs
+and so cannot exhibit the bug. The guard had to be artifact-gated against the real table.
+
+**Paired versus unpaired, twice now.** Two dense runs differing only in seed show mean |delta|
+0.0495 — larger than the 0.0481 MoE-vs-dense effect. That is not a refutation: the effect is a
+*paired* delta with per-step oscillation cancelled, the 0.0495 is *unpaired* and still contains
+it. Comparing them is comparing a quantity with its noise floor removed against one that keeps
+it. The mirror-image error (applying an unpaired floor to a paired design) once stamped a t≈6
+result NOT INTERPRETABLE.
+
+**Process notes.** 20 controller rulings recorded in the SDD ledger, three of which a subagent
+corrected and two of which I corrected myself. A subagent deleted ~2.8 GB of superseded
+checkpoints at 98% disk because I propagated hardware-safety rules into every dispatch and never
+the standing "don't delete without asking" rule. I then destroyed `artifacts/improv/` myself with
+`git worktree remove --force` — git was clean and pushed, but untracked artifacts lived in the
+doomed copy. Recoverable only because derivation is deterministic: regenerating reproduced
+18,791 traces and a 6.05% drop rate exactly. Three separate agents plus the final reviewer
+self-reported running a bare `import ttml` without a lease; the hazard is documented in a
+docstring nobody reads before their first command.
+
+Suite: **1139 passed, 2 skipped.**
