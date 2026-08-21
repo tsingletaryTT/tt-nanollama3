@@ -27,6 +27,15 @@ SHAPE
 Measured on 2,000 stories: 99.8% have >= 7 sentences, and a five-turn skit is median 202 /
 p99 257 / max 327 tokens, so 100% fit the 512 window even after tile alignment. The window
 is not a constraint here.
+
+KNOWN LIMITATION: split_sentences (in train.improv) over-splits dialogue with attribution.
+A sentence like '"It says!" said Person.' splits into two sentences: the quote and the
+dialogue tag separately. This causes some skits to drop when a model turn fails to carry
+any words from a partner turn that ended with dialogue. This is deliberate: the limitation
+exists in published stage-1 results and fixing the splitter would break reproducibility of
+those measurements. Skit derivation will show measurably higher drop rates on stories with
+dialogue-ending turns until the splitter is fixed as a standalone change with re-publication
+of stage-1 provenance.
 """
 from __future__ import annotations
 
