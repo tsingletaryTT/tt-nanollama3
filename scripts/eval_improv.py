@@ -51,7 +51,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from scripts.derive_traces import build_idf  # noqa: E402
+from scripts.derive_traces import build_idf, build_sft_examples  # noqa: E402
 from scripts.score_improv import (  # noqa: E402
     intensity,
     load_closure_lexicon,
@@ -94,6 +94,10 @@ CKPT_THINK = ROOT / "artifacts" / "improv" / "ckpt-think" / "step_3000.pkl"
 CKPT_NOTHINK = ROOT / "artifacts" / "improv" / "ckpt-nothink" / "step_3000.pkl"
 MANIFEST_THINK = ROOT / "artifacts" / "improv" / "ckpt-think" / "train_manifest.json"
 MANIFEST_NOTHINK = ROOT / "artifacts" / "improv" / "ckpt-nothink" / "train_manifest.json"
+#: FIX 3(e) (task-6-report.md): the derivation drop rate is only ever written to
+#: this gitignored file (artifacts/ is not committed) -- the spec requires it be
+#: reported WITH the results, so main() embeds its contents into the JSON below.
+DERIVE_MANIFEST_PATH = ROOT / "artifacts" / "improv" / "derive_manifest.json"
 #: The dense pretraining checkpoint both arms warm-started from. Used here ONLY to recover
 #: an architecture header (vocab_size, seq_len, transformer_config, ...) for HF conversion
 #: -- both SFT arms are dense, identical shape, so this checkpoint's header describes them
@@ -344,6 +348,43 @@ def select_heldout_openings(corpus_path: Path, trace_ids: set, *, n: int, seed: 
         if len(out) >= n:
             break
     return out, scanned
+
+
+def compute_truncation_counts(traces_path: Path, tokenizer_dir: Path, pad_token_id: int,
+                              max_seq_len: int = 512) -> Dict[str, Any]:
+    """FIX 3(f) (task-6-report.md): how many training examples per arm exceed
+    ``max_seq_len`` tokens after tile alignment -- ``sft_collate_fn`` silently truncates
+    these to ``max_seq_len`` (it does not raise, skip, or warn), and that truncation
+    appeared in no drop table anywhere in this plan's artifacts before this fix. Uses the
+    exact same ``build_sft_examples`` construction training itself used, over the exact
+    training traces, so these counts are a fact about what actually happened, not an
+    estimate.
+    """
+    from transformers import AutoTokenizer
+
+    tok = AutoTokenizer.from_pretrained(str(tokenizer_dir))
+    traces = [json.loads(line) for line in traces_path.open()]
+    counts: Dict[str, int] = {}
+    for arm in ("think", "nothink"):
+        examples = build_sft_examples(traces, tok, with_think=(arm == "think"),
+                                      pad_token_id=pad_token_id)
+        counts[arm] = sum(1 for e in examples if len(e["input_ids"]) > max_seq_len)
+    n = len(traces)
+    asymmetry_pct = round(abs(counts["think"] - counts["nothink"]) / n * 100, 4)
+    return {
+        "max_seq_len": max_seq_len,
+        "n_examples": n,
+        "think_exceeding_max_seq_len": counts["think"],
+        "nothink_exceeding_max_seq_len": counts["nothink"],
+        "arm_asymmetry_pct_of_n": asymmetry_pct,
+        "note": (f"sft_collate_fn silently truncates any example longer than "
+                f"max_seq_len={max_seq_len} to that length -- it does not raise, skip, "
+                f"or log. {counts['think']} think-arm and {counts['nothink']} "
+                f"nothink-arm examples (of {n}) are affected. The arm asymmetry "
+                f"({asymmetry_pct}% of n) is negligible and not a source of bias between "
+                f"arms on its own, but the truncation itself was previously invisible: "
+                f"it appears in no drop table in this plan's artifacts."),
+    }
 
 
 def build_cooc(traces_path: Path) -> Dict[str, set]:
@@ -608,6 +649,19 @@ def main() -> int:
         print(f"  {name:14} mean_delta={v['mean_delta']:+.4f} t={v['t']} "
               f"verdict={v['verdict']}")
 
+    # FIX 3(b) (task-6-report.md): groundedness is measured against this run's actual
+    # scores (not hardcoded from a prior run) -- how saturated is it, really, on THIS
+    # co-occurrence table and THESE continuations? Computed over both arms pooled (400
+    # scores) since saturation is a property of the metric/table, not of either arm.
+    _all_groundedness = ([s.groundedness for s in scores_think]
+                         + [s.groundedness for s in scores_nothink])
+    groundedness_saturation = {
+        "mean": round(st.fmean(_all_groundedness), 4),
+        "pct_exactly_1_0": round(
+            sum(1 for v in _all_groundedness if v == 1.0) / len(_all_groundedness) * 100, 2),
+        "n": len(_all_groundedness),
+    }
+
     # Auxiliary (not part of the 5-test Bonferroni family, reported for context only).
     aux = {
         "novelty": {"think_mean": round(st.fmean(s.novelty for s in scores_think), 3),
@@ -671,9 +725,47 @@ def main() -> int:
         divergence_positions.append(pos)
 
     swap = swap_verdict(divergence_positions, n_swap)
+    # FIX 3(c) (task-6-report.md): the forced-block qualifier used to live ONLY in
+    # generation_settings, far from where a reader of the swap test itself would look.
+    # It is the single most important caveat on this specific number (100% "changed" is
+    # a FORCED-context result, not evidence the model uses a think-block it chose to
+    # produce itself), so it is attached directly to the swap_test block now.
+    swap["forced_think_note"] = (
+        "Both the 'own' and 'swapped' conditions FORCE the story's own (or another "
+        "story's) extractive ground-truth think-block into the think arm's context "
+        "before generating -- this measures whether think-block CONTENT changes "
+        "generation once one is present, not whether the model organically chooses to "
+        "produce one (see the top-level 'adherence' section for that, separately)."
+    )
     print(f"  swap test: {swap['n_changed']}/{swap['n']} continuations changed "
           f"({swap['fraction_changed']:.1%}); "
           f"thinking_is_load_bearing={swap['thinking_is_load_bearing']}")
+
+    # -------------------------------------------------------------------------------
+    # FIX 3(e)/(f) (task-6-report.md): drop rate and truncation counts, computed/loaded
+    # here so they can be embedded in the report rather than left to live only in a
+    # gitignored artifact (derive_manifest.json) or nowhere at all (truncation).
+    # -------------------------------------------------------------------------------
+    derive_manifest = (json.loads(DERIVE_MANIFEST_PATH.read_text())
+                       if DERIVE_MANIFEST_PATH.is_file() else None)
+    if derive_manifest is not None and "corpus" in derive_manifest:
+        # Same repo-relative-path treatment as _manifest_for_report below, and for the
+        # same reason (FIX 3(g)): an absolute worktree path stops existing once the
+        # worktree is removed.
+        _corpus_path = Path(derive_manifest["corpus"])
+        if _corpus_path.is_absolute():
+            try:
+                derive_manifest["corpus"] = str(_corpus_path.relative_to(ROOT))
+            except ValueError:
+                pass
+    truncation = compute_truncation_counts(TRACES_PATH, TOKENIZER_DIR,
+                                           pad_token_id=tok_think.pad_token_id or 0)
+    print(f"  derivation drop rate: "
+          f"{derive_manifest['drop_rate']:.2%} ({derive_manifest['drops_by_rule']})"
+          if derive_manifest else "  derivation drop rate: derive_manifest.json not found")
+    print(f"  truncation (>{truncation['max_seq_len']} tok): "
+          f"think={truncation['think_exceeding_max_seq_len']} "
+          f"nothink={truncation['nothink_exceeding_max_seq_len']}")
 
     # -------------------------------------------------------------------------------
     # Assemble the report.
@@ -693,8 +785,74 @@ def main() -> int:
                     else ("STAGE 1 SUCCESS" if success["all_criteria_met"]
                           else "PARTIAL -- see success_criteria"))
 
+    # FIX 3(d)/(g) (task-6-report.md): each manifest gets an explicit loss_note (the
+    # two arms' losses are NOT comparable -- the think arm's completion supervises the
+    # think-block template as well as the continuation, the nothink arm's supervises
+    # only the continuation, so a side-by-side loss_end comparison is not a "which arm
+    # trained better" signal), and `traces` is rewritten repo-relative -- the raw
+    # manifest embeds an absolute path into THIS worktree, which stops existing the
+    # moment the worktree is removed.
+    LOSS_NOTE = (
+        "The two arms' losses are NOT directly comparable: the think arm's completion "
+        "is `think_block + continuation` (supervises the think-block template AND the "
+        "slot content, in addition to the continuation), while the nothink arm's "
+        "completion is the continuation alone. A lower/decreasing think-arm loss does "
+        "not mean 'the think arm learned the continuation better than the nothink arm' "
+        "-- the two arms are not scored against the same target distribution, so this "
+        "loss_end is not a legitimate comparison point between arms on its own."
+    )
+
+    def _manifest_for_report(path: Path) -> Dict[str, Any]:
+        m = dict(json.loads(path.read_text()))
+        traces_path = Path(m["traces"])
+        if traces_path.is_absolute():
+            try:
+                m["traces"] = str(traces_path.relative_to(ROOT))
+            except ValueError:
+                pass  # not under ROOT; leave as-is rather than guess
+        m["loss_note"] = LOSS_NOTE
+        return m
+
     report = {
         "verdict": verdict_line,
+        # FIX 3(b) (task-6-report.md): plain statement of what this measurement can and
+        # cannot support, next to the numbers rather than scattered across comments only
+        # a source-reader would find.
+        "limitations": {
+            "swap_test_and_rates_are_forced_not_organic": (
+                "The swap test and the paired failure-mode rates FORCE the think-block "
+                "into the prompt; they do not measure whether the model spontaneously "
+                "emits one. See 'adherence' for the organic measurement, and "
+                "swap_test.forced_think_note for the same caveat attached directly to "
+                "that number."
+            ),
+            "single_training_run_per_arm": (
+                "Each arm is a SINGLE SFT run (one seed, one training trajectory). The "
+                "paired t-tests in 'rates' capture item variance over the 200 held-out "
+                "examples ONLY -- they say nothing about run-to-run variance (a second "
+                "training run of the same arm/seed/recipe could land on different "
+                "scorer means for reasons unrelated to thinking vs. not-thinking). "
+                "Treat 'rates' as a single paired sample, not as evidence the effect (or "
+                "null) would replicate across retraining."
+            ),
+            "groundedness_is_saturated_and_cannot_discriminate": {
+                **groundedness_saturation,
+                "explanation": (
+                    "groundedness is saturated on the production co-occurrence table: "
+                    f"mean {groundedness_saturation['mean']}, "
+                    f"{groundedness_saturation['pct_exactly_1_0']}% of the "
+                    f"{groundedness_saturation['n']} pooled think+nothink scores are "
+                    "exactly 1.0. A metric with almost no variance left to explain is "
+                    "structurally unable to discriminate between the two arms "
+                    "regardless of any real underlying difference. So 'rates' reporting "
+                    "0/4 scorers favouring think is really 0 of 3 LIVE scorers "
+                    "(escalation, new_harm, affordance) plus one metric "
+                    "(groundedness) that could not have returned a different answer "
+                    "either way -- redesigning groundedness is out of scope for this "
+                    "evaluation pass and is tracked as a follow-up, not attempted here."
+                ),
+            },
+        },
         "swap_test": swap,
         "swap_test_detail": {
             "n": n_swap,
@@ -719,9 +877,19 @@ def main() -> int:
                             "written (main() raises otherwise).",
         },
         "manifests_used": {
-            "think": json.loads(MANIFEST_THINK.read_text()),
-            "nothink": json.loads(MANIFEST_NOTHINK.read_text()),
+            "think": _manifest_for_report(MANIFEST_THINK),
+            "nothink": _manifest_for_report(MANIFEST_NOTHINK),
         },
+        # FIX 3(e) (task-6-report.md): embedded verbatim from the gitignored
+        # derive_manifest.json so the drop rate is reported WITH the results, per spec,
+        # rather than surviving only in an artifact this repo never commits.
+        "derivation": (derive_manifest if derive_manifest is not None else {
+            "error": f"{DERIVE_MANIFEST_PATH} not found -- drop rate could not be "
+                     "embedded. Regenerate via scripts/derive_traces.py.",
+        }),
+        # FIX 3(f) (task-6-report.md): sft_collate_fn silently truncates examples longer
+        # than max_seq_len; this previously appeared in no drop table anywhere.
+        "truncation": truncation,
         "hf_conversion": {"think_config": cfg_think, "nothink_config": cfg_nothink,
                           "warm_start_header_source": str(
                               WARM_START_CKPT.relative_to(ROOT))},
@@ -730,10 +898,13 @@ def main() -> int:
             "continuation_max_new_tokens": args.continuation_max_new_tokens,
             "num_samples": args.num_samples, "temperature": args.temperature,
             "seed": args.seed,
-            "forced_think_note": "rates and the swap test FORCE the story's own extractive "
-                                 "ground-truth think-block into the think arm's context "
-                                 "rather than waiting for organic emission -- see the "
-                                 "comment above [5/7] in scripts/eval_improv.py for why.",
+            "forced_think_note": "See swap_test.forced_think_note and "
+                                 "limitations.swap_test_and_rates_are_forced_not_organic "
+                                 "-- rates and the swap test FORCE the story's own "
+                                 "extractive ground-truth think-block into the think "
+                                 "arm's context rather than waiting for organic "
+                                 "emission; see the comment above [5/7] in "
+                                 "scripts/eval_improv.py for why.",
         },
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)
