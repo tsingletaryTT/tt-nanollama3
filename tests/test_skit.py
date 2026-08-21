@@ -6,15 +6,17 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from train.improv import content_words
 from train.skit import (MIN_SENTENCES, MODEL_TURNS, PARTNER_TURNS, SKIT_ROLES,
                         derive_skit, skit_segments)
 
-STORY = ("There was a cat. The cat slept all day. "
-         "The cat stretched and yawned. "
-         "The cat was sleepy. "
-         "The sleepy cat curled up. "
-         "The cat was purring. "
-         "The purring was very loud.")
+# Story with turn-unique vocabulary to enable identity-based assertions.
+# Turns carry words forward to satisfy accept/add constraints, but each turn has
+# mostly distinct content words to distinguish correct sourcing from incorrect.
+STORY = ("Aardvark exists. Aardvark runs. "
+         "Aardvark jumps. Bear arrives. "
+         "Bear sleeps. Eagle flies. "
+         "Eagle sings.")
 
 
 def _idf(words):
@@ -22,7 +24,7 @@ def _idf(words):
 
 
 def test_a_skit_has_five_turns_and_three_blocks():
-    s = derive_skit(STORY, story_id=0, idf=_idf(["sleepy", "purring", "loud"]),
+    s = derive_skit(STORY, story_id=0, idf=_idf(["aardvark", "bear", "eagle"]),
                     intensity=lambda t: 0.0)
     assert s is not None
     assert len(s.turns) == 5
@@ -31,41 +33,79 @@ def test_a_skit_has_five_turns_and_three_blocks():
 
 
 def test_offer_of_a_later_block_comes_from_the_preceding_partner_turn():
-    """This is the change that makes `accept` mean something: turn 3 accepts what the
-    PARTNER said, not what the prefix said."""
-    s = derive_skit(STORY, story_id=0, idf=_idf(["sleepy", "purring"]),
+    """Offer must come from immediately preceding PARTNER turn, not from scene-so-far.
+
+    Mutation: source offer from prefix+all-prior-turns instead of just preceding turn.
+    This test catches that by asserting offer is a subset of the specific partner turn
+    AND disjoint from the preceding model turn (which has different vocabulary).
+    """
+    s = derive_skit(STORY, story_id=0, idf=_idf(["bear", "eagle"]),
                     intensity=lambda t: 0.0)
     assert s is not None
-    partner_words = set(s.turns[PARTNER_TURNS[0]].lower().split())
-    offer_words = set(s.blocks[1].offer.split())
-    assert offer_words & {w.strip('.,!"') for w in partner_words}, (
-        f"block 1's offer {s.blocks[1].offer!r} does not come from partner turn "
-        f"{s.turns[PARTNER_TURNS[0]]!r}")
+
+    # Block 1: offer must come from PARTNER_TURNS[0] = turn 1 ("Bear arrives")
+    # Turn 0 ("Aardvark jumps") has disjoint vocabulary.
+    partner_1_words = set(content_words(s.turns[PARTNER_TURNS[0]]))
+    turn_0_words = set(content_words(s.turns[0]))
+    block_1_offer_words = set(s.blocks[1].offer.split())
+
+    # Offer must be drawn from partner turn 1 only
+    assert block_1_offer_words.issubset(partner_1_words), (
+        f"block 1's offer {block_1_offer_words} must come from turn {PARTNER_TURNS[0]} "
+        f"{partner_1_words}, not from scene-so-far")
+
+    # Offer must NOT include words unique to the preceding model turn (identity check)
+    assert block_1_offer_words.isdisjoint(turn_0_words), (
+        f"block 1's offer {block_1_offer_words} should not contain turn 0's words {turn_0_words}")
 
 
 def test_stakes_is_measured_across_turns_not_within_one():
-    """Stage 1 measured intensity delta inside a single continuation, which is the wrong
-    interval — escalation in improv happens across an exchange."""
+    """Stakes computed as intensity(turn) - intensity(prev_turn), not vs the scene.
+
+    Mutation: always diff against prefix instead of against the immediately preceding turn.
+    This test catches that by recording all intensity() calls and asserting the exact
+    (current_turn, previous_turn) pairs passed to intensity() for each block.
+    """
     seen = []
 
     def spy(text):
         seen.append(text)
-        return 5.0 if "purring" in text else 0.0
+        return 5.0 if "eagle" in text.lower() else 0.0
 
-    s = derive_skit(STORY, story_id=0, idf=_idf(["purring"]), intensity=spy)
+    s = derive_skit(STORY, story_id=0, idf=_idf(["eagle"]), intensity=spy)
     assert s is not None
-    # the whole scene-so-far must never be handed to intensity(); only single turns
-    assert all(t.count(".") <= 2 for t in seen), (
-        f"intensity() was called on a multi-sentence span: {seen}")
+
+    # intensity() must be called once per block on current turn, once on previous turn.
+    # Expected call sequence (order of subtraction is: turn - prev):
+    # Block 0: intensity(turn 0), intensity(prefix)
+    # Block 1: intensity(turn 2), intensity(turn 1)
+    # Block 2: intensity(turn 4), intensity(turn 3)
+    expected_calls = [
+        s.turns[0],   # Block 0: current turn
+        s.prefix,     # Block 0: previous turn (prefix)
+        s.turns[2],   # Block 1: current turn
+        s.turns[1],   # Block 1: previous turn (partner)
+        s.turns[4],   # Block 2: current turn
+        s.turns[3],   # Block 2: previous turn (partner)
+    ]
+
+    assert seen == expected_calls, (
+        f"intensity() calls {seen} do not match expected block deltas {expected_calls}")
 
 
-def test_a_story_with_too_few_sentences_is_dropped():
+def test_story_with_too_few_sentences_returns_none():
+    """Stories with fewer than MIN_SENTENCES sentences are dropped.
+
+    Note: the MIN_SENTENCES gate is an explicit precondition. The downstream
+    len(sents[2:7]) != 5 check in derive_skit is the structural enforcer, but the gate
+    makes the intent explicit and is less fragile than relying on slice-width semantics.
+    """
     assert derive_skit("One. Two. Three.", story_id=0, idf={},
                        intensity=lambda t: 0.0) is None
 
 
 def test_segments_supervise_only_think_blocks_and_model_turns():
-    s = derive_skit(STORY, story_id=0, idf=_idf(["sleepy", "purring"]),
+    s = derive_skit(STORY, story_id=0, idf=_idf(["aardvark", "bear"]),
                     intensity=lambda t: 0.0)
     assert s is not None
     segs = skit_segments(s)
