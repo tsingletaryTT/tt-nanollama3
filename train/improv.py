@@ -75,8 +75,12 @@ def parse_think(text: str) -> Optional[Slots]:
     return Slots(**found)
 
 
-#: Below this the delta is noise rather than escalation. Calibrated in Task 3 against the
-#: corpus and recorded there; the default is intentionally conservative.
+#: Below this the delta is noise rather than escalation. FIX 5(c) (task-6-report.md):
+#: this was previously commented as "Calibrated in Task 3 against the corpus and recorded
+#: there" -- that calibration never happened (no such analysis appears in
+#: task-3-report.md or anywhere else in this plan's history). This value is an
+#: unvalidated default, not a measured one. Treat any result sensitive to its exact
+#: value with correspondingly less confidence until it is actually calibrated.
 STAKES_EPSILON = 0.5
 
 

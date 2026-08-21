@@ -3,9 +3,14 @@
 # HAND-CURATED, not scraped: a scraped list cannot be audited, and this one is small
 # enough to read. These are phrases that signal a continuation is WRAPPING UP the scene
 # rather than opening it further ("They went to bed." vs. "But what was inside the box?").
-# Checked as a raw substring against the final sentence's lowercased text (not just its
-# tokenised content words), because two of these ("ever after", "the end") are multi-word
-# and would never match a single-token lookup.
+# FIX 5(d) (task-6-report.md): this header used to say every marker below is checked as
+# a raw substring of the final sentence's lowercased text. That was true once but is a
+# stale description of a bug that has since been fixed (see scripts/score_improv.py's
+# `_is_closed`): multi-word markers ("ever after", "the end") ARE still matched as a raw
+# substring, since a substring match is the only way a multi-word phrase can match at
+# all. Single-word markers ("bed", "done", ...), however, are matched against
+# WORD-TOKENISED text only, specifically so "done" cannot match inside "abandoned" and
+# "bed" cannot match inside "robbed" -- the raw-substring bug this file used to document.
 bed
 asleep
 sleep
