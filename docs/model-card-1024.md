@@ -9,12 +9,49 @@ tags:
 
 # tt-tnt-1024
 
-A 123M-parameter Llama-3-style model trained from random initialization on
-Tenstorrent Blackhole hardware with `ttml` (tt-train), on a nine-source corpus
-that includes a small instruction slice.
+A 123M-parameter Llama-3-style model that is *of* Tenstorrent hardware, not merely
+trained on it. Trained from random initialization on Blackhole with `ttml`
+(tt-train) over a nine-source corpus with a small instruction slice, served
+through the Tenstorrent vLLM plugin, and packaged with
+[tt-model-manager](https://github.com/tenstorrent/tt-model-manager).
 
-This card describes what the model does and where it fails. It is not a claim
-that the model is good.
+It is small on purpose. One epoch takes about an hour on a single p300c, which is
+what makes it useful as an instrument rather than a product.
+
+## What it does best
+
+**Routing by physical die address.** Tokens can be assigned to experts by *where
+they live on the harvested 11×10 Tensix grid* rather than by a learned gate, and
+freezing routing to that geometry costs only **0.0118 nats** against a gate free
+to learn (|t| 5.1, 14/15 signs). Source-characteristic tokens occupy measurably
+distinct die regions — cell purity 0.546 against a 0.231 permutation floor. This
+part requires a real harvested grid to be *about*.
+
+**Sparse routing that pays.** A Mixture of Enthusiasts beats the dense baseline
+from scratch, replicated at two seeds: pooled **+0.0417 nats**, |t| 8.0, 39/44
+paired signs, separating late in training in both runs.
+
+**Thinking on demand.** Asked to plan before it speaks, it emits well-formed
+five-slot think-blocks in **98%** of generations where a control arm emits none.
+
+## Feature support
+
+| capability | state | note |
+|---|---|---|
+| Training on Blackhole (`ttml`) | ✅ | one epoch ≈ 65 min, one p300c |
+| Multi-chip DDP | ✅ `[1,2]` / ⚠️ `[1,4]` | the 4-chip mesh froze the host |
+| Sparse MoE (Mixture of Enthusiasts) | ✅ | replicated at two seeds |
+| Die-region expert routing | ✅ | 0.0118 nats to freeze to physical address |
+| Thinking (five-slot think-blocks) | ✅ format / ⏳ effect | steers, does not yet govern |
+| Per-core Gumbel sampling on device | ✅ | custom kernels, per-core RNG |
+| vLLM serving (TT plugin) | ✅ | OpenAI-compatible |
+| `tt-model` packaging | ✅ v4 / ⏳ v5 | v5 needs wheels assembled |
+| CPU-portable HF export | ✅ | runs without Tenstorrent hardware |
+| Tool calling / chat template | ➖ | base completion model by design |
+| Skits (multi-turn improv) | ⏳ | next |
+
+This card also records where the model fails, because a card that does not is
+not useful. It is not a claim that the model is good.
 
 ## Shape
 

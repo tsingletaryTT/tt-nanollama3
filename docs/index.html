@@ -381,10 +381,58 @@ footer a { color: var(--ink-3); }
   </div>
 </header>
 
+  <section id="capabilities">
+    <h2>What it does best</h2>
+    <p class="lede">
+      <strong>Routing by physical die address.</strong> Tokens can be assigned to experts by
+      <em>where they live on the harvested 11&times;10 Tensix grid</em> rather than by a learned
+      gate, and it costs <strong>0.0118 nats</strong> against a gate free to learn
+      (|t|&nbsp;5.1, 14/15 signs). Source-characteristic tokens occupy measurably distinct die
+      regions — cell purity 0.546 against a 0.231 permutation floor. This is the part no other
+      model can do, because it needs a real harvested grid to be <em>about</em>.
+    </p>
+    <p class="lede">
+      <strong>A complete, cheap exercise of the whole stack.</strong> One epoch in ~65 minutes on
+      one p300c: training through <code>ttml</code>, sampling per-core on the device, serving
+      through the vLLM plugin, packaging as a <code>tt-model</code> bundle, exporting to a
+      host-portable HF directory. Because the loop is cheap it gets run, and running it has found
+      <strong>seven defects</strong> in the surrounding stack — each now with a regression check.
+    </p>
+    <p class="lede">
+      <strong>Sparse routing that measurably pays.</strong> A Mixture of Enthusiasts beats the
+      dense baseline from scratch, replicated at two seeds — pooled <strong>+0.0417 nats</strong>,
+      |t|&nbsp;8.0, 39/44 signs — separating late in training in both runs.
+    </p>
+
+    <h3>Feature support</h3>
+    <div class="scroller">
+      <table>
+        <thead>
+          <tr><th>Capability</th><th>State</th><th>Evidence</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Training on Blackhole (<code>ttml</code>/tt-train)</td><td><span class="chip better">shipped</span></td><td>one epoch, ~65&nbsp;min, one p300c</td></tr>
+          <tr><td>Multi-chip DDP</td><td><span class="chip better">[1,2]</span> <span class="chip flag">[1,4]</span></td><td>the 4-chip mesh froze the host; note drafted in-repo</td></tr>
+          <tr><td>Sparse MoE — <em>Mixture of Enthusiasts</em></td><td><span class="chip better">shipped</span></td><td>replicated win, two seeds</td></tr>
+          <tr><td>Die-region expert routing</td><td><span class="chip better">shipped</span></td><td>0.0118 nats to freeze routing to physical address</td></tr>
+          <tr><td>Thinking — five-slot think-blocks</td><td><span class="chip better">format</span> <span class="chip null">effect</span></td><td>98% adherence; steers but does not yet govern</td></tr>
+          <tr><td>Per-core Gumbel sampling on device</td><td><span class="chip better">shipped</span></td><td>custom kernels, per-core RNG streams</td></tr>
+          <tr><td>vLLM serving via the TT plugin</td><td><span class="chip better">shipped</span></td><td><code>tt-model serve</code>, OpenAI-compatible</td></tr>
+          <tr><td><code>tt-model</code> bundle packaging</td><td><span class="chip better">v4</span> <span class="chip null">v5</span></td><td>v5 self-contained needs wheels assembled</td></tr>
+          <tr><td>Host-portable HF export</td><td><span class="chip better">shipped</span></td><td><code>scripts/chat.py</code> runs it CPU-only</td></tr>
+          <tr><td>Tool calling / reasoning parsers</td><td><span class="chip null">n/a</span></td><td>plumbing exists; a base model declares none</td></tr>
+          <tr><td>Chat template / instruction tuning</td><td><span class="chip null">n/a</span></td><td>base completion model by design</td></tr>
+          <tr><td>Skits — multi-turn improv</td><td><span class="chip flag">next</span></td><td>design note in the spec</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
 <nav class="mini" aria-label="Sections">
   <div class="wrap">
     <ol>
       <li><span class="grp">the model</span></li>
+        <li><a href="#capabilities">What it does best</a></li>
       <li><a href="#ask">Ask it something</a></li>
       <li><a href="#architecture">Architecture</a></li>
       <li><a href="#corpus">The corpus</a></li>
@@ -1001,6 +1049,28 @@ footer a { color: var(--ink-3); }
 </section>
 
 <!-- ═══ 6. Instruments ════════════════════════════════════════════════════════ -->
+<section id="manager">
+  <h2>Working with tt-model-manager</h2>
+  <p class="lede">
+    <a href="https://github.com/tenstorrent/tt-model-manager">tt-model-manager</a> — the
+    <code>tt-model</code> CLI, previously <code>tt-kernel-package-manager</code> — is how this
+    model is packaged, published and served. The relationship is deliberately adversarial in one
+    direction: <strong>tt-tnt is a hard consumer, and reports what breaks.</strong>
+  </p>
+  <pre><code>tt-model doctor episod/tt-tnt-1024     # is the surrounding toolchain adequate?
+tt-model pull  episod/tt-tnt-1024     # kernels, runner, weights
+tt-model serve episod/tt-tnt-1024     # through the TT vLLM plugin</code></pre>
+  <p>
+    Being a real consumer has found defects the manager's own tests could not: a version resolver
+    trusting frozen editable metadata over the source tree, a toolchain probe describing the wrong
+    interpreter, an instance report that sat after a <code>return</code> and never ran, a bundle
+    pinning a temp-directory <code>TT_METAL_HOME</code>, and a <code>--restore-card</code> that
+    would have published the wrong model's card. Two are merged upstream, two are in review, and
+    the repeatable subset is automated — <code>scripts/stack_probe.py</code> re-checks every one
+    of them in a single command, so the next regression is caught rather than rediscovered.
+  </p>
+</section>
+
 <section id="instruments">
   <div class="wrap col section-head">
     <p class="eyebrow">08 — the instruments</p>

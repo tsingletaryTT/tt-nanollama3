@@ -5,123 +5,131 @@
 
 <img src="docs/brand/tt-tnt-logo-small.jpg" alt="tt-tnt: a hand-drawn figure with TT-TNT written on its chest, standing on a grid of Tensix cores." width="260" align="right">
 
-A small Llama-3-style language model trained from random initialization on Blackhole
-hardware with `ttml` (tt-train), packaged with
-[tt-kernel](https://github.com/tenstorrent/tt-kernel-package-manager), and served through the
-Tenstorrent vLLM plugin.
+**A 123M-parameter Llama-3-style model that is *of* Tenstorrent hardware, not merely trained on
+it.** Trained from random initialization on Blackhole with `ttml` (tt-train), served through the
+Tenstorrent vLLM plugin, packaged with
+[tt-model-manager](https://github.com/tenstorrent/tt-model-manager), and small enough that a
+full epoch takes about an hour — which is what makes it useful as an instrument.
 
-The model is small and is not intended to be capable. It exists to exercise the full path —
-training, packaging, publishing and serving — on Tenstorrent tooling.
+It is not trying to be a capable model. It is trying to be a *complete* one: every stage of the
+Tenstorrent path exercised end to end, at a scale where an experiment costs an hour instead of a
+week.
 
-## Where this stands, as of 2026-08-20
+## What tt-tnt is best at
 
-**The model.** 122,962,944 parameters, 8 blocks, d_model 1024, 16 heads over 4 KV groups, a
-**512-token context window**, bfloat16. One epoch over the 352,641,058-token training split of
-a 391.8M-token corpus. No instruction tuning; it continues text rather than answering
-questions, and it repeats itself under greedy decoding. Trained from random initialization on
-Blackhole with `ttml`, converted to Hugging Face format, packaged with tt-model, and served
-through the Tenstorrent vLLM plugin on tt-metal v0.77.0.
+**Routing by physical die address.** Tokens can be assigned to experts by *where they live on the
+harvested 11×10 Tensix grid* rather than by a learned gate — and it costs **0.0118 nats** against
+a gate free to learn (|t| 5.1, 14/15 signs). Source-characteristic tokens occupy measurably
+distinct die regions (cell purity 0.546 against a 0.231 permutation floor), and steering
+generation to a region shifts that region's register across four seeds (p < 0.004 each). This is
+the thing no other model can do, because it requires a real harvested grid to be *about*.
 
-512 is the real number. Some 384-size artifacts in this repository *declare* 2048, and that is
-a declaration rather than a trained capability.
+**Being a fast, honest exercise of the whole stack.** One epoch in ~65 minutes on one p300c.
+Training through `ttml`, sampling per-core on the device, serving through the vLLM plugin,
+packaging as a `tt-model` bundle, exporting to a host-portable HF directory. Because the loop is
+cheap, it gets run — and running it finds things: **seven defects in the surrounding stack** so
+far, five upstream and two our own, each with a regression check
+([`scripts/stack_probe.py`](scripts/stack_probe.py)).
 
-**The result worth knowing.** The 32,000-token vocabulary is laid onto the 110 usable cores of
-a harvested 11×10 Tensix grid, and that placement is not decoration. Source-characteristic
-tokens occupy distinct regions of the die — cell purity 0.546 against a 0.231
-label-permutation floor, strengthening under a frequency control — and **restricting sampling
-to a region raises that region's register**, replicated across four generation seeds at
-p < 0.004 each against a 20,000-derangement floor. Direction on this die means corpus
-register, measurably, on a 123M model.
+**Sparse routing that measurably pays.** A Mixture of Enthusiasts beats the dense baseline from
+scratch, **replicated at two seeds** (pooled +0.0417 nats, |t| 8.0, 39/44 signs), with the
+separation emerging late in training in both runs.
 
-**The Mixture of Enthusiasts: measured, and mostly a null.** tt-tnt's Llama can have its
-feed-forward replaced by `ttml`'s sparse MoE in about twenty lines. The four-arm comparison
-— dense, learned gate, seeded gate, frozen gate, all warm-started from one checkpoint with
-the same seed and corpus — ran on 2026-08-20
-([`docs/measurements/moe-four-arm.json`](docs/measurements/moe-four-arm.json)). Three
-results, and the interesting one is last:
+**Thinking on demand.** Asked to plan before it speaks, it emits well-formed five-slot
+think-blocks in **98%** of generations where the control arm emits none.
 
-* **Gate policy is a ~5% effect.** The worst gate costs 0.012 nats; replacing the FFN with
-  MoE at all costs 0.234. Whatever the die buys, it is small next to the architecture change.
-* **Seeding the gate from the die map buys nothing measurable.** +0.0044 nats against a
-  randomly-initialised learned gate, signs 8+/7−, effect bounded under ~0.009 nats. The
-  seeding provably works as a *classifier* — 61.2% region recovery against 10% chance — and
-  that skill does not reach the loss. The gate learns what it needs wherever it starts.
-* **Freezing the gate to physical die geography costs only 0.0118 nats** (|t|=5.1, 14/15
-  signs) — about 15% of the run's own step-to-step floor. A routing rule fixed entirely by
-  *physical address*, never allowed to learn, lands within a hair of a freely-learned gate.
-  Nearly free is not free, and 14/15 signs say the gap is real, but that is the coherent
-  claim this project can now make: on this hardware, routing by geography is close to costless.
+## Feature support
 
-**What the comparison cannot tell you.** Every MoE arm introduces 204 fresh parameters and
-discards 18, so all three re-learn a feed-forward from init while the dense arm continues a
-converged one. The dense-vs-MoE gap is *initialization debt*, not a quality verdict — it
-shrinks monotonically (−0.523 → −0.132) and was still shrinking at step 1500. The
-MoE-vs-MoE contrasts above are free of the confound because the debt is identical across them.
+| capability | state | evidence |
+|---|---|---|
+| Training on Blackhole (`ttml`/tt-train) | ✅ | one epoch, ~65 min, one p300c |
+| Multi-chip DDP | ✅ `[1,2]` · ⚠️ `[1,4]` | `[1,4]` hard-froze the host; see the upstream note |
+| Sparse MoE — *Mixture of Enthusiasts* | ✅ | replicated win, two seeds |
+| Die-region expert routing | ✅ | 0.0118 nats to freeze routing to physical address |
+| Thinking — five-slot think-blocks | ✅ format · ⏳ effect | 98% adherence; steers but does not yet govern |
+| Per-core Gumbel sampling on device | ✅ | custom kernels, per-core RNG streams |
+| vLLM serving via the TT plugin | ✅ | `tt-model serve`, OpenAI-compatible |
+| `tt-model` bundle packaging | ✅ v4 · ⏳ v5 self-contained | v5 needs wheels assembled |
+| Host-portable HF export | ✅ | `scripts/chat.py` runs it CPU-only |
+| Tool calling / reasoning parsers | ➖ | plumbing exists; base model declares none |
+| Chat template / instruction tuning | ➖ | base completion model by design |
+| Skits — multi-turn improv | ⏳ next | design note in the spec |
 
-**Answered from scratch: MoE wins, and the gap widens.**
-([`docs/measurements/moe-from-scratch.json`](docs/measurements/moe-from-scratch.json)) Removing
-the warm start removes the debt. Dense and MoE, one epoch each from init, same seed and corpus,
-22 validation points, paired: final-five validation **2.8098 for MoE against 2.8748 for dense**,
-mean delta +0.0481 at |t| 7.3 with 20 of 22 signs, and the gap *grows* across training
-(first-five +0.0366 → last-five +0.0650). Read it as the ordinary MoE bargain rather than
-anything about geography: this configuration carries **3.62× total parameters at 0.989× active
-compute**, so more parameters for the same compute helped.
+## The science
 
-**Replicated at a second seed.** Seed 8191, same recipe: mean delta **+0.0354** (|t| 4.5,
-19/22 signs) against seed 5489's +0.0481 (|t| 7.5, 20/22) — pooled **+0.0417** over 44
-validation points. The *trajectory shape* reproduced independently too: both runs start near
-zero (8191 slightly negative) and end near +0.06, so the separation is a late-training effect
-in both. Treat **~0.04** as the estimate rather than the larger first number. Two seeds is two,
-not a distribution, and the pooled |t| describes item-level variance across validation points
-rather than run-to-run variance across many runs.
-With six pairwise contrasts the Bonferroni threshold is |t| > 2.64, which the seeding null
-fails outright and learned-vs-frozen only reaches (2.64, called borderline rather than a pass).
+Three findings, in descending order of how much they are *ours*.
 
-**Improv thinking: the model learns the format, and the format doesn't help yet.**
-([`docs/measurements/improv-stage1.json`](docs/measurements/improv-stage1.json)) tt-tnt can be
-taught to emit a five-slot think-block — `offer / accept / add / stakes / handback` — before
-continuing a story, each slot aimed at one improv failure mode: escalating to the worst place,
-blocking with the most boring next step, and drifting so far out nobody can follow. Two paired
-SFT arms, think against no-think, warm-started from the one-epoch checkpoint:
+### Routing is nearly free, and the die has regions
 
-* **Schema adherence 98%** (784 of 800 generations parse into all five slots; greedy 99%). The
-  no-think control emits them **0%** of the time, which is the control that shows adherence
-  comes from the training rather than from the harness.
-* **The block genuinely steers.** Substitute another story's think-block and **100%** of
-  continuations change. It is not decorative.
-* **It does not measurably improve the four failure modes** — 0 of 4 scorers at α = 0.01, all
-  NOT INTERPRETABLE. And one of those four, `groundedness`, is *saturated* on the real
-  co-occurrence table (99.25% of scores exactly 1.0), so honestly it is 0 of 3 live scorers plus
-  one that cannot discriminate.
+The die-region work is the part of this project that could not exist on other silicon. The
+harvested Tensix grid is a real, measured object: source-characteristic tokens cluster into
+distinct regions, and a gate *frozen* to that geometry — never allowed to learn — performs within
+0.0118 nats of one that learns freely. Seeding a learnable gate from the die map, by contrast,
+buys nothing measurable (+0.0044, signs 8+/7−) even though the seeding provably works as a
+classifier (61.2% region recovery against a 10% floor). The geometry is real; the loss cares
+where the gate may *end up*, not where it starts.
 
-So stage 1 is **PARTIAL**: the mechanism works end to end and buys nothing on the metrics we
-chose. The generations say why, and they are more informative than the scores. Asked to
-continue a story about Lily and her friends, the model planned `add: dance` and
-`handback: dance` — and then wrote a **scary dog**. Another block set `stakes: up` and the
-scene resolved into contentment. **The syntax of intention is perfect and the intention is
-not honoured.** Put beside the swap test, that names the thing precisely: the block is
-*context the model conditions on, not an instruction it obeys* — influence, not governance.
-Change it and the output moves; ask it to mean something and it shrugs. Which is exactly why
-no failure-mode scorer budged: we measured whether the plan improved the move, and the model
-never got as far as treating the plan as a plan. The no-think control, on the same opening,
-writes plainly **better** prose — longer, a named second character, dialogue. The arm that
-thinks first writes worse than the arm that doesn't. Close reading in
-[`episod-log.md`](episod-log.md), 2026-08-21.
+### Sparse routing pays, and the win is the ordinary one
 
-**Where it goes next: skits.** A single continuation gives `handback` nothing to hand back
-*to*. A skit — two or more turns with a partner who answers — is the smallest unit where
-accepting an offer and leaving an opening can actually pay off or fail, and where "made my
-partner look good" becomes measurable rather than decorative. Stage 2 was scoped as
-turn-taking for that reason; it should be scoped as skits. Worth recording how nearly we got this wrong — an earlier pass reported **0% adherence**
-and a diagnosis to match, from a run in which all 17 RMSNorm gammas were provably frozen
-(`stochastic_rounding` defaults off in the SFT path, which bypasses the warning `train/run.py`
-prints). With the gammas free, 0% became 98%. Both runs' numbers sit side by side in the
-measurement file.
+From scratch, one epoch, paired on data order, MoE beats dense at both seeds tried:
 
-**Open defect.** Served through vLLM, the model repeats more than its own CPU reference does
-(local repeat 0.1125 against 0.0125). The same weights driven through `tt_transformers`
-directly score 0.0000, so the fault is in the vLLM layer; the plugin and multi-block paging
-are both excluded. See §13 of the site.
+| seed | mean Δ | \|t\| | signs | final-5 dense | final-5 MoE |
+|---|---|---|---|---|---|
+| 5489 | +0.0481 | 7.5 | 20/22 | 2.8748 | **2.8098** |
+| 8191 | +0.0354 | 4.5 | 19/22 | 2.8213 | **2.7617** |
+| pooled | **+0.0417** | **8.0** | 39/44 | | |
+
+Both runs are indifferent early and separate late, which is the more convincing half — a seed
+artefact would be unlikely to reproduce that shape twice. Read it as the ordinary MoE bargain:
+this configuration carries **3.62× total parameters at 0.989× active compute**, so more
+parameters for the same compute helped. It is not evidence about the die geography above.
+([`docs/measurements/moe-from-scratch.json`](docs/measurements/moe-from-scratch.json))
+
+### Thinking: the format is learned, the plan is not yet obeyed
+
+Fine-tuned to emit `offer / accept / add / stakes / handback` before continuing a story, one slot
+per improv failure mode, the model produces well-formed blocks **98%** of the time against a
+**0%** control. Substituting another story's block changes **100%** of continuations, so the
+block steers rather than decorates.
+
+What it does not yet do is *govern*. It planned `add: dance` and wrote a scary dog. The next win
+is already located: a single continuation gives `handback` nothing to hand back *to*, so the slot
+encoding "make your partner look good" cannot pay off. **Skits** — two or more turns with a
+partner who answers — turn every slot from a description into a falsifiable prediction about a
+later turn, which is the thing that can actually be scored.
+([`docs/measurements/improv-stage1.json`](docs/measurements/improv-stage1.json))
+
+## The art
+
+The numbers are in `docs/measurements/`. What the model *sounds like* is in
+[`episod-log.md`](episod-log.md), which is where this project keeps its close reading — the run
+where the model heard "faster than light" and reached for *lightning*, the run where it stopped
+doing that and reached for cars and motors and tracks instead, and the day it learned to write a
+plan and then cheerfully ignored it.
+
+That log is the reason the die-region result exists. "The poetry region" started as a joke about
+a heat map and turned into a measurement.
+
+## Working with tt-model-manager
+
+[tt-model-manager](https://github.com/tenstorrent/tt-model-manager) (the `tt-model` CLI,
+previously `tt-kernel-package-manager`) is how this model is packaged, published and served. The
+relationship is deliberately adversarial in one direction: **tt-tnt is a hard consumer, and
+reports what breaks.**
+
+```bash
+tt-model doctor episod/tt-tnt-1024     # is the surrounding toolchain adequate?
+tt-model pull  episod/tt-tnt-1024     # kernels, runner, weights
+tt-model serve episod/tt-tnt-1024     # through the TT vLLM plugin
+```
+
+Being a real consumer has found and fixed defects the manager's own tests could not: a version
+resolver trusting frozen editable metadata over the source tree, a toolchain probe describing the
+wrong interpreter, an unreachable instance report, a bundle pinning a temp-directory
+`TT_METAL_HOME`, and a `--restore-card` that published the wrong model's card. Findings are
+recorded in [`docs/tt-kernel-conformance.md`](docs/tt-kernel-conformance.md) and the repeatable
+subset is automated in [`scripts/stack_probe.py`](scripts/stack_probe.py), which re-checks every
+one of them in a single command.
 
 ## Architecture
 
@@ -171,73 +179,22 @@ Upstream ships MoE configs for a single card and for a 6U Galaxy. Nothing for fo
 repository already vendors a `[1, 4]` mesh-graph descriptor because ttml ships defaults for 8 and
 32 only, and a mismatch there does not error — it hangs in the first gradient all-reduce.
 
-## Status
-
-Working today: corpus preparation (a nine-source, licence-audited blend), a 32,000-token
-BPE tokenizer trained on that blend, a training entrypoint that runs on hardware with a real
-validation loop, checkpointing with resume, and conversion to a Hugging Face model directory.
-The model has been trained for a full epoch — 10,787 steps, batch 64, sequence length 512,
-~58 minutes on a single Blackhole p300c — over the blend's 353,495,970-token training split,
-finishing at train loss 3.3125 and validation loss 4.2203. See
-[`docs/model-card.md`](docs/model-card.md) for the full curve; it plateaus before the run
-ends rather than still improving.
-
-Published and public. The weights on Hugging Face at
-[`episod/tt-tnt`](https://huggingface.co/episod/tt-tnt) are `tt-tnt-v3` — the same 384-size
-architecture retrained at a 2048-token context, 10,764 steps, final validation loss 2.9937 —
-and it is the checkpoint that has been packaged, published and served end to end. It is *not*
-the `tt-tnt-v1` run whose epoch and losses this section quotes.
-`scripts/publish_to_hub.py` creates the repo private by default and has no code path that flips
-it public itself; the repo's visibility was changed to public separately, as an
-explicitly-authorized action outside that script (2026-08-14), and is expected to stay that
-way. The tt-model packaging manifests are under [`manifests/`](manifests/), and
-[`docs/serving-with-tt-kernel.md`](docs/serving-with-tt-kernel.md) is the procedure for pulling
-and serving that bundle. See
-[`docs/superpowers/specs/`](docs/superpowers/specs/) for the full arc.
-
-The corpus ships as a recipe, not as text.
-[`episod/tt-tnt-corpus`](https://huggingface.co/datasets/episod/tt-tnt-corpus) (also public)
-carries the source registry with pinned revisions, the fetch/prepare/measure/blend scripts, the
-generated licensing table, and the provenance manifest with the blend's `sha256` — everything
-needed to reconstruct the corpus byte-identically, and nothing that would redistribute it. That
-is a licensing necessity rather than a stylistic choice: 46% of the blend is share-alike under
-two mutually incompatible copyleft terms (CDLA-Sharing-1.0 and CC-BY-SA-3.0), which no single
-concatenated file can satisfy at once.
-
-Calibrate your expectations — and note which model you are calibrating for. Two sizes
-matter here, and a parameter count means nothing until it is attached to one of them.
-The epoch, the losses and the samples quoted in this Status section are `tt-tnt-v1`
-at the **384** size: **22,025,088** parameters, 6 blocks of 384, a 512-token window. The model
-designated current in [`docs/current_model.json`](docs/current_model.json) is `tt-tnt-1024a` at
-the **1024** size: **122,962,944** parameters, 8 blocks of 1024, 16 heads over 4 KV groups,
-also trained at a 512-token window. It is the subject of the external benchmarks and the
-embedding measurements further down this page. Both models have seen one epoch of a
-~400M-token, nine-source blend — TinyStories, Simple English Wikipedia, and seven curated
-Project Gutenberg slices (see [`docs/corpus_blend.md`](docs/corpus_blend.md)) — not TinyStories
-alone. They demonstrate that the pipeline works end to end. Neither is a capable general model,
-and the corpus swap has not yet produced the oblique, observational voice it targets. Read
-against the frozen evaluation set
-([`docs/measurements/samples-tt-tnt-v1.md`](docs/measurements/samples-tt-tnt-v1.md), greedy
-decoding), `tt-tnt-v1` sometimes engages with a prompt's own material, and one long-form sample
-stays coherent for its full length — chosen here for being the most coherent of the set, not a
-typical one:
-
-> The old woman kept bees behind the house, and every morning she would go out and pick up the
-> honey and put it in her basket. One day, she was walking in the garden when she saw a big,
-> red apple. She was so excited and wanted to pick it. She picked it up and took a big bite. It
-> was so sweet and juicy!
-
-TinyStories still dominates elsewhere in the set: four of fifteen prompts collapse into "a
-little girl named Lily" regardless of what they asked for, and several others fall into hard
-repetition loops under greedy decoding — see the linked file and
-[`docs/model-card.md`](docs/model-card.md)'s Limitations section for the honest range.
-
 ## The model
 
-This table is `tt-tnt-v1` — the **384** size, the run described above. The designated current
-model `tt-tnt-1024a` is the **1024** size: 1024 wide, 8 blocks, 16 heads over 4 KV groups, a
-2816-wide SwiGLU, and a 512-token window, for 122,962,944 parameters. Both sizes are declared
-in [`train/sizes.py`](train/sizes.py) and one YAML each under
+The **designated current model is `tt-tnt-1024-dialogue`** — the 1024 size: 1024 wide, 8 blocks,
+16 heads over 4 KV groups, a 2816-wide SwiGLU, a 512-token window, **122,962,944 parameters**,
+one full epoch. It is the checkpoint every result on this page was measured on, and it is
+published as [`episod/tt-tnt-1024`](https://huggingface.co/episod/tt-tnt-1024).
+
+The designation, its reason, its evidence and — importantly — what it does *not* mean are
+recorded in [`docs/current_model.json`](docs/current_model.json), which is data rather than a
+claim of quality in the abstract. It supersedes `tt-tnt-1024a` as of 2026-08-18, chosen for a
+capability (it answers questions in the shape of an answer, and sometimes in fact) at a known
+cost. Note that [`episod/tt-tnt`](https://huggingface.co/episod/tt-tnt) on the Hub is a
+*different, older* model — the 384-wide, 6-layer, 2048-context lineage.
+
+The table below is `tt-tnt-v1`, the **384** size, kept for shape comparison. Both sizes are
+declared in [`train/sizes.py`](train/sizes.py) and one YAML each under
 [`train/configs/model/`](train/configs/model/).
 
 | Property | Value |
@@ -310,120 +267,6 @@ gap for a full epoch, unlike the original 0.43-epoch checkpoint, where the two w
 near-noise-dominated tie. The plateau in the curve above — not the train/val gap — is the more
 informative signal for this run: it says the model had largely stopped learning from this
 corpus well before step 10,787, not that it needs a slightly longer run to keep closing the gap.
-
-## History
-
-This model comes out of the **"Build an LLM from Scratch"** lesson arc in
-[tt-vscode-toolkit](https://github.com/tenstorrent/tt-vscode-toolkit), which builds a
-Llama-3-style model TT-native from the first line of code rather than porting one afterwards.
-The lessons are readable without installing anything:
-
-- [Pick Your Altitude](https://docs.tenstorrent.com/tt-vscode-toolkit/lessons/lfs-00-intro/) — the arc's introduction
-- [Tokenizer & Data](https://docs.tenstorrent.com/tt-vscode-toolkit/lessons/lfs-01-tokenizer/)
-- [Embeddings](https://docs.tenstorrent.com/tt-vscode-toolkit/lessons/lfs-02-embeddings/)
-- [Attention](https://docs.tenstorrent.com/tt-vscode-toolkit/lessons/lfs-03-attention/)
-- [The Transformer Block & the Model](https://docs.tenstorrent.com/tt-vscode-toolkit/lessons/lfs-04-block-and-model/)
-- [Train It & Run for Real](https://docs.tenstorrent.com/tt-vscode-toolkit/lessons/lfs-05-train-and-run/)
-
-Browse the whole microsite at
-[docs.tenstorrent.com/tt-vscode-toolkit](https://docs.tenstorrent.com/tt-vscode-toolkit/).
-
-This repository takes that arc past where the lessons stop: it owns its training entrypoint,
-its corpus and tokenizer pipeline, and the packaging work that turns a checkpoint into
-something servable.
-
-Why it has its own training entrypoint. tt-train's stock Python trainer does not work
-against current tt-metal. `examples/python/transformers/training.py` imports a `trainer`
-module that is not on its path, calls `train()` with a `val_ids` argument the signature does
-not accept, and depends on a `TrainingConfig` that never defines the `seq_len` `train()`
-requires. Its data loader also hardcodes `shakespeare.txt`, ignoring any configured path. We
-reuse everything ttml genuinely provides — `create_optimizer`, `train()`, `checkpointing`,
-and both of its Llama implementations — and replace only what is broken or hardcoded.
-
-Which Llama, and why it matters for speed. ttml ships two: a C++ `CppLlama` (reached
-through its `TransformerModelFactory`) and a pure-Python `ttml.models.llama.Llama`. They are
-the same architecture over the same fused ops and cost the same per step — but only the
-Python one can be handed a null attention mask, and a null mask is what puts the fused SDPA
-kernel on its causal path instead of its arbitrary-mask path, roughly halving the attention
-work. `train/model.py` wraps the Python model so its parameter names, checkpoints, and HF
-conversion are byte-for-byte what they always were, and `train/run.py --model-impl` selects
-between the two. Measured: **1.41x** faster per training step at `--size 384`, **1.15x** at
-`--size 1024`, with the loss trajectory unchanged. `train/model.py`'s module docstring carries
-the reasoning and the numbers; [`docs/upstream-tt-metal-asks.md`](docs/upstream-tt-metal-asks.md)
-carries the two-line tt-metal fix that would make this workaround unnecessary.
-
-## Lineage: from nanollama3 to tt-tnt
-
-This project was originally named **tt-nanollama3**, and this section says plainly what
-changed and what didn't, rather than quietly dropping the earlier name.
-
-What it started as. The model began as a hand-rolled nanollama3-like model: a Llama-3
-architecture, trained from random initialization with tt-train's `ttml` trainer, on a single
-downloaded corpus (TinyStories). That is still true today in the parts that matter most for
-correctness — the 384 config vendored at
-[`train/configs/model/tt-tnt-384.yaml`](train/configs/model/tt-tnt-384.yaml) is a
-verbatim copy of tt-train's own `nanollama3.yaml`, and every checkpoint this project has ever
-produced is trained against that same Llama-3 architecture (RoPE, RMSNorm, SwiGLU, grouped-query
-attention) through `ttml`. Nothing about the rename touched the model's shape or its trainer.
-
-What changed with the new name. Two things this project now owns that it didn't at the start:
-a **nine-source, licence-audited corpus** blended to a 400M-token budget (see
-[`docs/corpus_blend.md`](docs/corpus_blend.md) and [`docs/corpus_licensing.md`](docs/corpus_licensing.md)),
-in place of a single downloaded TinyStories dump; and a **32,000-token BPE tokenizer trained
-on that blend**, rather than inherited from someone else's vocabulary. Those two changes are
-what stopped "nanollama3-like" from being an accurate description of this project's identity,
-even though the underlying architecture and trainer it sits on did not change.
-
-Existing artifacts still carry the old name, on purpose. Checkpoints from before this
-rename are named `nanollama3_step*.pkl` and are left untouched — they are evidence of runs
-made under the old name, and renaming them would misrepresent when they were produced. New
-checkpoints are written as `tt_tnt_step*.pkl`; `train/checkpoint.latest_checkpoint` reads
-both naming schemes so an existing checkpoint directory keeps resolving correctly.
-
-## Provenance and licensing
-
-This project's source code is Apache-2.0, matching tt-metal and tt-vscode-toolkit. Every
-source file carries an SPDX header. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
-
-Apache-2.0 covers *our code*. It does not override the terms of what this project consumes,
-and two of those inputs deserve stating plainly rather than being folded into a blanket claim:
-
-Training corpus — a nine-source blend, two sources share-alike. The corpus (see
-[`docs/corpus_blend.md`](docs/corpus_blend.md) and
-[`docs/corpus_licensing.md`](docs/corpus_licensing.md), the latter generated from
-`train/corpus.py`) mixes TinyStories, Simple English Wikipedia, a small instruction-dialogue
-slice, and seven curated Project Gutenberg slices. **Three** sources carry share-alike data
-licenses: `tinystories`
-([`roneneldan/TinyStories`](https://huggingface.co/datasets/roneneldan/TinyStories), 29% of the
-blend) under the Community Data License Agreement – Sharing, v1.0; `wikipedia_simple`
-([`wikimedia/wikipedia`](https://huggingface.co/datasets/wikimedia/wikipedia), 15% of the
-blend) under CC-BY-SA-3.0; and `dialogue`
-([`databricks/databricks-dolly-15k`](https://huggingface.co/datasets/databricks/databricks-dolly-15k),
-2% of the blend) also under CC-BY-SA-3.0. This repository **does not redistribute the corpus**; the fetch
-scripts download each source from the Hugging Face Hub at a pinned revision. Whether model
-weights trained on share-alike data constitute a "Data Derivative" (CDLA-Sharing-1.0) or an
-"Adaptation" (CC-BY-SA-3.0) is not settled, and we do not assert that they don't. Anyone
-publishing weights trained with this code should reach their own conclusion rather than
-inheriting ours.
-
-Architectural inspiration — Mini-LLM. The lesson arc credits
-[Mini-LLM by Ashx098](https://github.com/Ashx098/Mini-LLM) for its component choices — RoPE,
-RMSNorm, SwiGLU, GQA, subword BPE. That repository **declares no license**, so no rights are
-granted by it. This is a credit, not a license inheritance: the components themselves come
-from published papers, and this implementation derives from tt-train's `nanollama3` model
-config and the `ttml` library, not from Mini-LLM's source. No code was copied from it.
-
-Model weights. Published, and public, at
-[`episod/tt-tnt`](https://huggingface.co/episod/tt-tnt) via `scripts/publish_to_hub.py`, which
-creates the repo private by default and has no code path of its own that flips it public — the
-repo's visibility was changed separately, as an explicitly-authorized action (2026-08-14), and
-is expected to stay public. [`docs/model-card.md`](docs/model-card.md) is the source of truth
-for the card pushed there; it states the corpus and its license explicitly and describes the
-model honestly as a demonstration rather than a capable general model, per the standard set
-above.
-
-Runtime dependencies — tt-metal / `ttml` / `ttnn` (Apache-2.0), `transformers` and
-`tokenizers` (Apache-2.0), numpy (BSD-3-Clause).
 
 ## Getting started
 
@@ -739,6 +582,120 @@ Two deflations belong with the number, and both are in the report:
 
 It also says nothing about generated text. This is a measurement of the embedding table, not of
 behaviour; `scripts/score_behaviour.py` is where register in actual completions is measured.
+
+## Lineage: from nanollama3 to tt-tnt
+
+This project was originally named **tt-nanollama3**, and this section says plainly what
+changed and what didn't, rather than quietly dropping the earlier name.
+
+What it started as. The model began as a hand-rolled nanollama3-like model: a Llama-3
+architecture, trained from random initialization with tt-train's `ttml` trainer, on a single
+downloaded corpus (TinyStories). That is still true today in the parts that matter most for
+correctness — the 384 config vendored at
+[`train/configs/model/tt-tnt-384.yaml`](train/configs/model/tt-tnt-384.yaml) is a
+verbatim copy of tt-train's own `nanollama3.yaml`, and every checkpoint this project has ever
+produced is trained against that same Llama-3 architecture (RoPE, RMSNorm, SwiGLU, grouped-query
+attention) through `ttml`. Nothing about the rename touched the model's shape or its trainer.
+
+What changed with the new name. Two things this project now owns that it didn't at the start:
+a **nine-source, licence-audited corpus** blended to a 400M-token budget (see
+[`docs/corpus_blend.md`](docs/corpus_blend.md) and [`docs/corpus_licensing.md`](docs/corpus_licensing.md)),
+in place of a single downloaded TinyStories dump; and a **32,000-token BPE tokenizer trained
+on that blend**, rather than inherited from someone else's vocabulary. Those two changes are
+what stopped "nanollama3-like" from being an accurate description of this project's identity,
+even though the underlying architecture and trainer it sits on did not change.
+
+Existing artifacts still carry the old name, on purpose. Checkpoints from before this
+rename are named `nanollama3_step*.pkl` and are left untouched — they are evidence of runs
+made under the old name, and renaming them would misrepresent when they were produced. New
+checkpoints are written as `tt_tnt_step*.pkl`; `train/checkpoint.latest_checkpoint` reads
+both naming schemes so an existing checkpoint directory keeps resolving correctly.
+
+## History
+
+This model comes out of the **"Build an LLM from Scratch"** lesson arc in
+[tt-vscode-toolkit](https://github.com/tenstorrent/tt-vscode-toolkit), which builds a
+Llama-3-style model TT-native from the first line of code rather than porting one afterwards.
+The lessons are readable without installing anything:
+
+- [Pick Your Altitude](https://docs.tenstorrent.com/tt-vscode-toolkit/lessons/lfs-00-intro/) — the arc's introduction
+- [Tokenizer & Data](https://docs.tenstorrent.com/tt-vscode-toolkit/lessons/lfs-01-tokenizer/)
+- [Embeddings](https://docs.tenstorrent.com/tt-vscode-toolkit/lessons/lfs-02-embeddings/)
+- [Attention](https://docs.tenstorrent.com/tt-vscode-toolkit/lessons/lfs-03-attention/)
+- [The Transformer Block & the Model](https://docs.tenstorrent.com/tt-vscode-toolkit/lessons/lfs-04-block-and-model/)
+- [Train It & Run for Real](https://docs.tenstorrent.com/tt-vscode-toolkit/lessons/lfs-05-train-and-run/)
+
+Browse the whole microsite at
+[docs.tenstorrent.com/tt-vscode-toolkit](https://docs.tenstorrent.com/tt-vscode-toolkit/).
+
+This repository takes that arc past where the lessons stop: it owns its training entrypoint,
+its corpus and tokenizer pipeline, and the packaging work that turns a checkpoint into
+something servable.
+
+Why it has its own training entrypoint. tt-train's stock Python trainer does not work
+against current tt-metal. `examples/python/transformers/training.py` imports a `trainer`
+module that is not on its path, calls `train()` with a `val_ids` argument the signature does
+not accept, and depends on a `TrainingConfig` that never defines the `seq_len` `train()`
+requires. Its data loader also hardcodes `shakespeare.txt`, ignoring any configured path. We
+reuse everything ttml genuinely provides — `create_optimizer`, `train()`, `checkpointing`,
+and both of its Llama implementations — and replace only what is broken or hardcoded.
+
+Which Llama, and why it matters for speed. ttml ships two: a C++ `CppLlama` (reached
+through its `TransformerModelFactory`) and a pure-Python `ttml.models.llama.Llama`. They are
+the same architecture over the same fused ops and cost the same per step — but only the
+Python one can be handed a null attention mask, and a null mask is what puts the fused SDPA
+kernel on its causal path instead of its arbitrary-mask path, roughly halving the attention
+work. `train/model.py` wraps the Python model so its parameter names, checkpoints, and HF
+conversion are byte-for-byte what they always were, and `train/run.py --model-impl` selects
+between the two. Measured: **1.41x** faster per training step at `--size 384`, **1.15x** at
+`--size 1024`, with the loss trajectory unchanged. `train/model.py`'s module docstring carries
+the reasoning and the numbers; [`docs/upstream-tt-metal-asks.md`](docs/upstream-tt-metal-asks.md)
+carries the two-line tt-metal fix that would make this workaround unnecessary.
+
+## Provenance and licensing
+
+This project's source code is Apache-2.0, matching tt-metal and tt-vscode-toolkit. Every
+source file carries an SPDX header. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
+
+Apache-2.0 covers *our code*. It does not override the terms of what this project consumes,
+and two of those inputs deserve stating plainly rather than being folded into a blanket claim:
+
+Training corpus — a nine-source blend, two sources share-alike. The corpus (see
+[`docs/corpus_blend.md`](docs/corpus_blend.md) and
+[`docs/corpus_licensing.md`](docs/corpus_licensing.md), the latter generated from
+`train/corpus.py`) mixes TinyStories, Simple English Wikipedia, a small instruction-dialogue
+slice, and seven curated Project Gutenberg slices. **Three** sources carry share-alike data
+licenses: `tinystories`
+([`roneneldan/TinyStories`](https://huggingface.co/datasets/roneneldan/TinyStories), 29% of the
+blend) under the Community Data License Agreement – Sharing, v1.0; `wikipedia_simple`
+([`wikimedia/wikipedia`](https://huggingface.co/datasets/wikimedia/wikipedia), 15% of the
+blend) under CC-BY-SA-3.0; and `dialogue`
+([`databricks/databricks-dolly-15k`](https://huggingface.co/datasets/databricks/databricks-dolly-15k),
+2% of the blend) also under CC-BY-SA-3.0. This repository **does not redistribute the corpus**; the fetch
+scripts download each source from the Hugging Face Hub at a pinned revision. Whether model
+weights trained on share-alike data constitute a "Data Derivative" (CDLA-Sharing-1.0) or an
+"Adaptation" (CC-BY-SA-3.0) is not settled, and we do not assert that they don't. Anyone
+publishing weights trained with this code should reach their own conclusion rather than
+inheriting ours.
+
+Architectural inspiration — Mini-LLM. The lesson arc credits
+[Mini-LLM by Ashx098](https://github.com/Ashx098/Mini-LLM) for its component choices — RoPE,
+RMSNorm, SwiGLU, GQA, subword BPE. That repository **declares no license**, so no rights are
+granted by it. This is a credit, not a license inheritance: the components themselves come
+from published papers, and this implementation derives from tt-train's `nanollama3` model
+config and the `ttml` library, not from Mini-LLM's source. No code was copied from it.
+
+Model weights. Published, and public, at
+[`episod/tt-tnt`](https://huggingface.co/episod/tt-tnt) via `scripts/publish_to_hub.py`, which
+creates the repo private by default and has no code path of its own that flips it public — the
+repo's visibility was changed separately, as an explicitly-authorized action (2026-08-14), and
+is expected to stay public. [`docs/model-card.md`](docs/model-card.md) is the source of truth
+for the card pushed there; it states the corpus and its license explicitly and describes the
+model honestly as a demonstration rather than a capable general model, per the standard set
+above.
+
+Runtime dependencies — tt-metal / `ttml` / `ttnn` (Apache-2.0), `transformers` and
+`tokenizers` (Apache-2.0), numpy (BSD-3-Clause).
 
 ## Contributing
 
