@@ -22,7 +22,7 @@ they them his her their him us we you your i me my not no nor do did does done h
 has had will would can could should may might must very just
 """.split())
 
-_SENT_SPLIT = re.compile(r'(?<=[.!?])\s+')
+_SENT_SPLIT = re.compile(r'(?<=[.!?"])\s+')
 _WORD = re.compile(r"[A-Za-z']+")
 
 
