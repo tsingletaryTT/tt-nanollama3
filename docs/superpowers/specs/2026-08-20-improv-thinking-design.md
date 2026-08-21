@@ -267,3 +267,51 @@ is used.
    playing well even when slots are thin — that is the mechanism being tested.
 5. **The harm lexicon is a blunt instrument.** Mitigated by the relative framing, but a
    folklore-heavy stage 2 should revisit it.
+
+---
+
+## Stage 2, re-scoped: skits (design note, 2026-08-21)
+
+Stage 2 was scoped as "turn-taking co-author". After stage 1's result it should be scoped as
+**skits**, and the reason is sharper than packaging.
+
+**Why the single continuation was the wrong unit.** `handback` encodes improv's "make your
+partner look good" — and with one continuation there is no partner, so the slot has nothing to
+hand back *to*. It is decorative by construction, and no scorer could have rescued it. Same for
+`stakes`: escalation in improv happens *across* an exchange, not inside one reply, so measuring
+intensity delta within a single continuation measures the wrong interval.
+
+**The real gain: slots become predictions.** Stage 1 could only ask whether a plan *described*
+the continuation it was derived from. A skit lets each slot make a falsifiable claim about a
+turn that has not happened yet:
+
+| slot | prediction about the NEXT turn | scoreable as |
+|---|---|---|
+| `accept` | the named element is carried forward | does it appear in the model's turn |
+| `add` | this specific element enters the scene | does it appear, and only it |
+| `stakes` | intensity rises/holds/falls **across the exchange** | delta between turns, not within one |
+| `handback` | the partner's next turn picks this up | does the partner's turn use it |
+| `offer` | (bookkeeping — what was received) | — |
+
+That converts the eval from "did the plan improve the move" into "does the plan **predict** what
+happens next" — which is exactly the question stage 1 could not ask, and exactly where its
+finding pointed: the block turned out to be **context the model conditions on, not an instruction
+it obeys**. A prediction can be scored for accuracy; a description cannot.
+
+**It also answers a question stage 1 left dangling:** whether a plan the model failed to honour
+was even a *good* plan. Scoring the prediction separates "bad plan" from "good plan, ignored" —
+two failures with completely different fixes.
+
+**What carries over.** The extractive derivation, the five-slot schema, the pre-shifted label
+convention, tile alignment, the paired-arms design, the Bonferroni discipline, and the swap test
+(which should run first again). `escalation` and `affordance` mostly survive as components with
+their interval redefined to span turns. `groundedness` is now NPMI-based and live.
+
+**What is new work.** A two-turn derivation (adjacent cut points from one story, so the "partner"
+turn is real corpus text rather than synthesised), per-slot prediction scorers, and a
+partner-simulation decision: the cheapest honest version uses the *actual next passage* from the
+corpus as the partner's turn, which keeps everything extractive and avoids putting an unvalidated
+generator in the loop — the same rule that shaped stage 1.
+
+**Not yet specified.** This is a design note, not a spec. It needs its own brainstorm →
+spec → plan cycle.
