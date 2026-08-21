@@ -16,3 +16,6 @@ scratch/
 # Weight cache written by `tt-model` when a bundle is staged locally (175M of
 # copied safetensors). Regenerable from artifacts/, so it is never committed.
 model_cache/
+
+# Superpowers SDD worktrees — scratch workspaces, never committed.
+.worktrees/

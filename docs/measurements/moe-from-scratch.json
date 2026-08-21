@@ -1,0 +1,16 @@
+{
+  "design": "From scratch, NO warm start: dense vs MoE (learned gate), 10764 steps = one epoch on tokens-v4, seed 5489 both arms, --ddp 2 one board, 22 validation points each. Paired: identical data order, so per-step oscillation cancels.",
+  "why_this_run_exists": "The four-arm warm-started experiment could not answer whether MoE overtakes dense: every MoE arm carried 204 fresh parameters against a converged feed-forward, so the whole dense-vs-MoE gap was initialization debt. From scratch there is no debt and the comparison is of architectures.",
+  "result": {
+    "mean_delta_dense_minus_moe": 0.0481,
+    "t": 7.3,
+    "signs_favouring_moe": 20,
+    "n": 22,
+    "first5_mean_delta": 0.0366,
+    "last5_mean_delta": 0.065,
+    "within_run_floor": 0.0844
+  },
+  "verdict": "MoE lower (better) than dense; effect grows over training.",
+  "honest_reading": "MoE here has 3.62x TOTAL parameters at 0.989x ACTIVE compute, so this is the ordinary MoE bargain -- more parameters for the same compute helped. It is NOT evidence about die geography: gate policy was measured separately in the four-arm run, where seeding the gate from the die map bought nothing measurable (+0.0044 nats, signs 8+/7-) and freezing it to physical address cost only 0.0118.",
+  "caveat": "One seed per arm. The paired design makes the delta precise, but a second seed would be needed to rule out a seed-specific interaction."
+}
