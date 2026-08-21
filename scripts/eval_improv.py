@@ -387,20 +387,20 @@ def compute_truncation_counts(traces_path: Path, tokenizer_dir: Path, pad_token_
     }
 
 
-def build_cooc(traces_path: Path) -> Dict[str, set]:
-    """Word -> words co-occurring with it in the same sentence, over the TRAINING traces'
-    text (prefix + continuation). Built from training data, never from the held-out eval
-    set, so the `groundedness` metric itself introduces no eval/train leakage.
+def build_association(traces_path: Path) -> Dict[str, object]:
+    """NPMI counts for `groundedness`, built from the derived traces.
+
+    Replaces the earlier boolean co-occurrence table, which saturated: on this corpus 80.1%
+    of prefix words are hub words with >2000 neighbours each, so "does any fresh word
+    co-occur with any prefix word" was true almost always (mean 0.998, 99.25% exactly 1.0).
     """
-    cooc: Dict[str, set] = {}
-    for line in traces_path.open():
-        rec = json.loads(line)
-        text = rec["prefix"] + " " + rec["continuation"]
-        for sent in split_sentences(text):
-            words = set(content_words(sent))
-            for w in words:
-                cooc.setdefault(w, set()).update(words - {w})
-    return cooc
+    from scripts.score_improv import build_association as _build
+    pairs: List[Tuple[str, str]] = []
+    with traces_path.open() as fh:
+        for line in fh:
+            rec = json.loads(line)
+            pairs.append((rec["prefix"], rec["continuation"]))
+    return _build(pairs)
 
 
 # ---------------------------------------------------------------------------------------
@@ -546,7 +546,7 @@ def main() -> int:
     print(f"  found {len(openings)}/{args.n_heldout} held-out openings "
           f"(scanned {n_scanned} corpus records; overlap with traces.jsonl: 0)")
 
-    cooc = build_cooc(TRACES_PATH)
+    assoc = build_association(TRACES_PATH)
 
     # -------------------------------------------------------------------------------
     # HEADLINE 1: schema adherence. ORGANIC generation -- a bare prefix, nothing forced --
@@ -626,9 +626,9 @@ def main() -> int:
         max_new_tokens=args.continuation_max_new_tokens, do_sample=False,
         batch_size=args.batch_size)
 
-    scores_think = [score_pair(o["prefix"], c, harm=harm, cooc=cooc, closure=closure)
+    scores_think = [score_pair(o["prefix"], c, harm=harm, assoc=assoc, closure=closure)
                     for o, c in zip(openings, think_continuations)]
-    scores_nothink = [score_pair(o["prefix"], c, harm=harm, cooc=cooc, closure=closure)
+    scores_nothink = [score_pair(o["prefix"], c, harm=harm, assoc=assoc, closure=closure)
                       for o, c in zip(openings, nothink_continuations)]
 
     scorer_series = {

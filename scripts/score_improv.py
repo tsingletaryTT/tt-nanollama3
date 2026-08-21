@@ -29,11 +29,12 @@ Closure-marker matching is split by arity, on purpose:
 """
 from __future__ import annotations
 
+import math
 import re
 import sys
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Dict, Set
+from typing import Dict, List, Set, Tuple
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -109,8 +110,57 @@ def _is_closed(tail: str, closure: frozenset) -> bool:
     return bool(tail_words & single)
 
 
+#: Association table for `groundedness`. Counts, not a neighbour SET, because the boolean
+#: "did these two words ever co-occur" version SATURATED: measured on the real 18,791-trace
+#: table it returned a mean of 0.998 with 99.25% of scores exactly 1.0, so it could not
+#: discriminate anything. The cause is structural rather than a bad threshold — the corpus
+#: vocabulary is only 9,926 words but averages 548 neighbours each, and 641 hub words
+#: (`about`, `after`, `again`, `afraid`, ...) exceed 2,000 neighbours, so 80.1% of prefix
+#: words are hubs and an existential "connects to ANY prefix word" is true almost always.
+#:
+#: Normalised PMI fixes it by weighting association STRENGTH instead of existence, and is
+#: bounded to [0, 1] so it still reads as a score. On the same real table: mean 0.259,
+#: sd 0.089, range 0.069-0.716, and 0.00% at ceiling.
+#:
+#: Note the old version DID pass a discrimination test on constructed extremes
+#: (grounded 1.000 vs "Gorthax and Vermilion argued about the Treaty of Blunn" 0.333). That
+#: test was not wrong, it was UNREPRESENTATIVE — real continuations never look like that.
+#: Hence `test_groundedness_is_not_saturated_on_the_real_corpus`, which asserts spread on the
+#: actual distribution rather than separation on a hand-built pair.
+def build_association(pairs: List[Tuple[str, str]]) -> Dict[str, object]:
+    """Build the NPMI counts from (prefix, continuation) pairs. Document = one pair."""
+    uni: Dict[str, int] = {}
+    co: Dict[str, Dict[str, int]] = {}
+    n = 0
+    for prefix, continuation in pairs:
+        words = set(content_words(prefix)) | set(content_words(continuation))
+        n += 1
+        for w in words:
+            uni[w] = uni.get(w, 0) + 1
+        for w in words:
+            row = co.setdefault(w, {})
+            for v in words:
+                if v != w:
+                    row[v] = row.get(v, 0) + 1
+    return {"uni": uni, "co": co, "n": n}
+
+
+def npmi(a: str, b: str, assoc: Dict[str, object]) -> float:
+    """Normalised PMI in [0, 1]; 0 when either word or the pair is unseen."""
+    uni, co, n = assoc["uni"], assoc["co"], assoc["n"]          # type: ignore[index]
+    ca, cb = uni.get(a, 0), uni.get(b, 0)
+    cab = co.get(a, {}).get(b, 0)
+    if not (ca and cb and cab and n):
+        return 0.0
+    p_ab = cab / n
+    denom = -math.log(p_ab)
+    if denom <= 0:
+        return 0.0
+    return max(0.0, math.log(p_ab / ((ca / n) * (cb / n))) / denom)
+
+
 def score_pair(prefix: str, continuation: str, *, harm: frozenset,
-               cooc: Dict[str, Set[str]], closure: frozenset) -> ImprovScores:
+               assoc: Dict[str, object], closure: frozenset) -> ImprovScores:
     p_words, c_words = content_words(prefix), content_words(continuation)
     p_set = set(p_words)
     fresh = [w for w in c_words if w not in p_set]
@@ -129,8 +179,10 @@ def score_pair(prefix: str, continuation: str, *, harm: frozenset,
     new_harm = (p_intensity == 0.0) and (c_intensity > 0.0)
 
     if fresh:
-        grounded = sum(1 for w in fresh
-                       if any(w in cooc.get(p, set()) for p in p_set)) / len(fresh)
+        # Mean over fresh words of the STRONGEST association to any prefix word. See the
+        # build_association docstring for why this is not a boolean co-occurrence test.
+        grounded = sum(max((npmi(w, p, assoc) for p in p_set), default=0.0)
+                       for w in fresh) / len(fresh)
     else:
         grounded = 1.0
 
