@@ -55,11 +55,44 @@ results, and the interesting one is last:
 **What the comparison cannot tell you.** Every MoE arm introduces 204 fresh parameters and
 discards 18, so all three re-learn a feed-forward from init while the dense arm continues a
 converged one. The dense-vs-MoE gap is *initialization debt*, not a quality verdict — it
-shrinks monotonically (−0.523 → −0.132) and was still shrinking at step 1500. Whether MoE
-overtakes dense is **not answered**; that needs a from-scratch run at a longer horizon. The
+shrinks monotonically (−0.523 → −0.132) and was still shrinking at step 1500. The
 MoE-vs-MoE contrasts above are free of the confound because the debt is identical across them.
+
+**Answered from scratch: MoE wins, and the gap widens.**
+([`docs/measurements/moe-from-scratch.json`](docs/measurements/moe-from-scratch.json)) Removing
+the warm start removes the debt. Dense and MoE, one epoch each from init, same seed and corpus,
+22 validation points, paired: final-five validation **2.8098 for MoE against 2.8748 for dense**,
+mean delta +0.0481 at |t| 7.3 with 20 of 22 signs, and the gap *grows* across training
+(first-five +0.0366 → last-five +0.0650). Read it as the ordinary MoE bargain rather than
+anything about geography: this configuration carries **3.62× total parameters at 0.989× active
+compute**, so more parameters for the same compute helped. One seed per arm — the paired design
+makes the delta precise but cannot exclude a seed-specific interaction.
 With six pairwise contrasts the Bonferroni threshold is |t| > 2.64, which the seeding null
 fails outright and learned-vs-frozen only reaches (2.64, called borderline rather than a pass).
+
+**Improv thinking: the model learns the format, and the format doesn't help yet.**
+([`docs/measurements/improv-stage1.json`](docs/measurements/improv-stage1.json)) tt-tnt can be
+taught to emit a five-slot think-block — `offer / accept / add / stakes / handback` — before
+continuing a story, each slot aimed at one improv failure mode: escalating to the worst place,
+blocking with the most boring next step, and drifting so far out nobody can follow. Two paired
+SFT arms, think against no-think, warm-started from the one-epoch checkpoint:
+
+* **Schema adherence 98%** (784 of 800 generations parse into all five slots; greedy 99%). The
+  no-think control emits them **0%** of the time, which is the control that shows adherence
+  comes from the training rather than from the harness.
+* **The block genuinely steers.** Substitute another story's think-block and **100%** of
+  continuations change. It is not decorative.
+* **It does not measurably improve the four failure modes** — 0 of 4 scorers at α = 0.01, all
+  NOT INTERPRETABLE. And one of those four, `groundedness`, is *saturated* on the real
+  co-occurrence table (99.25% of scores exactly 1.0), so honestly it is 0 of 3 live scorers plus
+  one that cannot discriminate.
+
+So stage 1 is **PARTIAL**: the mechanism works end to end and buys nothing on the metrics we
+chose. Worth recording how nearly we got this wrong — an earlier pass reported **0% adherence**
+and a diagnosis to match, from a run in which all 17 RMSNorm gammas were provably frozen
+(`stochastic_rounding` defaults off in the SFT path, which bypasses the warning `train/run.py`
+prints). With the gammas free, 0% became 98%. Both runs' numbers sit side by side in the
+measurement file.
 
 **Open defect.** Served through vLLM, the model repeats more than its own CPU reference does
 (local repeat 0.1125 against 0.0125). The same weights driven through `tt_transformers`

@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import pathlib
 
-W, H = 1000, 1010
+W, H = 1000, 1076
 BG, INK, INK2, RULE = "#F1F8F8", "#092221", "#3A5452", "#C7D9D8"
 ACCENT, TEAL, AMBER, RED, PURPLE = "#1B8EB1", "#74C5DF", "#F6BC42", "#FA512E", "#8A6FB0"
 MONO = "ui-monospace,'SF Mono',Menlo,Consolas,monospace"
@@ -161,9 +161,16 @@ def build() -> str:
                                "step-to-step floor. Seeding", size=12, fill=INK))
     o.append(text(40, y + 236, "alone buys nothing measurable (+0.0044, signs 8+/7−).",
                   size=12, fill=INK))
+    o.append(text(40, y + 262, "SPARSITY ITSELF DOES pay, from scratch: 2.8098 vs dense 2.8748 "
+                               "at one epoch (|t| 7.3,", size=12, fill=ACCENT, weight=600))
+    o.append(text(40, y + 280, "20/22 signs), and the gap widens. But that is 3.62x TOTAL "
+                               "params at 0.989x ACTIVE compute —", size=12, fill=ACCENT,
+                  weight=600))
+    o.append(text(40, y + 298, "the ordinary MoE bargain, not a claim about geography.",
+                  size=12, fill=ACCENT, weight=600))
 
     # ---- 4. the QB2 gap -----------------------------------------------------
-    y = 856
+    y = 922
     o.append(text(40, y, "4 — THE GAP THIS BOX SITS IN", size=12, font=MONO, fill=RED, weight=600))
     o.append(box(40, y + 16, 920, 128, fill=RED, op=0.07, stroke=RED))
     o.append(text(58, y + 42, "upstream ships MoE configs for single-card and for 6U Galaxy "

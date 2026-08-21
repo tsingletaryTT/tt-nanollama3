@@ -66,6 +66,41 @@ documents would improve termination was not supported.
 Full comparison:
 `docs/measurements/evaluation-tt-tnt-1024a-vs-tt-tnt-1024-dialogue.md`.
 
+## Experiments this checkpoint is the base for
+
+Two things were measured on top of this checkpoint on 2026-08-20. Both are recorded with their
+limits, because both are easy to overstate.
+
+**Sparse routing (Mixture of Enthusiasts) beats dense from scratch.** Replacing the
+feed-forward with `ttml`'s sparse MoE and training both arms one epoch from init, paired on
+seed 5489: validation **2.8098 for MoE against 2.8748 for dense** (mean delta +0.0481,
+|t| 7.3, 20 of 22 signs), and the gap widens across training. Read it as the ordinary MoE
+bargain — the configuration carries **3.62× total parameters at 0.989× active compute**, so
+more parameters for the same compute helped. It is *not* evidence about the die-region routing
+below. One seed per arm.
+
+**Routing by physical die address is nearly free.** Tokens can be routed to experts by where
+they live on the harvested Tensix grid rather than by a learned gate. Freezing the gate to that
+geography — never letting it learn — costs only **0.0118 nats** against a freely-learned gate
+(|t| 5.1, 14/15 signs). Seeding the gate from the die map and then letting it move buys nothing
+measurable (+0.0044, signs 8+/7−), even though the seeding demonstrably works as a classifier
+(61.2% region recovery against a 10% chance floor). The geometry is real; the loss does not care
+where the gate starts, only where it may end up.
+
+**A five-slot think-block can be learned, and does not yet help.** Fine-tuned to emit
+`offer / accept / add / stakes / handback` before continuing a story — one slot per improv
+failure mode (escalating to the worst place, blocking with the dullest next step, drifting too
+far out) — the model produces well-formed blocks in **98%** of generations (784/800; the
+no-think control produces them 0% of the time). Substituting another story's block changes
+**100%** of continuations, so the block steers rather than decorates. But it moves **none** of
+the four failure-mode scores at α = 0.01, and one of those four is saturated on the real
+co-occurrence table and cannot discriminate at all. Stage 1 is *partial*.
+
+One process note kept deliberately: an earlier pass reported 0% adherence, from a run in which
+all 17 RMSNorm gammas were provably frozen because `stochastic_rounding` defaults off on the SFT
+path. With the gammas free, 0% became 98%. Both runs are preserved in the repo's measurement
+files.
+
 ## What it cannot do
 
 No instruction tuning beyond a 2% slice of `databricks-dolly-15k`. No chat
