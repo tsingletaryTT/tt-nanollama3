@@ -40,39 +40,68 @@ def test_derive_returns_a_trace_with_all_slots():
 def test_sft_example_masks_only_the_prompt():
     """The mask is the whole point: prompt positions carry -100, completion carries ids.
 
-    A hollow version of this test (asserting only labels[0] == -100 and "something is
+    Pinned against ttml's PRE-SHIFTED label convention (labels[t] == input_ids[t+1] --
+    see `_sft_example_unaligned`'s docstring), not the same-position HF convention this
+    test used to assert. Under shifting the supervised region starts one position EARLIER
+    than the completion itself: the LAST prompt position's label is the FIRST completion
+    token (that transition -- predict the start of the completion from the prompt -- is
+    exactly the behaviour being trained, so it must be supervised, not masked), and the
+    supervised region ends one position EARLIER than the completion's own last token,
+    because that last token has no legitimate next token to predict (only padding follows
+    it) and must be masked instead.
+
+    A hollow version of this test (asserting only "something is masked, something is
     supervised") would still pass if the think-block were concatenated onto the PROMPT
-    side instead of the completion side — which is exactly the worst-case bug for this
-    project: it would train the model to never emit a think block. So this pins three
-    exact facts instead: (1) the masked prefix is exactly as long as the prompt's own
-    token count, no more, no less; (2) the think-block's own token sequence appears
-    verbatim inside the *supervised* (non -100) region of labels; and (3) the ONLY other
-    masked region is the trailing tile-alignment pad, which is legitimately -100 (padding
-    must not contribute to the loss) rather than a sign the completion got clipped.
+    side instead of the completion side -- exactly the worst-case bug for this project.
+    So this pins exact facts: (1) everything before the last prompt position is masked,
+    no more, no less; (2) the boundary position (last prompt token) is supervised and its
+    label is exactly the first completion token; (3) the think-block's own token sequence
+    appears verbatim inside the supervised region, starting at that boundary; (4) the last
+    completion position is masked (no next token to predict); and (5) the tile-alignment
+    pad tail is masked too.
     """
     tok = _Tok()
     rec = derive_from_story(STORY, story_id=0, rng_seed=5489)
     ex = build_sft_examples([rec], tok, with_think=True, pad_token_id=PAD_TOKEN_ID)[0]
-    assert len(ex["input_ids"]) == len(ex["labels"])
-    assert len(ex["input_ids"]) % 32 == 0, "build_sft_examples must tile-align its output"
+    input_ids, labels = ex["input_ids"], ex["labels"]
+    assert len(input_ids) == len(labels)
+    assert len(input_ids) % 32 == 0, "build_sft_examples must tile-align its output"
 
     prompt_ids = tok.encode(rec["prefix"])
-    assert ex["labels"][:len(prompt_ids)] == [-100] * len(prompt_ids)
-
     completion_ids = tok.encode(rec["think"] + rec["continuation"], add_special_tokens=False)
-    completion_region = ex["labels"][len(prompt_ids):len(prompt_ids) + len(completion_ids)]
-    assert all(v != -100 for v in completion_region), (
-        "nothing inside the actual completion should be masked")
+    boundary = len(prompt_ids) - 1  # last prompt position: first-supervised, per the shift
 
-    pad_region = ex["labels"][len(prompt_ids) + len(completion_ids):]
+    assert labels[:boundary] == [-100] * boundary, (
+        "everything strictly before the last prompt position must be masked")
+    assert labels[boundary] == input_ids[boundary + 1] == completion_ids[0], (
+        "the last prompt position's label must be the FIRST completion token -- this is "
+        "the prompt-to-completion transition, and it must be supervised")
+
+    # Supervised region: boundary .. boundary + len(completion_ids) - 2 (inclusive) --
+    # one shorter than completion_ids because the completion's own last token has no
+    # legitimate next token and is masked, not supervised (checked separately below).
+    supervised_region = labels[boundary:boundary + len(completion_ids) - 1]
+    assert all(v != -100 for v in supervised_region), (
+        "nothing in the shifted supervised region should be masked")
+    assert supervised_region == completion_ids[:-1], (
+        "supervised label VALUES must be the completion tokens themselves, pre-shifted "
+        "into position -- labels[boundary + j] == completion_ids[j] for the transition + "
+        "all but the last completion token")
+
+    last_completion_pos = boundary + len(completion_ids)
+    assert labels[last_completion_pos] == -100, (
+        "the completion's own last token has no next token to predict (only padding "
+        "follows) and must be masked, not scored against a pad token")
+
+    pad_region = labels[last_completion_pos + 1:]
     assert pad_region == [-100] * len(pad_region), (
         "the tile-alignment pad tail must be masked too, or it would pull the loss "
         "toward predicting pad_token_id")
-    assert ex["input_ids"][len(prompt_ids) + len(completion_ids):] == (
-        [PAD_TOKEN_ID] * len(pad_region)), "pad tail on input_ids must use pad_token_id"
+    assert input_ids[last_completion_pos + 1:] == [PAD_TOKEN_ID] * len(pad_region), (
+        "pad tail on input_ids must use pad_token_id")
 
     think_ids = tok.encode(rec["think"], add_special_tokens=False)
-    assert completion_region[:len(think_ids)] == think_ids, (
+    assert supervised_region[:len(think_ids)] == think_ids, (
         "the think-block's tokens must land in the supervised region, not the prompt")
 
 
@@ -116,7 +145,7 @@ def test_build_sft_examples_with_think_flag_controls_think_tokens():
 
     `test_no_think_arm_omits_the_block_but_keeps_the_continuation` asserts the exact
     token-count delta, but it necessarily does so on `_sft_example_unaligned` (pre tile
-    alignment) — the aligned delta is not think_len-stable (see that test's docstring).
+    alignment) -- the aligned delta is not think_len-stable (see that test's docstring).
     That relocation left `build_sft_examples`'s own `with_think` forwarding completely
     unguarded: a `build_sft_examples` that hardcoded `with_think=True` internally,
     silently ignoring its caller's flag, would pass every other test in this file --
@@ -133,6 +162,24 @@ def test_build_sft_examples_with_think_flag_controls_think_tokens():
     SUPERVISED region of `labels` (positions where `labels != -100`); with
     `with_think=False`, that same subsequence must appear NOWHERE in `input_ids` or
     `labels`.
+
+    LABEL-SHIFT NOTE: under the pre-shifted convention (see `_sft_example_unaligned`'s
+    docstring) the supervised region's absolute positions move one earlier than they used
+    to (the boundary token -- the last prompt position -- is now the first supervised
+    position, not the first completion position). The ORDERED SEQUENCE OF SUPERVISED
+    VALUES is unchanged by that shift -- `labels[boundary + j] == completion_ids[j]` for
+    every valid `j`, exactly the same values in the same relative order as the old
+    same-position convention produced, just written one position earlier -- so the
+    position-agnostic containment check below remains valid without modification.
+    Re-verified directly against the same mutation this test was built to catch
+    (hardcoding `with_think=True` inside `build_sft_examples`, ignoring the caller's
+    flag): the no-think arm still goes RED under the new labels, because a leaked
+    think-block still shows up as a value-level subsequence match regardless of which
+    position it starts at. The added position-anchored assertion below is strictly
+    stronger than the containment check alone: it additionally pins that the supervised
+    region *starts exactly at* the last prompt position, which a same-position-vs-shifted
+    off-by-one regression would violate even if the value-level containment happened to
+    still pass.
     """
     tok = _Tok()
     rec = derive_from_story(STORY, story_id=0, rng_seed=5489)
@@ -143,6 +190,17 @@ def test_build_sft_examples_with_think_flag_controls_think_tokens():
     supervised = [v for v in with_t["labels"] if v != -100]
     assert _contains_subsequence(supervised, think_ids), (
         "with_think=True must place the think-block's tokens in the supervised region")
+
+    # Position-anchored: the supervised region must begin exactly at the last prompt
+    # position (boundary), and the think-block's tokens must be the first ones there.
+    prompt_ids = tok.encode(rec["prefix"])
+    boundary = len(prompt_ids) - 1
+    assert with_t["labels"][boundary] != -100, (
+        "the last prompt position must be the first supervised position")
+    assert with_t["labels"][:boundary] == [-100] * boundary, (
+        "nothing before the last prompt position should be supervised")
+    assert with_t["labels"][boundary:boundary + len(think_ids)] == think_ids, (
+        "the think-block's tokens must start exactly at the last prompt position")
 
     without = build_sft_examples([rec], tok, with_think=False, pad_token_id=PAD_TOKEN_ID)[0]
     assert not _contains_subsequence(without["input_ids"], think_ids), (
@@ -197,3 +255,50 @@ def test_build_sft_examples_is_tile_aligned():
         for ex in examples:
             assert len(ex["input_ids"]) % 32 == 0
             assert len(ex["labels"]) == len(ex["input_ids"])
+
+
+def test_labels_are_shifted_by_one_for_next_token_prediction():
+    """The convention test whose absence let a whole plan ship with the wrong labels.
+
+    ttml's `cross_entropy_loss` (reached via `SFTTrainer`/`sft_collate_fn`) never shifts
+    internally -- it expects the CALLER to pre-shift, i.e. `labels[t]` must be the token
+    the model should predict having seen `input_ids[0..t]`, which is `input_ids[t+1]`.
+    This is the same convention `ttml.common.data.get_batch` uses for pretraining
+    (`y = split_ids[i+1:i+seq_len+1]`) and the one `ttml.datasets.causal_lm_collate_fn`'s
+    own docstring states outright ("already shifted by one for next-token prediction").
+
+    Every other test in this file checks shape, containment, or length -- structural
+    properties that are satisfied identically whether labels are shifted correctly or
+    not. That is exactly how a same-position (HF-style) `_sft_example_unaligned` shipped
+    and trained two SFT arms against an off-by-one target for a full task before being
+    caught (see task-5-report.md's addendum: loss stuck near `ln(vocab_size)` (~11)
+    instead of the warm-started checkpoint's own ~1.7-2.9). This test pins the actual
+    arithmetic relationship directly, across both arms, so a regression back to
+    same-position labels fails here immediately rather than needing a warm-started model
+    and a full training run to notice.
+    """
+    tok = _Tok()
+    rec = derive_from_story(STORY, story_id=0, rng_seed=5489)
+    for with_think in (True, False):
+        ex = build_sft_examples([rec], tok, with_think=with_think, pad_token_id=PAD_TOKEN_ID)[0]
+        input_ids, labels = ex["input_ids"], ex["labels"]
+        supervised_positions = [t for t, v in enumerate(labels) if v != -100]
+        assert supervised_positions, (
+            f"with_think={with_think}: fixture must have at least one supervised position")
+
+        for t in supervised_positions:
+            assert t + 1 < len(input_ids), (
+                f"with_think={with_think}: position {t} is supervised but has no next "
+                "token in input_ids to have predicted -- it should have been masked")
+            assert labels[t] == input_ids[t + 1], (
+                f"with_think={with_think}: labels[{t}]={labels[t]} != "
+                f"input_ids[{t + 1}]={input_ids[t + 1]} -- labels must be pre-shifted by "
+                "one for ttml's cross_entropy_loss convention (labels[t] == "
+                "input_ids[t+1]), not same-position/HF-style (labels[t] == input_ids[t])")
+
+        # The last supervised position must never be the sequence's final token -- if it
+        # were, there would be no input_ids[t+1] to have been the (correct) target, which
+        # would mean this position should have been masked instead of supervised.
+        assert supervised_positions[-1] < len(input_ids) - 1, (
+            f"with_think={with_think}: the last supervised position must leave at least "
+            "one more token in input_ids to serve as its shifted target")

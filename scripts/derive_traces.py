@@ -78,22 +78,61 @@ def _sft_example_unaligned(rec: dict, tok, *, with_think: bool) -> dict:
     token count and could mask a `with_think` regression on the wrong inputs. This function
     is the one true source of "how are input_ids/labels built from a trace", both for
     `build_sft_examples` and for that test.
+
+    LABEL CONVENTION -- pre-shifted, per ttml, not same-position, per HuggingFace. This was
+    wrong until Task 5's second pass (see task-5-report.md's addendum): ttml's
+    ``cross_entropy_loss`` (reached via ``SFTTrainer``/``sft_collate_fn``) never shifts
+    internally -- it expects the CALLER to have already set ``labels[t] == input_ids[t+1]``,
+    exactly as ``ttml.common.data.get_batch`` does for pretraining
+    (``y = split_ids[i+1:i+seq_len+1]``) and as ``ttml.datasets.causal_lm_collate_fn``'s own
+    docstring states outright ("already shifted by one for next-token prediction"). The
+    original version of this function built same-position (HF-style) labels -- correct for
+    HuggingFace `transformers`, where the model's own loss does the shift internally, but
+    silently wrong here. Both SFT arms trained a full task against that off-by-one target
+    before it was caught: loss sat near ``ln(vocab_size)`` (~11), not the checkpoint's own
+    ~1.7-2.9 on a warm start, because at every position the model was scored against the
+    token it had just been shown rather than the token it was supposed to predict next.
+
+    Boundary rule, worked out carefully because it is easy to get off by one in either
+    direction: under shifting, the LAST PROMPT position's label is the FIRST completion
+    token, and that position must be SUPERVISED (not masked) -- "predict the start of the
+    completion having seen only the prompt" is exactly the behaviour being trained, and
+    masking it would drop that transition from the loss entirely. Symmetrically, the LAST
+    completion position has no legitimate next token to predict (only tile-alignment
+    padding follows it, and a pad token is not a real target), so it is masked, matching the
+    pad tail's own masking. Net effect: the supervised region is still exactly
+    ``len(completion_ids)`` positions long -- it just starts and ends one position earlier
+    than the old (wrong) same-position convention did.
     """
     prompt = rec["prefix"]
     completion = (rec["think"] + rec["continuation"]) if with_think else rec["continuation"]
     p_ids = tok.encode(prompt)
     c_ids = tok.encode(completion, add_special_tokens=False)
-    return {"input_ids": p_ids + c_ids, "labels": [-100] * len(p_ids) + c_ids}
+    if not p_ids:
+        # Shifting needs a last prompt position to carry the first completion token's
+        # label; an empty prompt has no such position and the convention below breaks
+        # down (there is nothing to predict FROM). Every real prefix in this project
+        # tokenizes to at least a BOS token, so this should never fire in practice.
+        raise ValueError("prompt tokenized to zero ids; label shifting requires at least "
+                         "one prompt token")
+    input_ids = p_ids + c_ids
+    labels = [-100] * (len(p_ids) - 1) + c_ids + [-100]
+    return {"input_ids": input_ids, "labels": labels}
 
 
 def build_sft_examples(traces: List[dict], tok, *, with_think: bool,
                        pad_token_id: int) -> List[dict]:
-    """`{"input_ids", "labels"}` with -100 on prompt positions, for `sft_collate_fn`.
+    """`{"input_ids", "labels"}`, pre-shifted for ttml's next-token convention, for
+    `sft_collate_fn`.
 
-    Every example is padded up to the next multiple of `TILE` (32) tokens -- `pad_token_id`
-    on `input_ids`, `-100` (masked, same as a prompt position) on `labels` -- so the loss is
-    unaffected by the padding and the only cost is a little wasted compute. See `TILE`'s
-    comment above for why this lives here rather than in a custom collate function.
+    Labels are `-100` everywhere except the supervised region, which runs from the LAST
+    prompt position (whose label is the first completion token -- see
+    `_sft_example_unaligned`'s docstring for why that boundary token must be supervised,
+    not masked) through the second-to-last completion position. Every example is padded up
+    to the next multiple of `TILE` (32) tokens -- `pad_token_id` on `input_ids`, `-100` on
+    `labels` -- so the loss is unaffected by the padding and the only cost is a little
+    wasted compute. See `TILE`'s comment above for why this lives here rather than in a
+    custom collate function.
 
     Args:
         traces: records with "prefix", "think", "continuation" (see `derive_from_story`).

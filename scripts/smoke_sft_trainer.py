@@ -30,6 +30,21 @@ function) precisely because that wrapper's ``TtTntLlama`` accepts a null attenti
 the causal path, same requirement SFTTrainer has (``attention_mask=None`` lets the model
 build a causal mask on its own). That is the substitution used below.
 
+WARM-START LOSS GUARD (added after Task 5 found what this smoke test's random-init
+version could not catch): a smoke test that trains 4 steps from FRESH random weights
+cannot tell a correct label convention from a wrong one -- both look like "high loss,
+went down a bit" against a randomly initialised model. Task 5 shipped a full plan with
+`scripts/derive_traces.py`'s labels in the wrong convention (same-position/HF-style
+instead of ttml's pre-shifted `labels[t] == input_ids[t+1]`) for exactly this reason: it
+trained from random weights here, then warm-started for real training, and only the
+warm-started run's absolute loss (~11, not ~1.7-2.9) exposed the bug -- three tasks and
+one full training run later than it should have (see task-5-report.md's addendum for the
+full trail). This script now warm-starts from the same production checkpoint Task 5
+trains from and asserts the FIRST step's loss is below a threshold chosen to sit
+comfortably between "correct" (~1.7-2.9, this checkpoint's own validation range) and
+"broken" (~11.5, what the label-shift bug produced) -- a random-init smoke could never
+draw this line, because both outcomes start from the same place.
+
     gozer run --chips 1 --who "claude:improv" --reason "SFTTrainer masked smoke" -- \
         python3 scripts/smoke_sft_trainer.py
 """
@@ -49,6 +64,53 @@ COMPLETION = " Her mother took the needle and sewed the button."
 
 MODEL_YAML = ROOT / "train" / "configs" / "model" / "tt-tnt-1024.yaml"
 TOKENIZER_DIR = ROOT / "artifacts" / "hf-tt-tnt-1024-dialogue"
+WARM_START_CKPT = (ROOT / "artifacts" / "checkpoints-v077-beta2-control"
+                   / "tt_tnt_step00010764.pkl")
+
+# Comfortably between this checkpoint's own validation range (~1.7-2.9, see
+# task-5-report.md's addendum) and what a broken label convention produced (~11.5, close
+# to ln(vocab_size)=10.37, i.e. random-init level). A pass here means the model is
+# genuinely warm-started AND the example-building/masking path feeding it is sane; a
+# failure here means one of those two things is broken, most likely the labels.
+FIRST_STEP_LOSS_THRESHOLD = 5.0
+
+
+class _FirstStepLoss:
+    """Captures the loss reported at the FIRST optimizer step only.
+
+    Duck-typed against ttml.trainers.callback.TrainerCallback's hooks (only the ones
+    SFTTrainer actually calls are needed; the rest are no-ops). SFTTrainer calls
+    ``cb.on_step_end(self, self.step, step_loss, lr)`` after every optimizer step --
+    ``self.value`` latches on the first call and ignores the rest.
+    """
+
+    def __init__(self) -> None:
+        self.value = None
+
+    def on_train_begin(self, trainer) -> None:
+        pass
+
+    def on_after_forward(self, trainer, batch, loss) -> None:
+        pass
+
+    def on_after_backward(self, trainer, batch) -> None:
+        pass
+
+    def on_step_end(self, trainer, step, *args, **kwargs) -> None:
+        if self.value is None and args:
+            self.value = float(args[0])
+
+    def on_eval_end(self, trainer, step, eval_loss) -> None:
+        pass
+
+    def on_before_optimizer_step(self, trainer) -> None:
+        pass
+
+    def on_save(self, trainer, step, path) -> None:
+        pass
+
+    def on_train_end(self, trainer) -> None:
+        pass
 
 
 def main() -> int:
@@ -113,14 +175,46 @@ def main() -> int:
         transformer_config = model_yaml["transformer_config"]
         model = create_model(yaml_config, transformer_config)
 
+        # --- warm start (see the module docstring's WARM-START LOSS GUARD section) ---
+        from train.enthusiasts import warm_start
+
+        warm_summary = warm_start(model, WARM_START_CKPT,
+                                  transformer_config=transformer_config,
+                                  yaml_config=yaml_config, moe_block_indices=[])
+        print(f"warm start: {warm_summary}")
+
+        first_step_loss = _FirstStepLoss()
         trainer = SFTTrainer(
             model=model, train_dataloader=loader, eval_dataloader=None,
             config=SFTConfig(max_steps=4, learning_rate=1e-5, seed=5489,
                              max_seq_len=512, save_interval=0, eval_interval=0),
             optimizer={"type": "AdamW", "lr": 1e-5, "weight_decay": 0.01},
+            callbacks=[first_step_loss],
         )
         trainer.train()
         print("SFTTrainer completed 4 masked steps")
+
+        if first_step_loss.value is None:
+            raise RuntimeError("smoke never recorded a first-step loss -- on_step_end "
+                               "was never called; SFTTrainer's callback contract may "
+                               "have changed")
+        print(f"first step loss: {first_step_loss.value:.4f}  "
+              f"(threshold: < {FIRST_STEP_LOSS_THRESHOLD})")
+        if first_step_loss.value >= FIRST_STEP_LOSS_THRESHOLD:
+            raise AssertionError(
+                f"first-step loss {first_step_loss.value:.4f} is >= "
+                f"{FIRST_STEP_LOSS_THRESHOLD} on a WARM-STARTED model. A correctly "
+                f"warm-started model on ordinary text should start near this "
+                f"checkpoint's own validation loss (~1.7-2.9), not near "
+                f"ln(vocab_size)~10.37 (random-init level). The most likely cause is a "
+                f"label-shift convention mismatch in scripts/derive_traces.py's "
+                f"build_sft_examples / _sft_example_unaligned: ttml's cross_entropy_loss "
+                f"(via sft_collate_fn) expects labels[t] == input_ids[t+1] (pre-shifted "
+                f"for next-token prediction, same as ttml.common.data.get_batch's "
+                f"y = split_ids[i+1:...]), NOT same-position HF-style labels[t] == "
+                f"input_ids[t]. See task-5-report.md's addendum for the original "
+                f"discovery of this exact failure mode (loss 11.5 -> 1.7 from fixing "
+                f"exactly this).")
     finally:
         # Mirror image of open_device_mesh -- also clears ttml's global mesh state.
         # Bypassing device teardown entirely triggers an abort in
