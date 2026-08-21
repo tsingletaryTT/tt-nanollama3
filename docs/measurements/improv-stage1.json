@@ -4,17 +4,17 @@
     "swap_test_and_rates_are_forced_not_organic": "The swap test and the paired failure-mode rates FORCE the think-block into the prompt; they do not measure whether the model spontaneously emits one. See 'adherence' for the organic measurement, and swap_test.forced_think_note for the same caveat attached directly to that number.",
     "single_training_run_per_arm": "Each arm is a SINGLE SFT run (one seed, one training trajectory). The paired t-tests in 'rates' capture item variance over the 200 held-out examples ONLY -- they say nothing about run-to-run variance (a second training run of the same arm/seed/recipe could land on different scorer means for reasons unrelated to thinking vs. not-thinking). Treat 'rates' as a single paired sample, not as evidence the effect (or null) would replicate across retraining.",
     "groundedness_is_saturated_and_cannot_discriminate": {
-      "mean": 0.999,
-      "pct_exactly_1_0": 99.25,
+      "mean": 0.1962,
+      "pct_exactly_1_0": 0.25,
       "n": 400,
-      "explanation": "groundedness is saturated on the production co-occurrence table: mean 0.999, 99.25% of the 400 pooled think+nothink scores are exactly 1.0. A metric with almost no variance left to explain is structurally unable to discriminate between the two arms regardless of any real underlying difference. So 'rates' reporting 0/4 scorers favouring think is really 0 of 3 LIVE scorers (escalation, new_harm, affordance) plus one metric (groundedness) that could not have returned a different answer either way -- redesigning groundedness is out of scope for this evaluation pass and is tracked as a follow-up, not attempted here."
+      "explanation": "groundedness is saturated on the production co-occurrence table: mean 0.1962, 0.25% of the 400 pooled think+nothink scores are exactly 1.0. A metric with almost no variance left to explain is structurally unable to discriminate between the two arms regardless of any real underlying difference. So 'rates' reporting 0/4 scorers favouring think is really 0 of 3 LIVE scorers (escalation, new_harm, affordance) plus one metric (groundedness) that could not have returned a different answer either way -- redesigning groundedness is out of scope for this evaluation pass and is tracked as a follow-up, not attempted here."
     }
   },
   "swap_test": {
     "n": 50,
     "n_changed": 50,
     "fraction_changed": 1.0,
-    "median_first_divergence": 3.5,
+    "median_first_divergence": 3.0,
     "thinking_is_load_bearing": true,
     "note": "Below 0.5 the think-block is decorative: the model emits a plan and writes independently of it. Stage 1 has failed in that case, and that is the correct thing to report.",
     "forced_think_note": "Both the 'own' and 'swapped' conditions FORCE the story's own (or another story's) extractive ground-truth think-block into the think arm's context before generating -- this measures whether think-block CONTENT changes generation once one is present, not whether the model organically chooses to produce one (see the top-level 'adherence' section for that, separately)."
@@ -22,18 +22,18 @@
   "swap_test_detail": {
     "n": 50,
     "divergence_positions": [
-      44,
+      24,
       1,
       0,
       0,
       2,
       3,
       12,
-      19,
+      13,
       1,
       4,
       6,
-      9,
+      0,
       4,
       3,
       9,
@@ -48,12 +48,12 @@
       0,
       3,
       2,
-      7,
+      8,
       2,
       4,
       1,
-      0,
-      17,
+      1,
+      20,
       16,
       14,
       1,
@@ -66,12 +66,12 @@
       1,
       0,
       11,
-      3,
+      0,
       5,
       2,
       11,
       0,
-      13
+      2
     ],
     "note": "position is a TOKEN index into the generated continuation; None means the swapped continuation was identical to the own-think-block one for the full generation window."
   },
@@ -80,13 +80,13 @@
       "n_greedy": 200,
       "n_sampled": 600,
       "n_total": 800,
-      "n_parsed": 784,
-      "rate": 0.98,
-      "greedy_rate": 0.99,
+      "n_parsed": 786,
+      "rate": 0.9825,
+      "greedy_rate": 0.995,
       "example_generations": [
         " <think>\noffer: loved play outside friends\naccept: lily\nadd: dance\nstakes: level\nhandback: dance\n</think>\nOne day, Lily and her friends were playing a game when they saw a big, scary dog. The dog looked scary and Lily got scared",
-        " <think>\noffer: girl feeling sad wanted idea\naccept: arrow\nadd: lesson\nstakes: up\nhandback: lesson\n</think>\nShe decided to use her arrow to make a new arrow. She used her arrow to make a new arrow. The girl was so happy",
-        " <think>\noffer: cold\naccept: ben\nadd: melt\nstakes: down\nhandback: melt\n</think>\nIt's so cold!\u00e2\u20ac <think>\noffer: cold cold cold cold cold cold cold cold cold cold cold cold cold cold cold cold cold"
+        " <think>\noffer: girl feeling sad suddenly wanted idea\naccept: arrow\nadd: lesson\nstakes: up\nhandback: lesson\n</think>\nShe decided to use her arrow to make a new arrow. She used her arrow to make a new arrow. She was so happy",
+        " <think>\noffer: cold\naccept: ben\nadd: melt\nstakes: down\nhandback: melt\n</think>\nIt's so cold!\u00e2\u20ac <think>\noffer: cold cold shiver felt cold too cold\naccept: melt\nadd: melt\n"
       ]
     },
     "nothink_negative_control": {
@@ -99,59 +99,59 @@
       "example_generations": [
         " One day, Lily and her friends were playing hide-and-seek. Lily was hiding behind a big tree when she heard a loud noise. She looked around and saw a big, scary dog. Lily was scared and didn't know what to do. Her friend, Timmy, said, \"Don't be scared,",
         " She took a piece of paper and cut it into a special shape. Then she put it on the arrow and it was fixed! The girl was so happy and she thanked the arrow for its help. She was so proud of her arrow and she knew it was the best thing she could do. The girl was so brave",
-        " Can I have a friend?\u00e2\u20ac The old man smiled and said, \u00e2\u20ac\u0153Of course!\u00e2\u20ac Alice and the old man talked for a while. They talked about their day and talked about their day. Alice felt happy and warm inside. She knew that she had found a friend. Alice and the old"
+        " Can I have a friend?\u00e2\u20ac The old man smiled and said, \u00e2\u20ac\u0153Of course! What do you want to do?\u00e2\u20ac Alice thought for a moment and said, \u00e2\u20ac\u0153I want to be friends!\u00e2\u20ac The old man smiled and said, \u00e2\u20ac\u0153Okay, you can be my"
       ]
     }
   },
   "rates": {
     "escalation": {
-      "mean_delta": 0.2778,
-      "sd": 5.0509,
-      "se": 0.3572,
-      "t": 0.778,
+      "mean_delta": 0.3787,
+      "sd": 4.7689,
+      "se": 0.3372,
+      "t": 1.123,
       "direction": "lower",
       "signs_pos": 37,
-      "signs_neg": 37,
-      "signs_zero": 126,
+      "signs_neg": 32,
+      "signs_zero": 131,
       "n": 200,
       "critical_t": 2.576,
       "verdict": "NOT INTERPRETABLE"
     },
     "new_harm": {
-      "mean_delta": 0.005,
-      "sd": 0.3937,
-      "se": 0.0278,
-      "t": 0.18,
+      "mean_delta": -0.01,
+      "sd": 0.3872,
+      "se": 0.0274,
+      "t": 0.365,
       "direction": "lower",
-      "signs_pos": 16,
-      "signs_neg": 15,
-      "signs_zero": 169,
+      "signs_pos": 14,
+      "signs_neg": 16,
+      "signs_zero": 170,
       "n": 200,
       "critical_t": 2.576,
       "verdict": "NOT INTERPRETABLE"
     },
     "groundedness": {
-      "mean_delta": -0.002,
-      "sd": 0.0167,
-      "se": 0.0012,
-      "t": 1.659,
+      "mean_delta": -0.0013,
+      "sd": 0.0819,
+      "se": 0.0058,
+      "t": 0.232,
       "direction": "higher",
-      "signs_pos": 0,
-      "signs_neg": 3,
-      "signs_zero": 197,
+      "signs_pos": 89,
+      "signs_neg": 111,
+      "signs_zero": 0,
       "n": 200,
       "critical_t": 2.576,
       "verdict": "NOT INTERPRETABLE"
     },
     "affordance": {
-      "mean_delta": -0.035,
-      "sd": 0.6275,
-      "se": 0.0444,
-      "t": 0.789,
+      "mean_delta": -0.015,
+      "sd": 0.644,
+      "se": 0.0455,
+      "t": 0.329,
       "direction": "higher",
-      "signs_pos": 36,
+      "signs_pos": 40,
       "signs_neg": 43,
-      "signs_zero": 121,
+      "signs_zero": 117,
       "n": 200,
       "critical_t": 2.576,
       "verdict": "NOT INTERPRETABLE"
@@ -159,12 +159,12 @@
   },
   "rates_auxiliary_not_in_bonferroni_family": {
     "novelty": {
-      "think_mean": 10.11,
-      "nothink_mean": 10.67
+      "think_mean": 10.15,
+      "nothink_mean": 10.76
     },
     "new_proper_nouns": {
       "think_mean": 0.07,
-      "nothink_mean": 0.11
+      "nothink_mean": 0.09
     }
   },
   "bonferroni": {
@@ -521,5 +521,19 @@
     "temperature": 0.8,
     "seed": 5489,
     "forced_think_note": "See swap_test.forced_think_note and limitations.swap_test_and_rates_are_forced_not_organic -- rates and the swap test FORCE the story's own extractive ground-truth think-block into the think arm's context rather than waiting for organic emission; see the comment above [5/7] in scripts/eval_improv.py for why."
+  },
+  "groundedness_rerun_2026_08_21": {
+    "why": "The first run's groundedness scorer was SATURATED \u2014 boolean co-occurrence over a corpus where 80.1% of prefix words are hub words with >2000 neighbours, giving mean 0.998 with 99.25% of scores exactly 1.0. It could not have found an effect, so '0 of 4 scorers' was really 0 of 3 live scorers plus one dead one.",
+    "change": "Replaced with normalised PMI (bounded [0,1], weights association STRENGTH rather than existence). Both arms retrained on the same seed and traces; only the eval scorer changed.",
+    "prediction_made_before_running": "Still no effect, because a scorer that can now discriminate is still measuring a plan the prose does not obey ('influence, not governance'). If so the null gets STRONGER, not weaker.",
+    "outcome": "Prediction held. groundedness now has ZERO ties (89 up / 111 down across all 200 pairs, versus 200 ties before) so it is genuinely measuring \u2014 and it measures no effect, |t| 0.23. The other three are unchanged in verdict.",
+    "why_this_matters": "Yesterday's '0 of 4' contained a scorer that COULD NOT have found an effect. Today's '0 of 4' is four scorers that could and did not. Same headline, different evidential weight.",
+    "residual_tie_counts": {
+      "escalation": 131,
+      "new_harm": 170,
+      "groundedness": 0,
+      "affordance": 117,
+      "reading": "Three scorers still report IDENTICAL values for both arms on most prompts. The block changes the text (swap test 100%) without changing these properties of it \u2014 which is the same finding the generations show qualitatively."
+    }
   }
 }

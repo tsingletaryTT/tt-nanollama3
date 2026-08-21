@@ -97,6 +97,12 @@ is already located: a single continuation gives `handback` nothing to hand back 
 encoding "make your partner look good" cannot pay off. **Skits** — two or more turns with a
 partner who answers — turn every slot from a description into a falsifiable prediction about a
 later turn, which is the thing that can actually be scored.
+One scorer was rebuilt and the null survived it. `groundedness` was originally a boolean
+co-occurrence test, saturated on a corpus where 80.1% of prefix words are hubs — mean 0.998,
+99.25% of scores exactly 1.0 — so it *could not* have found an effect. Rebuilt on normalised PMI
+it now has **zero ties** (89 up, 111 down across 200 pairs) and reports **no effect**, |t| 0.23.
+Same headline as before, much stronger evidence behind it: four scorers that could find an
+effect and didn't, rather than three plus a dead one.
 ([`docs/measurements/improv-stage1.json`](docs/measurements/improv-stage1.json))
 
 ## The art
