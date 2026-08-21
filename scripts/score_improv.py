@@ -15,6 +15,17 @@ a question mark" definition doesn't discriminate: nearly every real continuation
 introduces at least one new word, so a closed ending like "They went to bed." would score
 the same as an open one. Checking for closure markers first is what makes the score mean
 something.
+
+Closure-marker matching is split by arity, on purpose:
+  - Multi-word markers ("ever after", "the end") are matched as a raw lowercased substring
+    against the whole final sentence, because they can never surface as a single token.
+  - Single-word markers ("bed", "done", ...) are matched against WORD-TOKENISED text
+    (word-boundary semantics), never as a raw substring — a raw substring match on a
+    single word produces false positives ("done" inside "abandoned"/"condone"/"undone",
+    "bed" inside "robbed"/"embedded") that silently mis-score an open ending as closed.
+    Tokenisation here uses a plain regex word-split rather than `content_words`, because
+    `content_words` drops stopwords and "done" is itself one of `train.improv.STOPWORDS`
+    — running it through `content_words` would make "done" impossible to match at all.
 """
 from __future__ import annotations
 
@@ -32,6 +43,7 @@ from train.improv import content_words, split_sentences  # noqa: E402
 HARM_PATH = ROOT / "train" / "data" / "harm_lexicon.txt"
 CLOSURE_PATH = ROOT / "train" / "data" / "closure_lexicon.txt"
 _PROPER = re.compile(r"\b([A-Z][a-z]+)\b")
+_WORD = re.compile(r"[A-Za-z']+")
 
 
 @dataclass(frozen=True)
@@ -81,14 +93,40 @@ def _proper_nouns(text: str) -> Set[str]:
     return out
 
 
+def _is_closed(tail: str, closure: frozenset) -> bool:
+    """True if the final sentence contains a closure marker.
+
+    Multi-word markers are matched as a substring of the raw lowercased sentence.
+    Single-word markers are matched against word-tokenised text only, so "done"
+    cannot match inside "abandoned" and "bed" cannot match inside "robbed".
+    """
+    tail_lower = tail.lower()
+    multi = {m for m in closure if " " in m}
+    single = {m for m in closure if " " not in m}
+    if any(marker in tail_lower for marker in multi):
+        return True
+    tail_words = set(_WORD.findall(tail_lower))
+    return bool(tail_words & single)
+
+
 def score_pair(prefix: str, continuation: str, *, harm: frozenset,
                cooc: Dict[str, Set[str]], closure: frozenset) -> ImprovScores:
     p_words, c_words = content_words(prefix), content_words(continuation)
     p_set = set(p_words)
     fresh = [w for w in c_words if w not in p_set]
 
-    delta = intensity(continuation, harm) - intensity(prefix, harm)
-    new_harm = any(w in harm for w in fresh)
+    p_intensity = intensity(prefix, harm)
+    c_intensity = intensity(continuation, harm)
+    delta = c_intensity - p_intensity
+
+    # new_harm: True only when the PREFIX carried no harm at all and the continuation
+    # introduces some — i.e. harm arriving in a scene that had none, "going to the worst
+    # place". A grim scene picking up more grim vocabulary is not that failure mode; that
+    # is exactly why `escalation` (the delta) exists to capture rises. A scene that is
+    # already grim staying grim (or getting grimmer) must NOT set new_harm — it must stay
+    # False in that case, even though fresh words there may themselves be harm-lexicon
+    # hits.
+    new_harm = (p_intensity == 0.0) and (c_intensity > 0.0)
 
     if fresh:
         grounded = sum(1 for w in fresh
@@ -98,13 +136,8 @@ def score_pair(prefix: str, continuation: str, *, harm: frozenset,
 
     sents = split_sentences(continuation)
     tail = sents[-1] if sents else continuation
-    tail_lower = tail.lower()
 
-    # affordance: 0 if the final sentence contains a closure marker (checked as a raw
-    # substring against the lowercased sentence, since "ever after" / "the end" are
-    # multi-word and would never match a tokenised content-word lookup); otherwise 1 if
-    # it ends with "?" or introduces a fresh content word; else 0.
-    if any(marker in tail_lower for marker in closure):
+    if _is_closed(tail, closure):
         affordance = 0
     else:
         affordance = int(tail.rstrip().endswith("?")

@@ -2,6 +2,15 @@ __pycache__/
 *.pyc
 .venv/
 data/
+# Curated lexicon files under train/data/ (e.g. harm_lexicon.txt, closure_lexicon.txt)
+# are hand-written source, not generated/downloaded data — carve them out of the bare
+# `data/` rule above. A directory match can't be undone by negating a file pattern
+# inside it, so the directory itself must be re-included first, then everything in it
+# re-excluded except *.txt — narrowed on purpose so a stray large corpus artefact
+# dropped into train/data/ stays ignored.
+!train/data/
+train/data/*
+!train/data/*.txt
 checkpoints/
 checkpoints-v2/
 checkpoints-scratch/

@@ -37,7 +37,14 @@ def test_grim_continuing_grim_is_NOT_escalation():
 
 
 def test_new_harm_flags_only_the_gentle_to_grim_case():
+    """new_harm means harm arriving in a scene that had none — not a grim scene staying grim.
+
+    GRIM_P -> GRIM_C also introduces harm-lexicon words (cold, cut, wounded), so without
+    the prefix-was-clean check this would be True for both cases and the test's own name
+    would be a lie. It must be True only when the prefix started at zero.
+    """
     assert score_pair(GENTLE_P, GRIM_C, harm=HARM, cooc={}, closure=CLOSURE).new_harm is True
+    assert score_pair(GRIM_P, GRIM_C, harm=HARM, cooc={}, closure=CLOSURE).new_harm is False
 
 
 def test_groundedness_ranks_connected_above_unconnected():
@@ -55,3 +62,25 @@ def test_affordance_separates_closed_from_open_endings():
     open_ = score_pair(GENTLE_P, "But what was inside the box?", harm=HARM, cooc={}, closure=CLOSURE)
     assert open_.affordance == 1
     assert closed.affordance == 0
+
+
+def test_affordance_single_word_marker_does_not_false_positive_on_substring():
+    """A raw substring match on a single-word marker is wrong: "done" lives inside
+    "abandoned", "bed" lives inside "robbed". This ending contains neither closure
+    marker as a WORD, so it must stay open (affordance 1), not read as closed.
+    """
+    s = score_pair(GENTLE_P, "They were robbed of everything.", harm=HARM, cooc={},
+                   closure=CLOSURE)
+    assert s.affordance == 1
+
+
+def test_affordance_multiword_marker_still_matches():
+    """Multi-word markers ("ever after") can never surface as a single token, so they
+    must still be caught by substring matching even after single-word markers move to
+    word-tokenised matching.
+    """
+    s = score_pair(
+        GENTLE_P,
+        "The kingdom celebrated, and it was said they lived ever after in peace.",
+        harm=HARM, cooc={}, closure=CLOSURE)
+    assert s.affordance == 0
