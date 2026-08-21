@@ -113,6 +113,36 @@ class LossRecorder:
         self._fh.close()
 
 
+def _assert_stochastic_rounding(trainer, arm: str) -> None:
+    """Fail loudly if the built optimizer does not actually have stochastic rounding on.
+
+    FIX 1 (task-6-report.md): both arms originally trained with ``stochastic_rounding``
+    omitted from the optimizer dict, which ``optimizer_registry.cpp`` defaults to
+    ``false``. In bfloat16 the ulp at 1.0 is 0.0039 -- an order of magnitude larger than
+    the ~3e-4 Adam updates the 17 RMSNorm gamma tensors receive -- so every update
+    rounded deterministically back to 1.0 and was discarded, every step, for all 3000
+    steps of both arms (proven: those 17 tensors were bit-identical to the warm-start
+    checkpoint at step 3000). ``train/run.py`` has a warning for exactly this
+    (``_warn_if_stochastic_rounding_disabled``) but it is a warning, easy to miss in a
+    long log, and the SFT path here bypassed it entirely by building its own optimizer
+    dict. This asserts instead: read the flag back out of the constructed optimizer's own
+    state dict (not the dict we passed in -- that only proves intent, not that the C++
+    factory actually consumed it) and refuse to train if it is not set.
+    """
+    state = trainer.optimizer.get_state_dict()
+    enabled = bool(state.get("stochastic_rounding", False))
+    print(f"[{arm}] optimizer stochastic_rounding (read back from optimizer state): "
+          f"{enabled}")
+    if not enabled:
+        raise RuntimeError(
+            f"stochastic_rounding is NOT enabled on the '{arm}' arm's optimizer -- "
+            "RMSNorm gamma parameters cannot move in bfloat16 (ulp at 1.0 is 0.0039, "
+            "an order of magnitude larger than the ~3e-4 updates these gammas receive). "
+            "Refusing to train rather than silently repeating FIX 1's bug; see "
+            "task-6-report.md."
+        )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -176,9 +206,11 @@ def main() -> int:
             config=SFTConfig(max_steps=args.steps, learning_rate=args.lr, seed=args.seed,
                              max_seq_len=512, checkpoint_dir=str(out),
                              save_interval=1000, eval_interval=0, max_grad_norm=1.0),
-            optimizer={"type": "AdamW", "lr": args.lr, "weight_decay": 0.01},
+            optimizer={"type": "AdamW", "lr": args.lr, "weight_decay": 0.01,
+                       "stochastic_rounding": True},
             callbacks=[recorder],
         )
+        _assert_stochastic_rounding(trainer, args.arm)
         trainer.train()
         recorder.close()
 
@@ -196,6 +228,9 @@ def main() -> int:
             "steps": args.steps,
             "lr": args.lr,
             "batch_size": args.batch_size,
+            "stochastic_rounding": True,  # FIX 1 -- see task-6-report.md; verified via
+                                           # trainer.optimizer.get_state_dict() before
+                                           # training started, not just declared here.
             "max_seq_len": 512,
             "mesh": "(1,1)",  # SFTTrainer opens its own mesh; ddp does not apply here
             "warm_start": str(WARM_START_CKPT.relative_to(ROOT)),

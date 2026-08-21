@@ -113,6 +113,29 @@ class _FirstStepLoss:
         pass
 
 
+def _assert_stochastic_rounding(trainer) -> None:
+    """Fail loudly if the built optimizer does not actually have stochastic rounding on.
+
+    FIX 1 (task-6-report.md): this smoke's optimizer dict originally omitted
+    ``stochastic_rounding`` entirely, which ``optimizer_registry.cpp`` defaults to
+    ``false`` -- the exact same omission Task 5's real training arms shipped with, which
+    is why THIS smoke never caught it: a 4-step run with a masked-loss assertion has no
+    signal at all about whether 17 RMSNorm gammas moved. Reading the flag back out of the
+    constructed optimizer's own state dict (not the input dict, which only proves intent)
+    and refusing to proceed if it did not take.
+    """
+    state = trainer.optimizer.get_state_dict()
+    enabled = bool(state.get("stochastic_rounding", False))
+    print(f"optimizer stochastic_rounding (read back from optimizer state): {enabled}")
+    if not enabled:
+        raise RuntimeError(
+            "stochastic_rounding is NOT enabled on this smoke's optimizer -- RMSNorm "
+            "gamma parameters cannot move in bfloat16 (ulp at 1.0 is 0.0039, an order of "
+            "magnitude larger than the ~3e-4 updates these gammas receive). Refusing to "
+            "train rather than silently repeating FIX 1's bug; see task-6-report.md."
+        )
+
+
 def main() -> int:
     from transformers import AutoTokenizer
 
@@ -188,9 +211,11 @@ def main() -> int:
             model=model, train_dataloader=loader, eval_dataloader=None,
             config=SFTConfig(max_steps=4, learning_rate=1e-5, seed=5489,
                              max_seq_len=512, save_interval=0, eval_interval=0),
-            optimizer={"type": "AdamW", "lr": 1e-5, "weight_decay": 0.01},
+            optimizer={"type": "AdamW", "lr": 1e-5, "weight_decay": 0.01,
+                       "stochastic_rounding": True},
             callbacks=[first_step_loss],
         )
+        _assert_stochastic_rounding(trainer)
         trainer.train()
         print("SFTTrainer completed 4 masked steps")
 
