@@ -103,6 +103,54 @@ def test_no_think_arm_omits_the_block_but_keeps_the_continuation():
     assert len(with_t["input_ids"]) - len(without["input_ids"]) == think_len
 
 
+def _contains_subsequence(haystack: list, needle: list) -> bool:
+    """True if `needle` appears as a contiguous run inside `haystack`."""
+    n = len(needle)
+    if n == 0:
+        return True
+    return any(haystack[i:i + n] == needle for i in range(len(haystack) - n + 1))
+
+
+def test_build_sft_examples_with_think_flag_controls_think_tokens():
+    """Content-based guard on `build_sft_examples`'s OWN `with_think` forwarding.
+
+    `test_no_think_arm_omits_the_block_but_keeps_the_continuation` asserts the exact
+    token-count delta, but it necessarily does so on `_sft_example_unaligned` (pre tile
+    alignment) — the aligned delta is not think_len-stable (see that test's docstring).
+    That relocation left `build_sft_examples`'s own `with_think` forwarding completely
+    unguarded: a `build_sft_examples` that hardcoded `with_think=True` internally,
+    silently ignoring its caller's flag, would pass every other test in this file --
+    `test_sft_example_masks_only_the_prompt` only ever calls with `with_think=True`, the
+    delta test bypasses `build_sft_examples` entirely by calling
+    `_sft_example_unaligned` directly, and `test_build_sft_examples_is_tile_aligned`
+    checks length/shape only and never content, so it cannot tell the two arms apart.
+    Task 5 calls the aligned `build_sft_examples`, so that regression could ship with
+    every test in this file green.
+
+    This test closes the gap directly against `build_sft_examples`'s own output, using
+    containment rather than arithmetic so it is invariant to trailing tile-alignment pad:
+    with `with_think=True`, the think-block's token subsequence must appear inside the
+    SUPERVISED region of `labels` (positions where `labels != -100`); with
+    `with_think=False`, that same subsequence must appear NOWHERE in `input_ids` or
+    `labels`.
+    """
+    tok = _Tok()
+    rec = derive_from_story(STORY, story_id=0, rng_seed=5489)
+    think_ids = tok.encode(rec["think"], add_special_tokens=False)
+    assert think_ids, "fixture think-block must tokenize to at least one id"
+
+    with_t = build_sft_examples([rec], tok, with_think=True, pad_token_id=PAD_TOKEN_ID)[0]
+    supervised = [v for v in with_t["labels"] if v != -100]
+    assert _contains_subsequence(supervised, think_ids), (
+        "with_think=True must place the think-block's tokens in the supervised region")
+
+    without = build_sft_examples([rec], tok, with_think=False, pad_token_id=PAD_TOKEN_ID)[0]
+    assert not _contains_subsequence(without["input_ids"], think_ids), (
+        "with_think=False must not leak the think-block into input_ids")
+    assert not _contains_subsequence(without["labels"], think_ids), (
+        "with_think=False must not leak the think-block into labels")
+
+
 def _fake_trace(*, prefix: str, continuation: str) -> dict:
     """A trace dict with the same shape `derive_from_story` produces (prefix/think/
     continuation), built directly rather than via `derive_from_story` + `extract_slots`.
