@@ -810,6 +810,18 @@ def main() -> int:
                 m["traces"] = str(traces_path.relative_to(ROOT))
             except ValueError:
                 pass  # not under ROOT; leave as-is rather than guess
+        # The warm-start checkpoint path is NESTED, and an earlier pass rewrote only the
+        # top-level `traces` key — so this one kept leaking an absolute worktree path into a
+        # committed artifact, which stops resolving once the worktree is removed. Rewrite it
+        # the same way rather than assuming one relative-path fix covers the whole manifest.
+        ws = m.get("warm_start_summary")
+        if isinstance(ws, dict) and ws.get("checkpoint"):
+            ck = Path(ws["checkpoint"])
+            if ck.is_absolute():
+                try:
+                    ws["checkpoint"] = str(ck.relative_to(ROOT))
+                except ValueError:
+                    pass  # not under ROOT; leave rather than guess
         m["loss_note"] = LOSS_NOTE
         return m
 

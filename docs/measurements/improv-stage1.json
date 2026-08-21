@@ -403,7 +403,7 @@
       "mesh": "(1,1)",
       "warm_start": "artifacts/checkpoints-v077-beta2-control/tt_tnt_step00010764.pkl",
       "warm_start_summary": {
-        "checkpoint": "/home/ttuser/code/tt-tnt/.worktrees/improv-thinking/artifacts/checkpoints-v077-beta2-control/tt_tnt_step00010764.pkl",
+        "checkpoint": "artifacts/checkpoints-v077-beta2-control/tt_tnt_step00010764.pkl",
         "copied": 66,
         "fresh": 0,
         "unused_from_checkpoint": 0,
@@ -433,7 +433,7 @@
       "mesh": "(1,1)",
       "warm_start": "artifacts/checkpoints-v077-beta2-control/tt_tnt_step00010764.pkl",
       "warm_start_summary": {
-        "checkpoint": "/home/ttuser/code/tt-tnt/.worktrees/improv-thinking/artifacts/checkpoints-v077-beta2-control/tt_tnt_step00010764.pkl",
+        "checkpoint": "artifacts/checkpoints-v077-beta2-control/tt_tnt_step00010764.pkl",
         "copied": 66,
         "fresh": 0,
         "unused_from_checkpoint": 0,
